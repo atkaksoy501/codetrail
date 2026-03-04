@@ -131,8 +131,8 @@ function buildMarkdownComponents(pathRoots: string[], query: string): Components
       return <>{children}</>;
     },
     code({ className, children, node }) {
-      const languageMatch = /language-([a-zA-Z0-9_-]+)/.exec(className ?? "");
-      const language = languageMatch?.[1] ?? "";
+      const fenceInfo = extractFenceInfoFromClassName(className);
+      const codeDescriptor = describeCodeFence(fenceInfo, pathRoots);
       const rawValue = String(children ?? "");
       const codeValue = rawValue.replace(/\n$/, "");
       const position = (
@@ -142,7 +142,7 @@ function buildMarkdownComponents(pathRoots: string[], query: string): Components
         typeof position?.start?.line === "number" &&
         typeof position?.end?.line === "number" &&
         position.start.line !== position.end.line;
-      const isInlineCode = !languageMatch && !spansMultipleLines && !rawValue.includes("\n");
+      const isInlineCode = !fenceInfo && !spansMultipleLines && !rawValue.includes("\n");
 
       if (isInlineCode) {
         const resolved = resolvePathToken(codeValue.trim(), pathRoots);
@@ -161,7 +161,13 @@ function buildMarkdownComponents(pathRoots: string[], query: string): Components
         }
         return <code>{children}</code>;
       }
-      return <CodeBlock language={language} codeValue={codeValue} />;
+      return (
+        <CodeBlock
+          language={codeDescriptor.syntaxLanguage}
+          codeValue={codeValue}
+          metaLabel={codeDescriptor.metaLabel}
+        />
+      );
     },
     a({ href, children }) {
       const parsedHref = parseMarkdownHref(href ?? "", pathRoots);
@@ -545,9 +551,11 @@ async function openLocalPath(path: string): Promise<void> {
 export function CodeBlock({
   language,
   codeValue,
+  metaLabel,
 }: {
   language: string;
   codeValue: string;
+  metaLabel?: string;
 }) {
   const normalizedLanguage = language.trim().toLowerCase();
   if (isLikelyDiff(normalizedLanguage, codeValue)) {
@@ -564,10 +572,80 @@ export function CodeBlock({
 
   return (
     <div className="code-block">
-      <div className="code-meta">{normalizedLanguage || "code"}</div>
+      <div className="code-meta">{metaLabel || normalizedLanguage || "code"}</div>
       <pre className="code-pre">{renderedLines}</pre>
     </div>
   );
+}
+
+type CodeFenceDescriptor = {
+  syntaxLanguage: string;
+  metaLabel: string;
+};
+
+function describeCodeFence(fenceInfo: string | null, pathRoots: string[]): CodeFenceDescriptor {
+  const normalizedInfo = fenceInfo?.trim() ?? "";
+  if (normalizedInfo.length === 0) {
+    return {
+      syntaxLanguage: "",
+      metaLabel: "",
+    };
+  }
+
+  const sourceRef = parseSourceReferenceFenceInfo(normalizedInfo);
+  if (sourceRef) {
+    const displayPath = trimProjectPrefixFromPath(sourceRef.filePath, pathRoots);
+    return {
+      syntaxLanguage: detectLanguageFromFilePath(sourceRef.filePath),
+      metaLabel: `${displayPath}:${sourceRef.startLine}`,
+    };
+  }
+
+  const path = toLocalPath(normalizedInfo);
+  if (path && isPathUnderProjectRoots(path, pathRoots)) {
+    return {
+      syntaxLanguage: detectLanguageFromFilePath(path),
+      metaLabel: trimProjectPrefixFromPath(path, pathRoots),
+    };
+  }
+
+  return {
+    syntaxLanguage: normalizedInfo,
+    metaLabel: normalizedInfo,
+  };
+}
+
+function extractFenceInfoFromClassName(className?: string): string | null {
+  if (!className) {
+    return null;
+  }
+  const token = className.split(/\s+/).find((classToken) => classToken.startsWith("language-"));
+  if (!token) {
+    return null;
+  }
+
+  const value = token.slice("language-".length).trim();
+  return value.length > 0 ? value : null;
+}
+
+function parseSourceReferenceFenceInfo(
+  info: string,
+): { startLine: number; filePath: string } | null {
+  const match = /^(\d+)(?::\d+)?:(.+)$/.exec(info);
+  if (!match) {
+    return null;
+  }
+
+  const startLine = Number(match[1]);
+  if (!Number.isFinite(startLine) || startLine <= 0) {
+    return null;
+  }
+  const rawPath = match[2]?.trim() ?? "";
+  const filePath = toLocalPath(rawPath);
+  if (!filePath) {
+    return null;
+  }
+  return { startLine, filePath };
 }
 
 export function DiffBlock({

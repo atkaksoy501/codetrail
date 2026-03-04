@@ -118,6 +118,24 @@ describe("renderRichText", () => {
     expect(html).toContain('class="tok-number">42</span>');
   });
 
+  it("renders source-reference fence headers as file path plus start line", () => {
+    const markdown = [
+      "```190:209:/Users/acme/repo/packages/core/src/search/searchMessages.ts",
+      "function normalizeProviders(values: string[]): Provider[] {",
+      "  return [];",
+      "}",
+      "```",
+    ].join("\n");
+
+    const html = renderNodes(renderRichText(markdown, "", "source-ref", ["/Users/acme/repo"]));
+
+    expect(html).toContain(
+      '<div class="code-meta">packages/core/src/search/searchMessages.ts:190</div>',
+    );
+    expect(html).not.toContain('<div class="code-meta">190</div>');
+    expect(html).toContain('class="tok-keyword">function</span>');
+  });
+
   it("renders fenced diffs using diff table rows", () => {
     const markdown = [
       "```diff",
