@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
@@ -92,6 +92,47 @@ function setupIndexedDb(): { dbPath: string; cleanup: () => void } {
     ].join("\n")}\n`,
   );
 
+  const cursorProjectPath = join(dir, "workspace", "cursor-project");
+  const encodedCursorProject = cursorProjectPath.slice(1).replaceAll("/", "-");
+  const cursorSessionId = "cursor-session-1";
+  const cursorTranscriptPath = join(
+    dir,
+    ".cursor",
+    "projects",
+    encodedCursorProject,
+    "agent-transcripts",
+    cursorSessionId,
+    `${cursorSessionId}.jsonl`,
+  );
+  mkdirSync(join(dir, ".cursor", "projects", encodedCursorProject, "terminals"), {
+    recursive: true,
+  });
+  mkdirSync(dirname(cursorTranscriptPath), { recursive: true });
+  mkdirSync(join(cursorProjectPath), { recursive: true });
+  writeFileSync(
+    join(dir, ".cursor", "projects", encodedCursorProject, "terminals", "100.txt"),
+    `---\ncwd: "${cursorProjectPath}"\n---\n`,
+  );
+  writeFileSync(
+    cursorTranscriptPath,
+    `${[
+      JSON.stringify({
+        role: "user",
+        timestamp: "2026-02-27T12:10:00Z",
+        message: {
+          content: [{ type: "text", text: "Please fix this cursor bug path." }],
+        },
+      }),
+      JSON.stringify({
+        role: "assistant",
+        timestamp: "2026-02-27T12:10:01Z",
+        message: {
+          content: [{ type: "text", text: "Cursor bug fix applied." }],
+        },
+      }),
+    ].join("\n")}\n`,
+  );
+
   runIncrementalIndexing({
     dbPath,
     discoveryConfig: {
@@ -143,8 +184,11 @@ describe("searchMessages", () => {
 
     const claudeOnly = searchMessages(db, { query: "bug", providers: ["claude"] });
     const codexOnly = searchMessages(db, { query: "bug", providers: ["codex"] });
+    const cursorOnly = searchMessages(db, { query: "cursor", providers: ["cursor"] });
     expect(claudeOnly.totalCount).toBeGreaterThanOrEqual(1);
     expect(codexOnly.totalCount).toBe(0);
+    expect(cursorOnly.totalCount).toBeGreaterThanOrEqual(1);
+    expect(cursorOnly.results.every((result) => result.provider === "cursor")).toBe(true);
 
     const projectMatch = searchMessages(db, { query: "bug", projectQuery: "project" });
     const projectMiss = searchMessages(db, {

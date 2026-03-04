@@ -46,9 +46,7 @@ type ProjectSummary = IpcResponse<"projects:list">["projects"][number];
 type SessionSummary = IpcResponse<"sessions:list">["sessions"][number];
 type SessionDetail = IpcResponse<"sessions:getDetail">;
 type ProjectCombinedDetail = IpcResponse<"projects:getCombinedDetail">;
-type HistoryMessage =
-  | SessionDetail["messages"][number]
-  | ProjectCombinedDetail["messages"][number];
+type HistoryMessage = SessionDetail["messages"][number] | ProjectCombinedDetail["messages"][number];
 type BookmarkListResponse = IpcResponse<"bookmarks:listProject">;
 type SearchQueryResponse = IpcResponse<"search:query">;
 type SettingsInfoResponse = IpcResponse<"app:getSettingsInfo">;
@@ -167,7 +165,9 @@ export function App({ initialPaneState = null }: { initialPaneState?: PaneStateS
   );
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [projectsLoaded, setProjectsLoaded] = useState(false);
-  const [selectedProjectId, setSelectedProjectId] = useState(initialPaneState?.selectedProjectId ?? "");
+  const [selectedProjectId, setSelectedProjectId] = useState(
+    initialPaneState?.selectedProjectId ?? "",
+  );
 
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [sessionsLoadedProjectId, setSessionsLoadedProjectId] = useState<string | null>(null);
@@ -175,7 +175,9 @@ export function App({ initialPaneState = null }: { initialPaneState?: PaneStateS
   const [historyMode, setHistoryMode] = useState<HistoryMode>(
     initialPaneState?.historyMode ?? "project_all",
   );
-  const [selectedSessionId, setSelectedSessionId] = useState(initialPaneState?.selectedSessionId ?? "");
+  const [selectedSessionId, setSelectedSessionId] = useState(
+    initialPaneState?.selectedSessionId ?? "",
+  );
   const [sessionDetail, setSessionDetail] = useState<SessionDetail | null>(null);
   const [projectCombinedDetail, setProjectCombinedDetail] = useState<ProjectCombinedDetail | null>(
     null,
@@ -273,7 +275,10 @@ export function App({ initialPaneState = null }: { initialPaneState?: PaneStateS
         }
       : null,
   );
+  const projectsLoadTokenRef = useRef(0);
+  const sessionsLoadTokenRef = useRef(0);
   const bookmarksLoadTokenRef = useRef(0);
+  const searchLoadTokenRef = useRef(0);
   const sessionScrollTopRef = useRef(initialSessionScrollTop);
   const sessionScrollSyncTimerRef = useRef<number | null>(null);
   const {
@@ -295,7 +300,7 @@ export function App({ initialPaneState = null }: { initialPaneState?: PaneStateS
     const next = [...projects];
     next.sort((left, right) => {
       const byRecent =
-        compareRecent(right.lastActivity, left.lastActivity) || left.name.localeCompare(right.name)
+        compareRecent(right.lastActivity, left.lastActivity) || left.name.localeCompare(right.name);
       return projectSortDirection === "desc" ? byRecent : -byRecent;
     });
     return next;
@@ -306,24 +311,34 @@ export function App({ initialPaneState = null }: { initialPaneState?: PaneStateS
     next.sort((left, right) => {
       const byRecent =
         compareRecent(sessionActivityOf(right), sessionActivityOf(left)) ||
-        right.messageCount - left.messageCount
+        right.messageCount - left.messageCount;
       return sessionSortDirection === "desc" ? byRecent : -byRecent;
     });
     return next;
   }, [sessionSortDirection, sessions]);
 
   const loadProjects = useCallback(async () => {
+    const requestToken = projectsLoadTokenRef.current + 1;
+    projectsLoadTokenRef.current = requestToken;
     setProjectsLoaded(false);
     const response = await codetrail.invoke("projects:list", {
       providers: projectProviders,
       query: projectQuery,
     });
+    if (requestToken !== projectsLoadTokenRef.current) {
+      return;
+    }
     setProjects(response.projects);
     setProjectsLoaded(true);
   }, [codetrail, projectProviders, projectQuery]);
 
   const loadSessions = useCallback(async () => {
+    const requestToken = sessionsLoadTokenRef.current + 1;
+    sessionsLoadTokenRef.current = requestToken;
     if (!selectedProjectId) {
+      if (requestToken !== sessionsLoadTokenRef.current) {
+        return;
+      }
       setSessions([]);
       setSessionsLoadedProjectId("");
       setSelectedSessionId("");
@@ -334,6 +349,9 @@ export function App({ initialPaneState = null }: { initialPaneState?: PaneStateS
     const response = await codetrail.invoke("sessions:list", {
       projectId: selectedProjectId,
     });
+    if (requestToken !== sessionsLoadTokenRef.current) {
+      return;
+    }
     setSessions(response.sessions);
     setSessionsLoadedProjectId(selectedProjectId);
   }, [codetrail, selectedProjectId]);
@@ -364,9 +382,14 @@ export function App({ initialPaneState = null }: { initialPaneState?: PaneStateS
   }, [codetrail, effectiveBookmarkQuery, historyCategories, selectedProjectId]);
 
   const loadSearch = useCallback(async () => {
+    const requestToken = searchLoadTokenRef.current + 1;
+    searchLoadTokenRef.current = requestToken;
     const trimmed = searchQuery.trim();
     const isAllHistoryCategoriesSelected = historyCategories.length === CATEGORIES.length;
     if (trimmed.length === 0) {
+      if (requestToken !== searchLoadTokenRef.current) {
+        return;
+      }
       setSearchResponse({
         query: searchQuery,
         totalCount: 0,
@@ -385,6 +408,9 @@ export function App({ initialPaneState = null }: { initialPaneState?: PaneStateS
       limit: 100,
       offset: 0,
     });
+    if (requestToken !== searchLoadTokenRef.current) {
+      return;
+    }
     setSearchResponse(response);
   }, [
     codetrail,
@@ -805,7 +831,8 @@ export function App({ initialPaneState = null }: { initialPaneState?: PaneStateS
   const bookmarkMessages = useMemo(() => {
     const next = bookmarksResponse.results.map((entry) => entry.message);
     next.sort((left, right) => {
-      const byTime = compareRecent(left.createdAt, right.createdAt) || left.id.localeCompare(right.id);
+      const byTime =
+        compareRecent(left.createdAt, right.createdAt) || left.id.localeCompare(right.id);
       return bookmarkSortDirection === "asc" ? byTime : -byTime;
     });
     return next;
@@ -847,7 +874,6 @@ export function App({ initialPaneState = null }: { initialPaneState?: PaneStateS
     }
     return sessionDetail?.messages ?? [];
   }, [bookmarkMessages, historyMode, projectCombinedDetail?.messages, sessionDetail?.messages]);
-
 
   const visibleFocusedMessageId = useMemo(() => {
     if (!focusMessageId) {
@@ -1199,7 +1225,13 @@ export function App({ initialPaneState = null }: { initialPaneState?: PaneStateS
       setFocusMessageId(messageId);
       setPendingRevealTarget({ messageId, sourceId });
     },
-    [activeHistoryMessages, bookmarksResponse.results, historyCategories, historyMode, selectedProjectId],
+    [
+      activeHistoryMessages,
+      bookmarksResponse.results,
+      historyCategories,
+      historyMode,
+      selectedProjectId,
+    ],
   );
 
   const handleToggleBookmark = useCallback(
@@ -1423,9 +1455,9 @@ export function App({ initialPaneState = null }: { initialPaneState?: PaneStateS
                       ? "Bookmarks"
                       : historyMode === "project_all"
                         ? "All Sessions"
-                      : selectedSession
-                        ? deriveSessionTitle(selectedSession)
-                        : "Session Detail"}
+                        : selectedSession
+                          ? deriveSessionTitle(selectedSession)
+                          : "Session Detail"}
                   </div>
                   <div className="msg-toolbar">
                     <button

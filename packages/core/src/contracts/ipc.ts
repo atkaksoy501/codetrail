@@ -211,7 +211,7 @@ export const ipcContractSchemas = {
       projectId: z.string().min(1),
       page: z.number().int().nonnegative().default(0),
       pageSize: z.number().int().positive().max(500).default(100),
-      categories: z.array(z.string().min(1)).optional(),
+      categories: z.array(messageCategorySchema).optional(),
       query: z.string().default(""),
       sortDirection: sortDirectionSchema.default("asc"),
       focusMessageId: z.string().min(1).optional(),
@@ -240,7 +240,7 @@ export const ipcContractSchemas = {
       sessionId: z.string().min(1),
       page: z.number().int().nonnegative().default(0),
       pageSize: z.number().int().positive().max(500).default(100),
-      categories: z.array(z.string().min(1)).optional(),
+      categories: z.array(messageCategorySchema).optional(),
       query: z.string().default(""),
       sortDirection: sortDirectionSchema.default("asc"),
       focusMessageId: z.string().min(1).optional(),
@@ -260,7 +260,7 @@ export const ipcContractSchemas = {
     request: z.object({
       projectId: z.string().min(1),
       query: z.string().optional(),
-      categories: z.array(z.string().min(1)).optional(),
+      categories: z.array(messageCategorySchema).optional(),
     }),
     response: z.object({
       projectId: z.string().min(1),
@@ -284,7 +284,7 @@ export const ipcContractSchemas = {
   "search:query": {
     request: z.object({
       query: z.string().default(""),
-      categories: z.array(z.string().min(1)).optional(),
+      categories: z.array(messageCategorySchema).optional(),
       providers: z.array(providerSchema).optional(),
       projectIds: z.array(z.string().min(1)).optional(),
       projectQuery: z.string().default(""),
@@ -360,6 +360,9 @@ export const ipcChannels = Object.keys(ipcContractSchemas) as Array<
 >;
 
 export type IpcChannel = keyof typeof ipcContractSchemas;
+export type IpcRequestInput<C extends IpcChannel> = z.input<
+  (typeof ipcContractSchemas)[C]["request"]
+>;
 export type IpcRequest<C extends IpcChannel> = z.infer<(typeof ipcContractSchemas)[C]["request"]>;
 export type IpcResponse<C extends IpcChannel> = z.infer<(typeof ipcContractSchemas)[C]["response"]>;
 

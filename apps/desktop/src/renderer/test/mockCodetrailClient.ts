@@ -1,12 +1,12 @@
 import { vi } from "vitest";
 
-import type { IpcChannel, IpcRequest, IpcResponse } from "@codetrail/core";
+import type { IpcChannel, IpcRequestInput, IpcResponse } from "@codetrail/core";
 
 import type { CodetrailClient } from "../lib/codetrailClient";
 
 type MockInvoke = <C extends IpcChannel>(
   channel: C,
-  payload: IpcRequest<C>,
+  payload: IpcRequestInput<C>,
 ) => Promise<IpcResponse<C>>;
 
 export type MockCodetrailClient = CodetrailClient & {

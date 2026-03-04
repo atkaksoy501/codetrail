@@ -14,6 +14,7 @@ const {
   mockRegisterIpcHandlers,
   mockEnqueue,
   mockStat,
+  mockRealpath,
   mockOpenPath,
   mockShowItemInFolder,
   mockListProjects,
@@ -54,10 +55,25 @@ const {
   mockRegisterIpcHandlers: vi.fn(),
   mockEnqueue: vi.fn(async () => ({ jobId: "job-1" })),
   mockStat: vi.fn<() => Promise<{ isFile: () => boolean }>>(async () => ({ isFile: () => false })),
+  mockRealpath: vi.fn(async (pathValue: string) => pathValue),
   mockOpenPath: vi.fn(async () => ""),
   mockShowItemInFolder: vi.fn(),
-  mockListProjects: vi.fn((payload) => ({ items: [{ id: "p1", ...payload }], total: 1 })),
-  mockGetProjectCombinedDetail: vi.fn((payload) => ({ projectId: payload.projectId, messages: [] })),
+  mockListProjects: vi.fn(() => ({
+    projects: [
+      {
+        id: "project-1",
+        provider: "claude",
+        name: "Project One",
+        path: "/workspace/project-one",
+        sessionCount: 1,
+        lastActivity: "2026-03-01T12:00:00.000Z",
+      },
+    ],
+  })),
+  mockGetProjectCombinedDetail: vi.fn((payload) => ({
+    projectId: payload.projectId,
+    messages: [],
+  })),
   mockListSessions: vi.fn((payload) => ({ items: [{ id: "s1", ...payload }], total: 1 })),
   mockGetSessionDetail: vi.fn((payload) => ({ id: payload.id, messages: [] })),
   mockListProjectBookmarks: vi.fn((payload) => ({ items: [{ id: "b1", ...payload }], total: 1 })),
@@ -98,6 +114,7 @@ vi.mock("./ipc", () => ({
 }));
 
 vi.mock("node:fs/promises", () => ({
+  realpath: mockRealpath,
   stat: mockStat,
 }));
 
@@ -186,6 +203,7 @@ describe("bootstrapMainProcess", () => {
     });
     mockInitializeDatabase.mockReturnValue({ schemaVersion: 7, tables: [{ name: "messages" }] });
     mockStat.mockResolvedValue({ isFile: () => false });
+    mockRealpath.mockImplementation(async (pathValue: string) => pathValue);
     mockOpenPath.mockResolvedValue("");
   });
 
@@ -253,10 +271,18 @@ describe("bootstrapMainProcess", () => {
       cursorRoot: "/cursor/root",
     });
 
-    const projectPayload = { provider: "claude", limit: 5 };
+    const projectPayload = { providers: ["claude"], query: "" };
     expect(getRequiredHandler(handlers, "projects:list")(projectPayload)).toEqual({
-      items: [{ id: "p1", ...projectPayload }],
-      total: 1,
+      projects: [
+        {
+          id: "project-1",
+          provider: "claude",
+          name: "Project One",
+          path: "/workspace/project-one",
+          sessionCount: 1,
+          lastActivity: "2026-03-01T12:00:00.000Z",
+        },
+      ],
     });
     expect(mockListProjects).toHaveBeenCalledWith(projectPayload);
 
@@ -268,12 +294,12 @@ describe("bootstrapMainProcess", () => {
     expect(mockListSessions).toHaveBeenCalledWith(sessionsPayload);
 
     const combinedDetailPayload = { projectId: "project-1", page: 0 };
-    expect(getRequiredHandler(handlers, "projects:getCombinedDetail")(combinedDetailPayload)).toEqual(
-      {
-        projectId: "project-1",
-        messages: [],
-      },
-    );
+    expect(
+      getRequiredHandler(handlers, "projects:getCombinedDetail")(combinedDetailPayload),
+    ).toEqual({
+      projectId: "project-1",
+      messages: [],
+    });
     expect(mockGetProjectCombinedDetail).toHaveBeenCalledWith(combinedDetailPayload);
 
     const detailPayload = { id: "session-99" };
@@ -320,25 +346,38 @@ describe("bootstrapMainProcess", () => {
     const openInFileManager = getRequiredHandler(handlers, "path:openInFileManager");
 
     mockStat.mockResolvedValueOnce({ isFile: () => true });
-    await expect(openInFileManager({ path: "/tmp/file.txt" })).resolves.toEqual({
+    await expect(openInFileManager({ path: "/workspace/project-one/file.txt" })).resolves.toEqual({
       ok: true,
       error: null,
     });
-    expect(mockShowItemInFolder).toHaveBeenCalledWith("/tmp/file.txt");
+    expect(mockShowItemInFolder).toHaveBeenCalledWith("/workspace/project-one/file.txt");
 
     mockStat.mockResolvedValueOnce({ isFile: () => false });
     mockOpenPath.mockResolvedValueOnce("");
-    await expect(openInFileManager({ path: "/tmp/folder" })).resolves.toEqual({
+    await expect(openInFileManager({ path: "/workspace/project-one/folder" })).resolves.toEqual({
       ok: true,
       error: null,
     });
-    expect(mockOpenPath).toHaveBeenCalledWith("/tmp/folder");
+    expect(mockOpenPath).toHaveBeenCalledWith("/workspace/project-one/folder");
 
     mockStat.mockRejectedValueOnce(new Error("ENOENT"));
     mockOpenPath.mockResolvedValueOnce("permission denied");
-    await expect(openInFileManager({ path: "/tmp/missing" })).resolves.toEqual({
+    await expect(openInFileManager({ path: "/workspace/project-one/missing" })).resolves.toEqual({
       ok: false,
       error: "permission denied",
+    });
+
+    await expect(openInFileManager({ path: "/private/etc/passwd" })).resolves.toEqual({
+      ok: false,
+      error: "Path is outside indexed projects and app storage roots.",
+    });
+
+    mockRealpath.mockResolvedValueOnce("/private/etc/passwd");
+    await expect(
+      openInFileManager({ path: "/workspace/project-one/symlink-passwd" }),
+    ).resolves.toEqual({
+      ok: false,
+      error: "Path is outside indexed projects and app storage roots.",
     });
   });
 

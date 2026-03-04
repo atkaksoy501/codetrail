@@ -1,6 +1,7 @@
 import {
   type IpcRequest,
   type IpcResponse,
+  type Provider,
   makeEmptyCategoryCounts,
   normalizeMessageCategories,
   normalizeMessageCategory,
@@ -30,7 +31,7 @@ export type QueryServiceDependencies = {
 type SessionSummaryRow = {
   id: string;
   project_id: string;
-  provider: "claude" | "codex" | "gemini";
+  provider: Provider;
   file_path: string;
   title: string;
   model_names: string;
@@ -48,7 +49,7 @@ type MessageRow = {
   id: string;
   source_id: string;
   session_id: string;
-  provider: "claude" | "codex" | "gemini";
+  provider: Provider;
   category: string;
   content: string;
   created_at: string;
@@ -267,7 +268,7 @@ function listProjectsWithDatabase(
     )
     .all(...params) as Array<{
     id: string;
-    provider: "claude" | "codex" | "gemini";
+    provider: Provider;
     name: string;
     path: string;
     session_count: number;
@@ -431,9 +432,7 @@ function getProjectCombinedDetailWithDatabase(
           focusTarget.created_at,
           focusTarget.created_at,
           focusTarget.id,
-        ) as
-        | { cnt: number }
-        | undefined;
+        ) as { cnt: number } | undefined;
       const countBefore = Number(focusRow?.cnt ?? 0);
       if (countBefore > 0) {
         focusIndex = countBefore - 1;
@@ -617,9 +616,7 @@ function getSessionDetailWithDatabase(
           focusTarget.created_at,
           focusTarget.created_at,
           focusTarget.id,
-        ) as
-        | { cnt: number }
-        | undefined;
+        ) as { cnt: number } | undefined;
       const countBefore = Number(focusRow?.cnt ?? 0);
       if (countBefore > 0) {
         focusIndex = countBefore - 1;
@@ -798,7 +795,7 @@ function toggleBookmarkWithStore(
         id: string;
         source_id: string;
         session_id: string;
-        provider: "claude" | "codex" | "gemini";
+        provider: Provider;
         category: string;
         content: string;
         created_at: string;

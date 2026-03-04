@@ -1,9 +1,9 @@
 import { createContext, useContext, useRef } from "react";
 
-import type { IpcChannel, IpcRequest, IpcResponse } from "@codetrail/core";
+import type { IpcChannel, IpcRequestInput, IpcResponse } from "@codetrail/core";
 
 export type CodetrailClient = {
-  invoke<C extends IpcChannel>(channel: C, payload: IpcRequest<C>): Promise<IpcResponse<C>>;
+  invoke<C extends IpcChannel>(channel: C, payload: IpcRequestInput<C>): Promise<IpcResponse<C>>;
 };
 
 const MISSING_PRELOAD_ERROR =

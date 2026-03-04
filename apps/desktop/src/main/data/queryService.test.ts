@@ -428,6 +428,29 @@ describe("queryService in-memory", () => {
     ]);
   });
 
+  it("returns cursor provider entries from project listings", () => {
+    const db = createInMemoryDatabase();
+    const now = "2026-03-01T10:00:00.000Z";
+
+    db.prepare(
+      `INSERT INTO projects (id, provider, name, path, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run("project_cursor", "cursor", "Cursor Project", "/workspace/cursor-project", now, now);
+
+    const service = createQueryServiceFromDb(db);
+    const projects = service.listProjects({ providers: undefined, query: "" });
+    expect(projects.projects).toEqual([
+      {
+        id: "project_cursor",
+        provider: "cursor",
+        name: "Cursor Project",
+        path: "/workspace/cursor-project",
+        sessionCount: 0,
+        lastActivity: null,
+      },
+    ]);
+  });
+
   it("supports injected openDatabase dependency in path-based helpers", () => {
     const db = seedQueryDb();
     const closeSpy = vi.spyOn(db, "close");

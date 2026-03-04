@@ -1,5 +1,5 @@
-import { stat } from "node:fs/promises";
-import { join } from "node:path";
+import { realpath, stat } from "node:fs/promises";
+import { dirname, isAbsolute, join, normalize, relative, resolve } from "node:path";
 
 import { app, ipcMain, shell } from "electron";
 
@@ -34,6 +34,13 @@ export async function bootstrapMainProcess(
 ): Promise<BootstrapResult> {
   const dbPath = options.dbPath ?? join(app.getPath("userData"), "codetrail.sqlite");
   const bookmarksDbPath = resolveBookmarksDbPath(dbPath);
+  const settingsFilePath =
+    options.appStateStore?.getFilePath() ?? join(app.getPath("userData"), "ui-state.json");
+  const geminiHistoryRoot =
+    DEFAULT_DISCOVERY_CONFIG.geminiHistoryRoot ?? join(app.getPath("home"), ".gemini", "history");
+  const geminiProjectsPath =
+    DEFAULT_DISCOVERY_CONFIG.geminiProjectsPath ??
+    join(app.getPath("home"), ".gemini", "projects.json");
 
   const dbBootstrap = initializeDatabase(dbPath);
   initializeBookmarkStore(bookmarksDbPath);
@@ -55,8 +62,7 @@ export async function bootstrapMainProcess(
     }),
     "app:getSettingsInfo": () => ({
       storage: {
-        settingsFile:
-          options.appStateStore?.getFilePath() ?? join(app.getPath("userData"), "ui-state.json"),
+        settingsFile: settingsFilePath,
         cacheDir: app.getPath("sessionData"),
         databaseFile: dbPath,
         bookmarksDatabaseFile: bookmarksDbPath,
@@ -66,12 +72,8 @@ export async function bootstrapMainProcess(
         claudeRoot: DEFAULT_DISCOVERY_CONFIG.claudeRoot,
         codexRoot: DEFAULT_DISCOVERY_CONFIG.codexRoot,
         geminiRoot: DEFAULT_DISCOVERY_CONFIG.geminiRoot,
-        geminiHistoryRoot:
-          DEFAULT_DISCOVERY_CONFIG.geminiHistoryRoot ??
-          join(app.getPath("home"), ".gemini", "history"),
-        geminiProjectsPath:
-          DEFAULT_DISCOVERY_CONFIG.geminiProjectsPath ??
-          join(app.getPath("home"), ".gemini", "projects.json"),
+        geminiHistoryRoot,
+        geminiProjectsPath,
         cursorRoot: DEFAULT_DISCOVERY_CONFIG.cursorRoot,
       },
     }),
@@ -90,17 +92,35 @@ export async function bootstrapMainProcess(
     "bookmarks:toggle": (payload) => queryService.toggleBookmark(payload),
     "search:query": (payload) => queryService.runSearchQuery(payload),
     "path:openInFileManager": async (payload) => {
+      if (!isAbsolute(payload.path)) {
+        return { ok: false, error: "Path must be absolute." };
+      }
+      const targetPath = await resolveCanonicalPath(payload.path);
+      const allowedRoots = getAllowedOpenInFileManagerRoots({
+        dbPath,
+        bookmarksDbPath,
+        settingsFilePath,
+        queryService,
+        geminiHistoryRoot,
+        geminiProjectsPath,
+      });
+      if (!isPathAllowedByRoots(targetPath, allowedRoots)) {
+        return {
+          ok: false,
+          error: "Path is outside indexed projects and app storage roots.",
+        };
+      }
       try {
-        const fileStat = await stat(payload.path);
+        const fileStat = await stat(targetPath);
         if (fileStat.isFile()) {
-          shell.showItemInFolder(payload.path);
+          shell.showItemInFolder(targetPath);
           return { ok: true, error: null };
         }
       } catch {
         // Fall through to generic shell open.
       }
 
-      const error = await shell.openPath(payload.path);
+      const error = await shell.openPath(targetPath);
       return {
         ok: error.length === 0,
         error: error.length > 0 ? error : null,
@@ -203,4 +223,71 @@ export function shutdownMainProcess(): void {
   }
   activeQueryService.close();
   activeQueryService = null;
+}
+
+function getAllowedOpenInFileManagerRoots(input: {
+  dbPath: string;
+  bookmarksDbPath: string;
+  settingsFilePath: string;
+  queryService: QueryService;
+  geminiHistoryRoot: string;
+  geminiProjectsPath: string;
+}): string[] {
+  const roots = new Set<string>();
+  const addRoot = (value: string | null | undefined) => {
+    if (!value) {
+      return;
+    }
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return;
+    }
+    roots.add(normalizeResolvedPath(trimmed));
+  };
+
+  addRoot(input.dbPath);
+  addRoot(input.bookmarksDbPath);
+  addRoot(input.settingsFilePath);
+  addRoot(app.getPath("userData"));
+  addRoot(app.getPath("sessionData"));
+  addRoot(DEFAULT_DISCOVERY_CONFIG.claudeRoot);
+  addRoot(DEFAULT_DISCOVERY_CONFIG.codexRoot);
+  addRoot(DEFAULT_DISCOVERY_CONFIG.geminiRoot);
+  addRoot(input.geminiHistoryRoot);
+  addRoot(input.geminiProjectsPath);
+  addRoot(dirname(input.geminiProjectsPath));
+  addRoot(DEFAULT_DISCOVERY_CONFIG.cursorRoot);
+
+  try {
+    const projects = input.queryService.listProjects({ providers: undefined, query: "" });
+    for (const project of projects.projects) {
+      addRoot(project.path);
+    }
+  } catch {
+    // Keep static roots if project lookup fails.
+  }
+
+  return [...roots];
+}
+
+function normalizeResolvedPath(value: string): string {
+  return resolve(normalize(value));
+}
+
+async function resolveCanonicalPath(value: string): Promise<string> {
+  const normalizedPath = normalizeResolvedPath(value);
+  try {
+    return normalizeResolvedPath(await realpath(normalizedPath));
+  } catch {
+    return normalizedPath;
+  }
+}
+
+function isPathAllowedByRoots(targetPath: string, allowedRoots: string[]): boolean {
+  return allowedRoots.some((root) => isPathWithinRoot(targetPath, root));
+}
+
+function isPathWithinRoot(targetPath: string, rootPath: string): boolean {
+  const relativePath = relative(rootPath, targetPath);
+  return relativePath === "" || (!relativePath.startsWith("..") && !isAbsolute(relativePath));
 }

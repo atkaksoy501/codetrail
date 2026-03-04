@@ -2,7 +2,13 @@ import { appendFileSync, existsSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import { BrowserWindow, type BrowserWindowConstructorOptions, app, nativeImage } from "electron";
+import {
+  BrowserWindow,
+  type BrowserWindowConstructorOptions,
+  app,
+  nativeImage,
+  shell,
+} from "electron";
 
 import { type AppStateStore, createAppStateStore } from "./appStateStore";
 import { bootstrapMainProcess, shutdownMainProcess } from "./bootstrap";
@@ -57,8 +63,7 @@ function createWindow(appStateStore: AppStateStore): BrowserWindow {
   const persistedPaneState = appStateStore.getPaneState();
   const persistedWindowState = appStateStore.getWindowState();
   const isMac = process.platform === "darwin";
-  const windowBackgroundColor =
-    persistedPaneState?.theme === "dark" ? "#1e2028" : "#f5f5f7";
+  const windowBackgroundColor = persistedPaneState?.theme === "dark" ? "#1e2028" : "#f5f5f7";
 
   const windowOptions = {
     show: false,
@@ -85,6 +90,24 @@ function createWindow(appStateStore: AppStateStore): BrowserWindow {
   } satisfies BrowserWindowConstructorOptions;
 
   const mainWindow = new BrowserWindow(windowOptions);
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (isAllowedExternalUrl(url)) {
+      void shell.openExternal(url);
+    }
+    return { action: "deny" };
+  });
+  mainWindow.webContents.once("did-finish-load", () => {
+    mainWindow.webContents.on("will-navigate", (event, targetUrl) => {
+      const currentUrl = mainWindow.webContents.getURL();
+      if (normalizeNavigationUrl(targetUrl) === normalizeNavigationUrl(currentUrl)) {
+        return;
+      }
+      event.preventDefault();
+      if (isAllowedExternalUrl(targetUrl)) {
+        void shell.openExternal(targetUrl);
+      }
+    });
+  });
   mainWindow.once("ready-to-show", () => {
     mainWindow.show();
   });
@@ -122,7 +145,7 @@ function createWindow(appStateStore: AppStateStore): BrowserWindow {
     });
   }
 
-  const rendererUrl = process.env.CODETRAIL_RENDERER_URL;
+  const rendererUrl = resolveDevRendererUrlFromEnv();
   if (rendererUrl && rendererUrl.length > 0) {
     void mainWindow.loadURL(rendererUrl);
   } else {
@@ -297,4 +320,55 @@ function resolveAppIconPath(): string | null {
   }
 
   return null;
+}
+
+function resolveDevRendererUrlFromEnv(): string | null {
+  const rawUrl = process.env.CODETRAIL_RENDERER_URL?.trim();
+  if (!rawUrl) {
+    return null;
+  }
+  if (app.isPackaged) {
+    console.warn("[codetrail] ignoring CODETRAIL_RENDERER_URL in packaged build");
+    return null;
+  }
+  if (!isAllowedDevRendererUrl(rawUrl)) {
+    console.warn("[codetrail] ignoring unsafe CODETRAIL_RENDERER_URL", rawUrl);
+    return null;
+  }
+  return rawUrl;
+}
+
+function isAllowedDevRendererUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    const isHttp = parsed.protocol === "http:" || parsed.protocol === "https:";
+    const isLocalhost =
+      parsed.hostname === "localhost" ||
+      parsed.hostname === "127.0.0.1" ||
+      parsed.hostname === "::1";
+    return isHttp && isLocalhost;
+  } catch {
+    return false;
+  }
+}
+
+function isAllowedExternalUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return (
+      parsed.protocol === "http:" || parsed.protocol === "https:" || parsed.protocol === "mailto:"
+    );
+  } catch {
+    return false;
+  }
+}
+
+function normalizeNavigationUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    parsed.hash = "";
+    return parsed.toString();
+  } catch {
+    return url;
+  }
 }

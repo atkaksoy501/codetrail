@@ -43,6 +43,7 @@ JOIN messages m ON m.id = message_fts.message_id
 JOIN sessions s ON s.id = m.session_id
 LEFT JOIN projects p ON p.id = s.project_id
 `;
+const PROVIDERS: Provider[] = ["claude", "codex", "gemini", "cursor"];
 
 export function searchMessages(
   db: SqliteDatabase,
@@ -190,8 +191,8 @@ function buildFilters(
 function normalizeProviders(values: string[]): Provider[] {
   const selected = new Set<Provider>();
   for (const value of values) {
-    if (value === "claude" || value === "codex" || value === "gemini") {
-      selected.add(value);
+    if (PROVIDERS.includes(value as Provider)) {
+      selected.add(value as Provider);
     }
   }
 
@@ -199,6 +200,9 @@ function normalizeProviders(values: string[]): Provider[] {
 }
 
 function normalizeProvider(value: string): Provider {
+  if (value === "cursor") {
+    return "cursor";
+  }
   if (value === "codex") {
     return "codex";
   }

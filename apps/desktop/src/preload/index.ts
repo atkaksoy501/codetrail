@@ -1,9 +1,9 @@
 import { contextBridge, ipcRenderer } from "electron";
 
-import type { IpcChannel, IpcRequest, IpcResponse } from "@codetrail/core";
+import type { IpcChannel, IpcRequestInput, IpcResponse } from "@codetrail/core";
 
 type InvokeApi = {
-  invoke<C extends IpcChannel>(channel: C, payload: IpcRequest<C>): Promise<IpcResponse<C>>;
+  invoke<C extends IpcChannel>(channel: C, payload: IpcRequestInput<C>): Promise<IpcResponse<C>>;
 };
 
 const api: InvokeApi = {

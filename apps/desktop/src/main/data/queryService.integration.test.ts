@@ -200,7 +200,7 @@ describe("queryService", () => {
       page: 0,
       pageSize: 100,
       sortDirection: "asc",
-      categories: ["tool_call"],
+      categories: ["tool_use"],
       query: "Read",
       focusMessageId: undefined,
       focusSourceId: undefined,
