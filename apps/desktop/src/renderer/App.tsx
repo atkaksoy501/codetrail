@@ -219,6 +219,9 @@ export function App({ initialPaneState = null }: { initialPaneState?: PaneStateS
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [sessionsLoadedProjectId, setSessionsLoadedProjectId] = useState<string | null>(null);
   const [bookmarksLoadedProjectId, setBookmarksLoadedProjectId] = useState<string | null>(null);
+  const [sessionPaneStableProjectId, setSessionPaneStableProjectId] = useState<string | null>(
+    initialPaneState?.selectedProjectId ?? null,
+  );
   const [historyMode, setHistoryMode] = useState<HistoryMode>(
     initialPaneState?.historyMode ?? "project_all",
   );
@@ -1080,6 +1083,21 @@ export function App({ initialPaneState = null }: { initialPaneState?: PaneStateS
     setFocusMessageId(targetMessageId);
   }, [activeHistoryMessages, loadedHistoryPage, pendingMessagePageNavigation]);
 
+  useEffect(() => {
+    if (!selectedProjectId) {
+      setSessionPaneStableProjectId(null);
+      return;
+    }
+    if (
+      sessionsLoadedProjectId === selectedProjectId &&
+      bookmarksLoadedProjectId === selectedProjectId
+    ) {
+      setSessionPaneStableProjectId((value) =>
+        value === selectedProjectId ? value : selectedProjectId,
+      );
+    }
+  }, [bookmarksLoadedProjectId, selectedProjectId, sessionsLoadedProjectId]);
+
   const handleRefresh = useCallback(
     async (force: boolean) => {
       setRefreshing(true);
@@ -1116,8 +1134,7 @@ export function App({ initialPaneState = null }: { initialPaneState?: PaneStateS
     [sortedSessions],
   );
   const isSessionPaneReadyForSelectedProject =
-    !selectedProjectId ||
-    (sessionsLoadedProjectId === selectedProjectId && bookmarksLoadedProjectId === selectedProjectId);
+    !selectedProjectId || sessionPaneStableProjectId === selectedProjectId;
   const visibleSessionPaneSessions = isSessionPaneReadyForSelectedProject ? sortedSessions : [];
   const visibleSessionPaneBookmarksCount = isSessionPaneReadyForSelectedProject
     ? bookmarksResponse.totalCount

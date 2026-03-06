@@ -1431,6 +1431,321 @@ function createProjectSwitchBookmarksDelayClient() {
   return { client, delayedBookmarks };
 }
 
+function createBookmarkSearchDelayClient() {
+  const client = createMockCodetrailClient();
+  const delayedBookmarks = createDeferred<{
+    projectId: string;
+    totalCount: number;
+    filteredCount: number;
+    categoryCounts: {
+      user: number;
+      assistant: number;
+      tool_use: number;
+      tool_edit: number;
+      tool_result: number;
+      thinking: number;
+      system: number;
+    };
+    results: Array<{
+      projectId: string;
+      sessionId: string;
+      sessionTitle: string;
+      bookmarkedAt: string;
+      isOrphaned: boolean;
+      orphanedAt: null;
+      message: {
+        id: string;
+        sourceId: string;
+        sessionId: string;
+        provider: "claude";
+        category: "assistant";
+        content: string;
+        createdAt: string;
+        tokenInput: null;
+        tokenOutput: null;
+        operationDurationMs: null;
+        operationDurationSource: null;
+        operationDurationConfidence: null;
+      };
+    }>;
+  }>();
+
+  client.invoke.mockImplementation(async (channel, payload) => {
+    const request = payload as Record<string, unknown>;
+
+    if (channel === "ui:getState") {
+      return {
+        projectPaneWidth: null,
+        sessionPaneWidth: null,
+        projectPaneCollapsed: null,
+        sessionPaneCollapsed: null,
+        projectProviders: null,
+        historyCategories: null,
+        expandedByDefaultCategories: null,
+        searchProviders: null,
+        theme: null,
+        monoFontFamily: null,
+        regularFontFamily: null,
+        monoFontSize: null,
+        regularFontSize: null,
+        useMonospaceForAllMessages: null,
+        selectedProjectId: null,
+        selectedSessionId: null,
+        historyMode: null,
+        projectSortDirection: null,
+        sessionSortDirection: null,
+        messageSortDirection: null,
+        bookmarkSortDirection: null,
+        projectAllSortDirection: null,
+        sessionPage: null,
+        sessionScrollTop: null,
+        systemMessageRegexRules: null,
+      };
+    }
+
+    if (channel === "ui:setState") {
+      return { ok: true };
+    }
+
+    if (channel === "ui:getZoom") {
+      return { percent: 100 };
+    }
+
+    if (channel === "projects:list") {
+      return {
+        projects: [
+          {
+            id: "project_1",
+            provider: "claude",
+            name: "Project One",
+            path: "/workspace/project-one",
+            sessionCount: 1,
+            lastActivity: "2026-03-01T10:00:05.000Z",
+          },
+        ],
+      };
+    }
+
+    if (channel === "sessions:list") {
+      return {
+        sessions: [
+          {
+            id: "session_1",
+            projectId: "project_1",
+            provider: "claude",
+            filePath: "/workspace/project-one/session-1.jsonl",
+            title: "Investigate markdown rendering",
+            modelNames: "claude-opus-4-1",
+            startedAt: "2026-03-01T10:00:00.000Z",
+            endedAt: "2026-03-01T10:00:05.000Z",
+            durationMs: 5000,
+            gitBranch: "main",
+            cwd: "/workspace/project-one",
+            messageCount: 2,
+            tokenInputTotal: 14,
+            tokenOutputTotal: 8,
+          },
+        ],
+      };
+    }
+
+    if (channel === "projects:getCombinedDetail") {
+      return {
+        projectId: "project_1",
+        totalCount: 2,
+        categoryCounts: {
+          user: 0,
+          assistant: 1,
+          tool_use: 1,
+          tool_edit: 0,
+          tool_result: 0,
+          thinking: 0,
+          system: 0,
+        },
+        page: 0,
+        pageSize: 100,
+        focusIndex: null,
+        messages: [
+          {
+            id: "m_tool",
+            sourceId: "src_tool",
+            sessionId: "session_1",
+            provider: "claude",
+            category: "tool_use",
+            content: '{"name":"Read","args":{"path":"src/parser.ts"}}',
+            createdAt: "2026-03-01T10:00:01.000Z",
+            tokenInput: null,
+            tokenOutput: null,
+            operationDurationMs: null,
+            operationDurationSource: null,
+            operationDurationConfidence: null,
+            sessionTitle: "Investigate markdown rendering",
+            sessionActivity: "2026-03-01T10:00:05.000Z",
+            sessionStartedAt: "2026-03-01T10:00:00.000Z",
+            sessionEndedAt: "2026-03-01T10:00:05.000Z",
+            sessionGitBranch: "main",
+            sessionCwd: "/workspace/project-one",
+          },
+          {
+            id: "m_assistant",
+            sourceId: "src_assistant",
+            sessionId: "session_1",
+            provider: "claude",
+            category: "assistant",
+            content: "Parser behavior inspected and fixed.",
+            createdAt: "2026-03-01T10:00:05.000Z",
+            tokenInput: 10,
+            tokenOutput: 8,
+            operationDurationMs: 4000,
+            operationDurationSource: "native",
+            operationDurationConfidence: "high",
+            sessionTitle: "Investigate markdown rendering",
+            sessionActivity: "2026-03-01T10:00:05.000Z",
+            sessionStartedAt: "2026-03-01T10:00:00.000Z",
+            sessionEndedAt: "2026-03-01T10:00:05.000Z",
+            sessionGitBranch: "main",
+            sessionCwd: "/workspace/project-one",
+          },
+        ],
+      };
+    }
+
+    if (channel === "sessions:getDetail") {
+      return {
+        session: {
+          id: "session_1",
+          projectId: "project_1",
+          provider: "claude",
+          filePath: "/workspace/project-one/session-1.jsonl",
+          title: "Investigate markdown rendering",
+          modelNames: "claude-opus-4-1",
+          startedAt: "2026-03-01T10:00:00.000Z",
+          endedAt: "2026-03-01T10:00:05.000Z",
+          durationMs: 5000,
+          gitBranch: "main",
+          cwd: "/workspace/project-one",
+          messageCount: 2,
+          tokenInputTotal: 14,
+          tokenOutputTotal: 8,
+        },
+        totalCount: 2,
+        categoryCounts: {
+          user: 1,
+          assistant: 1,
+          tool_use: 0,
+          tool_edit: 0,
+          tool_result: 0,
+          thinking: 0,
+          system: 0,
+        },
+        page: 0,
+        pageSize: 100,
+        focusIndex: null,
+        messages: [],
+      };
+    }
+
+    if (channel === "bookmarks:listProject") {
+      const query = String(request.query ?? "").toLowerCase();
+      if (query === "delayed-search") {
+        return delayedBookmarks.promise;
+      }
+      const entry = {
+        projectId: "project_1",
+        sessionId: "session_1",
+        sessionTitle: "Investigate markdown rendering",
+        bookmarkedAt: "2026-03-01T10:10:00.000Z",
+        isOrphaned: false,
+        orphanedAt: null,
+        message: {
+          id: "bm1",
+          sourceId: "bm-src-1",
+          sessionId: "session_1",
+          provider: "claude" as const,
+          category: "assistant" as const,
+          content: "Parser behavior inspected and fixed.",
+          createdAt: "2026-03-01T10:10:00.000Z",
+          tokenInput: null,
+          tokenOutput: null,
+          operationDurationMs: null,
+          operationDurationSource: null,
+          operationDurationConfidence: null,
+        },
+      };
+      const matches = query.length === 0 || entry.message.content.toLowerCase().includes(query);
+
+      return {
+        projectId: "project_1",
+        totalCount: 1,
+        filteredCount: matches ? 1 : 0,
+        categoryCounts: {
+          user: 0,
+          assistant: matches ? 1 : 0,
+          tool_use: 0,
+          tool_edit: 0,
+          tool_result: 0,
+          thinking: 0,
+          system: 0,
+        },
+        results: matches ? [entry] : [],
+      };
+    }
+
+    if (channel === "search:query") {
+      return {
+        query: String(request.query ?? ""),
+        totalCount: 0,
+        categoryCounts: {
+          user: 0,
+          assistant: 0,
+          tool_use: 0,
+          tool_edit: 0,
+          tool_result: 0,
+          thinking: 0,
+          system: 0,
+        },
+        results: [],
+      };
+    }
+
+    if (channel === "ui:setZoom") {
+      return { percent: 100 };
+    }
+
+    if (channel === "indexer:refresh") {
+      return { jobId: "refresh-1" };
+    }
+
+    if (channel === "bookmarks:toggle") {
+      return { bookmarked: true };
+    }
+
+    if (channel === "app:getSettingsInfo") {
+      return {
+        storage: {
+          settingsFile: "/tmp/ui-state.json",
+          cacheDir: "/tmp/cache",
+          databaseFile: "/tmp/codetrail.sqlite",
+          bookmarksDatabaseFile: "/tmp/codetrail.bookmarks.sqlite",
+          userDataDir: "/tmp",
+        },
+        discovery: {
+          claudeRoot: "/Users/test/.claude/projects",
+          codexRoot: "/Users/test/.codex/sessions",
+          geminiRoot: "/Users/test/.gemini/tmp",
+          geminiHistoryRoot: "/Users/test/.gemini/history",
+          geminiProjectsPath: "/Users/test/.gemini/projects.json",
+          cursorRoot: "/Users/test/.cursor/projects",
+        },
+      };
+    }
+
+    throw new Error(`Unhandled IPC call: ${channel}`);
+  });
+
+  return { client, delayedBookmarks };
+}
+
 describe("App", () => {
   it("loads history, supports global search navigation, and opens settings", async () => {
     Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
@@ -1584,6 +1899,60 @@ describe("App", () => {
         calls.some(([, payload]) => (payload as { query?: string }).query === "no-match-token"),
       ).toBe(true);
     });
+  });
+
+  it("keeps the session list stable while a bookmark search is in flight", async () => {
+    const { client, delayedBookmarks } = createBookmarkSearchDelayClient();
+
+    renderWithClient(<App />, client);
+
+    await waitFor(() => {
+      expect(screen.getByText("Bookmarked Messages")).toBeInTheDocument();
+      expect(screen.getByText("Investigate markdown rendering")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText("Bookmarked Messages"));
+    await waitFor(() => {
+      expect(screen.getByText("Parser behavior inspected and fixed.")).toBeInTheDocument();
+    });
+
+    fireEvent.change(screen.getByPlaceholderText(SEARCH_PLACEHOLDERS.historyBookmarks), {
+      target: { value: "delayed-search" },
+    });
+
+    await waitFor(() => {
+      const calls = client.invoke.mock.calls.filter(
+        ([channel]) => channel === "bookmarks:listProject",
+      );
+      expect(
+        calls.some(([, payload]) => (payload as { query?: string }).query === "delayed-search"),
+      ).toBe(true);
+    });
+
+    expect(screen.getByText("Bookmarked Messages")).toBeInTheDocument();
+    expect(screen.getByText("Investigate markdown rendering")).toBeInTheDocument();
+
+    delayedBookmarks.resolve({
+      projectId: "project_1",
+      totalCount: 1,
+      filteredCount: 0,
+      categoryCounts: {
+        user: 0,
+        assistant: 0,
+        tool_use: 0,
+        tool_edit: 0,
+        tool_result: 0,
+        thinking: 0,
+        system: 0,
+      },
+      results: [],
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("No bookmarked messages match current filters.")).toBeInTheDocument();
+    });
+    expect(screen.getByText("Bookmarked Messages")).toBeInTheDocument();
+    expect(screen.getByText("Investigate markdown rendering")).toBeInTheDocument();
   });
 
   it("keeps bookmarks mode when Cmd/Ctrl+F searches messages", async () => {
