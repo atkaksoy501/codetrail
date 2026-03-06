@@ -7,6 +7,8 @@ export type SessionSelectionDecision = {
   resetPage: boolean;
 };
 
+// Selection repair runs after session data loads so the UI can preserve an existing choice when it
+// is still valid, but fall back to the first session when filters/project changes invalidate it.
 export function decideSessionSelectionAfterLoad(args: {
   paneStateHydrated: boolean;
   sessionsLoadedProjectId: string | null;

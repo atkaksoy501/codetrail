@@ -9,6 +9,8 @@ import {
 } from "./contracts";
 import { parseProviderPayload } from "./providerParsers";
 
+// parseSession is the narrow boundary between provider-specific transcript shapes and the
+// canonical message model used everywhere else in the app.
 export function parseSession(input: ParseSessionInput): ParseSessionResult {
   const validated = parseSessionInputSchema.parse(input);
   const diagnostics: ParserDiagnostic[] = [];
@@ -32,6 +34,8 @@ export function parseSession(input: ParseSessionInput): ParseSessionResult {
       operationDurationConfidence: message.operationDurationConfidence ?? null,
     };
 
+    // Provider parsers are intentionally permissive. Canonical validation catches anything that
+    // still does not satisfy the shared contract before it reaches indexing/search.
     const parsedMessage = canonicalMessageSchema.safeParse(candidate);
     if (!parsedMessage.success) {
       diagnostics.push({

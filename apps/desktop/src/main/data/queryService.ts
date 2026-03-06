@@ -102,6 +102,8 @@ export type QueryService = {
   close: () => void;
 };
 
+// QueryService keeps SQL and bookmark resolution in one place so IPC handlers stay thin and the
+// renderer only deals with typed responses.
 export function createQueryService(
   dbPath: string,
   dependencies: QueryServiceDependencies = {},
@@ -724,6 +726,8 @@ function buildMessageSortSql(sortDirection: MessageSortDirection): {
 } {
   const isAscending = sortDirection === "asc";
   return {
+    // created_at can be null or invalid in imported data, so use the unixepoch expression as the
+    // primary stable sort key and the raw string/id as deterministic tie-breakers.
     messageOrder: isAscending
       ? `${MESSAGE_CREATED_AT_ORDER_EXPR} ASC, m.created_at ASC, m.id ASC`
       : `${MESSAGE_CREATED_AT_ORDER_EXPR} DESC, m.created_at DESC, m.id DESC`,
@@ -779,6 +783,8 @@ function resolveFocusTarget(
     bySourceIdParams: readonly unknown[];
   },
 ): FocusTargetRow | undefined {
+  // Search results prefer the concrete indexed message id, but source ids let us reveal a message
+  // even when the exact split segment changed during reindexing.
   if (args.focusMessageId) {
     return db.prepare(args.byMessageIdSql).get(...args.byMessageIdParams) as
       | FocusTargetRow
@@ -808,6 +814,8 @@ function resolveFocusIndexAndPage(args: {
     return { page, focusIndex };
   }
 
+  // Convert a focus target into the page that should be loaded by counting how many rows sort
+  // before it under the current direction/filter set.
   const focusRow = args.db
     .prepare(
       `SELECT COUNT(*) as cnt

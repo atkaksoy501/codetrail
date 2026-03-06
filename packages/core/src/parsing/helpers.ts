@@ -7,6 +7,8 @@ export type TokenUsage = {
 
 export const EPOCH_ISO = new Date(0).toISOString();
 
+// These helpers are intentionally defensive because provider payloads are only partially stable
+// and often mix JSON objects, strings, arrays, and missing fields in the same transcript.
 export function asRecord(value: unknown): UnknownRecord | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return null;
@@ -42,6 +44,7 @@ export function extractEvents(payload: unknown): unknown[] {
   }
 
   for (const key of ["events", "messages", "conversation", "items"]) {
+    // Providers rename their top-level event arrays frequently, so probe the common variants.
     const candidate = record[key];
     if (Array.isArray(candidate)) {
       return candidate;
@@ -74,6 +77,8 @@ export function extractTokenUsage(event: UnknownRecord): TokenUsage {
   );
 
   for (const usage of usageCandidates) {
+    // Prefer explicit top-level token counts when present, but fall back to nested usage blocks
+    // because each provider chooses different field names and nesting depth.
     const usageRecord = asRecord(usage);
     if (!usageRecord) {
       continue;
@@ -162,6 +167,7 @@ export function extractText(value: unknown): string[] {
 
   const typed = lowerString(record.type);
   if (typed === "thinking" || typed === "reasoning") {
+    // Reasoning blocks often still store their text under the same generic fields as normal text.
     const text = firstTextField(record);
     return text ? [text] : [];
   }

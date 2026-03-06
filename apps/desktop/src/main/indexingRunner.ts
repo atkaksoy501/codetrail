@@ -49,6 +49,8 @@ export type IndexingRunnerDependencies = {
   createBookmarkStore?: (bookmarksDbPath: string) => BookmarkStore;
 };
 
+// The runner serializes refresh requests so indexing, bookmark reconciliation, and worker fallback
+// behave like one logical pipeline from the rest of the app's perspective.
 export class WorkerIndexingRunner {
   private sequence = 0;
   private queue: Promise<void> = Promise.resolve();
@@ -90,6 +92,8 @@ export class WorkerIndexingRunner {
       });
       const bookmarkStore = this.createBookmarkStoreFn(this.bookmarksDbPath);
       try {
+        // Indexing can invalidate bookmarked message ids after a reparse, so reconcile right after
+        // each completed run while the database is warm.
         bookmarkStore.reconcileWithIndexedData(this.dbPath);
       } finally {
         bookmarkStore.close();
@@ -112,6 +116,7 @@ async function runIndexingJob(args: {
   createWorker: (workerUrl: URL) => WorkerLike;
 }): Promise<void> {
   if (!args.workerUrl) {
+    // Tests and some dev builds do not emit the worker bundle, so keep an in-process path.
     args.runIncrementalIndexing({
       dbPath: args.dbPath,
       forceReindex: args.forceReindex,
@@ -135,6 +140,8 @@ async function runIndexingJob(args: {
       args.createWorker,
     );
   } catch (error) {
+    // Falling back preserves functionality even if the worker cannot boot due to packaging or ABI
+    // issues. The cost is UI responsiveness, not correctness.
     console.error("[codetrail] indexing worker failed; falling back to in-process indexing", error);
     args.runIncrementalIndexing({
       dbPath: args.dbPath,
@@ -155,6 +162,7 @@ function runIndexingInWorker(
     const worker = createWorker(workerUrl);
     let settled = false;
 
+    // Centralize shutdown so all exit paths terminate the worker exactly once.
     const finish = (callback: () => void) => {
       if (settled) {
         return;

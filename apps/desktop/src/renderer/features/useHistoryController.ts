@@ -73,6 +73,8 @@ import { useHistoryDataEffects } from "./useHistoryDataEffects";
 import { useHistoryDerivedState } from "./useHistoryDerivedState";
 import { useHistoryInteractions } from "./useHistoryInteractions";
 
+// useHistoryController is the stateful coordinator for the history UI. It owns selection, pane
+// layout, persisted UI state, data loading hooks, and keyboard/navigation wiring.
 export function useHistoryController({
   initialPaneState,
   isHistoryLayout,
@@ -171,6 +173,7 @@ export function useHistoryController({
   const sessionListRef = useRef<HTMLDivElement | null>(null);
   const projectListRef = useRef<HTMLDivElement | null>(null);
   const sessionSearchInputRef = useRef<HTMLInputElement | null>(null);
+  // Persisted scroll restoration only applies to the same session/page snapshot that was saved.
   const pendingRestoredSessionScrollRef = useRef<{
     sessionId: string;
     sessionPage: number;
@@ -239,6 +242,8 @@ export function useHistoryController({
 
   const paneStateForSync = useMemo(
     () => ({
+      // Keep the persisted snapshot derived from the controller's canonical selection state so
+      // restoration does not drift from what the UI is actually rendering.
       projectPaneWidth,
       sessionPaneWidth,
       projectPaneCollapsed,
@@ -503,6 +508,8 @@ export function useHistoryController({
       pendingRestore.sessionId === scrollScopeId &&
       pendingRestore.sessionPage === sessionPage
     ) {
+      // Restore once for the exact saved view, then fall back to normal top-of-list behavior on
+      // any later navigation.
       messageListRef.current.scrollTop = pendingRestore.scrollTop;
       sessionScrollTopRef.current = pendingRestore.scrollTop;
       setSessionScrollTop(pendingRestore.scrollTop);

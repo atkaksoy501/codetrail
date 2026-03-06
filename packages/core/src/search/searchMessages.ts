@@ -52,6 +52,9 @@ JOIN messages m ON m.id = message_fts.message_id
 JOIN sessions s ON s.id = m.session_id
 LEFT JOIN projects p ON p.id = s.project_id
 `;
+
+// Search is implemented directly on the FTS table, then enriched with session/project metadata so
+// the renderer can navigate back to the exact message hit without extra round-trips.
 export function searchMessages(
   db: SqliteDatabase,
   input: SearchMessagesInput,
@@ -106,6 +109,8 @@ export function searchMessages(
   const totalCount = Number(countRow?.cnt ?? 0);
 
   const facetFilters = buildFilters(input, false);
+  // Facets intentionally ignore the category filter so the UI can show "what else is available"
+  // for the current text/project/provider query.
   const facetWhereClause = sqlWhereClause([...queryFilter.conditions, ...facetFilters.conditions]);
   const facetWhereParams = [...queryFilter.params, ...facetFilters.params];
   const facetRows = db
@@ -124,6 +129,8 @@ export function searchMessages(
 
   const limit = Math.max(1, input.limit ?? 50);
   const offset = Math.max(0, input.offset ?? 0);
+  // snippet() operates on the indexed FTS columns, so the snippet stays aligned with the exact hit
+  // terms instead of reimplementing highlight logic in application code.
   const snippetSelect = "snippet(message_fts, 4, '<mark>', '</mark>', '...', 64) as snippet";
   const orderBy = "ORDER BY bm25(message_fts), m.created_at DESC, m.id DESC";
   const resultRows = db
@@ -200,6 +207,8 @@ function buildFilters(
       ? input.projectIds.filter((value) => value.length > 0)
       : [];
   if (projectIds.length > 0) {
+    // projectIds supports batched search across a preselected subset, while projectId is the
+    // simpler single-project path used by most callers.
     conditions.push(`s.project_id IN (${projectIds.map(() => "?").join(",")})`);
     params.push(...projectIds);
   } else if (input.projectId && input.projectId.length > 0) {
@@ -256,6 +265,7 @@ function sqlWhereClause(conditions: string[]): string {
 
 function buildQueryFilter(plan: SearchQueryPlan): { conditions: string[]; params: string[] } {
   if (!plan.ftsQuery) {
+    // Keep the SQL shape valid even for degenerate plans so callers do not need a special case.
     return {
       conditions: ["1 = 0"],
       params: [],

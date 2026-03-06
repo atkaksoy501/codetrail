@@ -32,6 +32,8 @@ import {
 import { deriveSessionTitle, toggleValue } from "../lib/viewUtils";
 import { focusHistoryList, formatDuration } from "./historyControllerShared";
 
+// Interaction handlers are collected here so keyboard/mouse behavior can share the same
+// state-transition rules without being spread across components.
 export function useHistoryInteractions({
   codetrail,
   logError,
@@ -177,6 +179,8 @@ export function useHistoryInteractions({
 
   const handleRevealInSession = useCallback(
     (messageId: string, sourceId: string) => {
+      // Bookmarks/project-wide views route through pending search navigation because the controller
+      // may need to switch projects or sessions before the message can be focused.
       if (historyMode === "bookmarks") {
         const bookmarked = bookmarksResponse.results.find(
           (entry) => entry.message.id === messageId,
@@ -252,6 +256,7 @@ export function useHistoryInteractions({
       if (sessionScrollSyncTimerRef.current !== null) {
         return;
       }
+      // Debounce writes back into pane state so large scroll gestures do not spam persistence.
       sessionScrollSyncTimerRef.current = window.setTimeout(() => {
         sessionScrollSyncTimerRef.current = null;
         setSessionScrollTop((value) =>
@@ -280,6 +285,8 @@ export function useHistoryInteractions({
   );
 
   const resetHistorySelectionState = useCallback(() => {
+    // Changing history scope should clear any transient focus/navigation state carried over from a
+    // previous scope.
     setPendingSearchNavigation(null);
     setPendingMessageAreaFocus(false);
     setPendingMessagePageNavigation(null);
@@ -417,6 +424,8 @@ export function useHistoryInteractions({
         direction === "next"
           ? Math.min(totalPages - 1, sessionPage + 1)
           : Math.max(0, sessionPage - 1);
+      // Crossing a page boundary is deferred until the new page loads, then the controller picks
+      // the first/last visible message on that page.
       setPendingMessageAreaFocus(true);
       setPendingMessagePageNavigation({ direction, targetPage });
       setSessionPage(targetPage);

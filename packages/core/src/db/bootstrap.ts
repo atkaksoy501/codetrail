@@ -10,6 +10,8 @@ export type DatabaseBootstrapResult = {
 
 export type SqliteDatabase = InstanceType<typeof Database>;
 
+// The schema is intentionally small and append-friendly: raw transcript files stay on disk, while
+// SQLite stores the normalized searchable projection plus incremental indexing metadata.
 const tableStatements = [
   `CREATE TABLE IF NOT EXISTS meta (
     key TEXT PRIMARY KEY,
@@ -96,6 +98,7 @@ const dataTables = ["tool_calls", "messages", "sessions", "projects", "indexed_f
 
 export function openDatabase(databasePath: string): SqliteDatabase {
   const db = new Database(databasePath);
+  // WAL keeps read-heavy UI queries responsive while indexing writes in the background.
   db.pragma("journal_mode = WAL");
   return db;
 }
@@ -107,6 +110,8 @@ export function ensureDatabaseSchema(db: SqliteDatabase): DatabaseBootstrapResul
   let schemaRebuilt = false;
 
   if (existingSchemaVersion !== null && existingSchemaVersion !== DATABASE_SCHEMA_VERSION) {
+    // Schema upgrades are coarse-grained for now: rebuild deterministically rather than carrying a
+    // long chain of handwritten migrations for a local cache database.
     clearAllSchemaObjects(db);
     recreateSchema(db);
     schemaRebuilt = true;
@@ -174,6 +179,8 @@ function ensureMessageFtsTable(db: SqliteDatabase): void {
     return;
   }
 
+  // Rebuild the FTS table in place when its definition changes, then repopulate from canonical
+  // messages so search stays a pure derivative of the base tables.
   db.exec("DROP TABLE IF EXISTS message_fts");
   db.exec(
     `CREATE VIRTUAL TABLE message_fts USING fts5(

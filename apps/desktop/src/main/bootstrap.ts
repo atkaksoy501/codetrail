@@ -27,6 +27,8 @@ export type BootstrapResult = {
   tableCount: number;
 };
 
+// The main process owns long-lived resources: databases, IPC handlers, indexing workers, and the
+// path allowlist used by shell integrations.
 let activeQueryService: QueryService | null = null;
 
 export async function bootstrapMainProcess(
@@ -118,6 +120,8 @@ export async function bootstrapMainProcess(
         return { ok: false, error: "Path must be absolute." };
       }
       const targetPath = await resolveCanonicalPath(payload.path);
+      // Only permit shell-open for indexed workspaces and app-owned storage to avoid turning IPC
+      // into a generic arbitrary-path opener.
       const allowedRoots = readAllowedRoots();
       if (!isPathAllowedByRoots(targetPath, allowedRoots)) {
         return {
@@ -274,6 +278,7 @@ function getAllowedOpenInFileManagerRoots(input: {
   addRoot(DEFAULT_DISCOVERY_CONFIG.cursorRoot);
 
   try {
+    // Indexed project paths are dynamic, so fold them into the static provider/app roots cache.
     const projects = input.queryService.listProjects({ providers: undefined, query: "" });
     for (const project of projects.projects) {
       addRoot(project.path);

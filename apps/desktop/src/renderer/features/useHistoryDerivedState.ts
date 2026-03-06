@@ -30,6 +30,8 @@ import {
   prettyProvider,
 } from "../lib/viewUtils";
 
+// Pure derived state for the history screen lives here so sorting, counts, labels, and layout math
+// remain memoized and testable without mixing them into fetch/interaction code.
 export function useHistoryDerivedState({
   historyMode,
   sortedProjects,
@@ -159,6 +161,8 @@ export function useHistoryDerivedState({
   );
   const isSessionPaneReadyForSelectedProject =
     !selectedProjectId || sessionPaneStableProjectId === selectedProjectId;
+  // Keep rendering pinned to the last fully-loaded project to avoid flashing an empty or mixed
+  // session pane while the selected project is still fetching.
   const visibleSessionPaneSessions = isSessionPaneReadyForSelectedProject ? sortedSessions : [];
   const visibleSessionPaneBookmarksCount = isSessionPaneReadyForSelectedProject
     ? bookmarksResponse.totalCount
@@ -168,6 +172,8 @@ export function useHistoryDerivedState({
     : 0;
 
   const sessionPaneNavigationItems = useMemo<SessionPaneNavigationItem[]>(() => {
+    // The session pane is modeled as one navigation list that includes synthetic entries for
+    // project-wide messages and bookmarks alongside real sessions.
     const next: SessionPaneNavigationItem[] = [{ id: PROJECT_ALL_NAV_ID, kind: "project_all" }];
     if (visibleSessionPaneBookmarksCount > 0) {
       next.push({ id: BOOKMARKS_NAV_ID, kind: "bookmarks" });
@@ -256,6 +262,8 @@ export function useHistoryDerivedState({
   const scopedExpandCollapseLabel = `${scopedActionLabel} ${bulkScopeLabel}`;
   const workspaceStyle = isHistoryLayout
     ? {
+        // Collapsed panes still reserve a narrow track so keyboard focus and affordances remain
+        // visible instead of disappearing from the grid entirely.
         gridTemplateColumns: `${
           projectPaneCollapsed ? COLLAPSED_PANE_WIDTH : projectPaneWidth
         }px 1px ${sessionPaneCollapsed ? COLLAPSED_PANE_WIDTH : sessionPaneWidth}px 1px minmax(420px, 1fr)`,

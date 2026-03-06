@@ -73,6 +73,8 @@ type IndexedMessage = ReturnType<typeof parseSession>["messages"][number];
 
 const MAX_DERIVED_DURATION_MS = 15 * 60 * 1000;
 
+// Incremental indexing treats the filesystem as source of truth and the SQLite database as a
+// cacheable projection of normalized session history.
 export function runIncrementalIndexing(
   config: IndexingConfig,
   dependencies: IndexingDependencies = {},
@@ -225,6 +227,7 @@ export function runIncrementalIndexing(
         existing.file_mtime_ms === discovered.fileMtimeMs &&
         existingSessionId === sessionDbId;
 
+      // file size + mtime + derived session id is enough for a cheap incremental skip check.
       if (unchanged) {
         skippedFiles += 1;
         continue;
@@ -262,6 +265,8 @@ export function runIncrementalIndexing(
 
       const projectId = makeProjectId(discovered.provider, discovered.projectPath);
       const sourceMeta = extractSourceMetadata(discovered.provider, source.rawPayload);
+      // Normalization happens in stages so each step has one job: provider parsing, optional
+      // system-message overrides, derived duration inference, then timestamp repair.
       const normalizedMessages = reclassifySystemMessages(
         parsed.messages,
         compiledSystemMessageRules.compiledByProvider[discovered.provider],
@@ -443,6 +448,7 @@ function readProviderSource(
   parsePayload: unknown[] | Record<string, unknown>;
 } | null {
   try {
+    // Gemini stores one JSON document per session, while the other providers currently emit JSONL.
     if (provider === "gemini") {
       const parsed = JSON.parse(readFileText(filePath)) as Record<string, unknown>;
       return {
@@ -589,6 +595,8 @@ function deriveOperationDurations(messages: IndexedMessage[]): IndexedMessage[] 
       return message;
     }
 
+    // Derived durations are only filled when the adjacent message pair is a high-confidence
+    // request/response boundary; otherwise leaving null is safer than inventing precision.
     return {
       ...message,
       operationDurationMs: durationMs,
@@ -617,6 +625,8 @@ function normalizeMessageTimestamps(
 
   let previousMs = Number.NEGATIVE_INFINITY;
   return messages.map((message, index) => {
+    // Cursor transcripts can contain duplicate or missing timestamps. Force a monotonic sequence so
+    // sort order and pagination stay stable across reloads.
     const parsedMs = Date.parse(message.createdAt);
     let nextMs = Number.isFinite(parsedMs) && parsedMs > 0 ? parsedMs : fallbackBaseMs + index;
     if (!Number.isFinite(nextMs) || nextMs <= 0) {
@@ -658,6 +668,8 @@ function selectDerivedBaseline(
   }
 
   if (currentCategory === "assistant" || currentCategory === "thinking") {
+    // Split assistant/thinking segments often share the same source id. Skip backwards past those
+    // siblings so we measure from the user/tool message that actually triggered them.
     const currentRoot = splitMessageRoot(messages[currentIndex]?.id ?? "");
     let pointer = currentIndex - 1;
     while (pointer >= 0) {
@@ -742,6 +754,7 @@ function compileSystemMessageRules(overrides?: SystemMessageRegexRuleOverrides):
   let invalidCount = 0;
   for (const provider of PROVIDER_VALUES) {
     const compiled: RegExp[] = [];
+    // Invalid user-supplied regexes are counted and ignored instead of failing indexing.
     for (const pattern of resolved[provider]) {
       const normalized = pattern.trim();
       if (normalized.length === 0) {

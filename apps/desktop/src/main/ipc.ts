@@ -16,6 +16,8 @@ type IpcHandlerMap = {
   ) => Promise<IpcResponse<K>> | IpcResponse<K>;
 };
 
+// IPC registration validates both directions against the shared contract so renderer/main drift is
+// caught immediately instead of surfacing as loosely-typed runtime bugs.
 export function registerIpcHandlers(
   ipcMain: Pick<IpcMain, "handle">,
   handlers: IpcHandlerMap,

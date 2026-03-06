@@ -23,6 +23,8 @@ import type {
 import type { CodetrailClient } from "../lib/codetrailClient";
 import { decideSessionSelectionAfterLoad } from "../lib/sessionSelection";
 
+// This hook owns the async side of history state: loading projects/sessions/details and reconciling
+// in-flight requests with the controller's current selection.
 export function useHistoryDataEffects({
   codetrail,
   logError,
@@ -113,6 +115,7 @@ export function useHistoryDataEffects({
   bookmarksLoadTokenRef: MutableRefObject<number>;
 }) {
   const loadProjects = useCallback(async () => {
+    // Monotonic request tokens prevent stale async responses from overwriting newer selections.
     const requestToken = projectsLoadTokenRef.current + 1;
     projectsLoadTokenRef.current = requestToken;
     setProjectsLoaded(false);
@@ -309,6 +312,8 @@ export function useHistoryDataEffects({
       return;
     }
 
+    // Search navigation is a two-step handshake: first move to the right project, then once that
+    // project's sessions are loaded, reveal the specific session/message target.
     if (pendingSearchNavigation.projectId !== selectedProjectId) {
       setHistorySelection((selectionState) =>
         setHistorySelectionProjectId(selectionState, pendingSearchNavigation.projectId),
@@ -375,6 +380,8 @@ export function useHistoryDataEffects({
     const isRevealing = pendingRevealTarget !== null;
     const isAllHistoryCategoriesSelected = historyCategories.length === CATEGORIES.length;
     const effectiveCategories = isAllHistoryCategoriesSelected ? undefined : historyCategories;
+    // When revealing a specific message from bookmarks/search, temporarily ignore the free-text
+    // query so pagination can land on the target even if it would otherwise be filtered out.
     const effectiveQuery = isRevealing ? "" : effectiveSessionQuery;
     void codetrail
       .invoke("sessions:getDetail", {
@@ -490,6 +497,8 @@ export function useHistoryDataEffects({
       setSessionPaneStableProjectId(null);
       return;
     }
+    // The session pane should not flip to a new project until both sessions and bookmarks for that
+    // project are loaded, otherwise the pane briefly renders mismatched content.
     if (
       sessionsLoadedProjectId === selectedProjectId &&
       bookmarksLoadedProjectId === selectedProjectId

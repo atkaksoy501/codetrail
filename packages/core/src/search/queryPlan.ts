@@ -42,6 +42,8 @@ export type SearchQueryPlan = {
   error: string | null;
 };
 
+// Search is compiled once up front into both an FTS query and a highlight plan so the rest of the
+// stack can treat simple and advanced modes uniformly.
 export function buildSearchQueryPlan(query: string, mode: SearchMode = "simple"): SearchQueryPlan {
   const normalizedQuery = query.trim();
   if (normalizedQuery.length === 0) {
@@ -137,6 +139,8 @@ function buildSimpleSearchQueryPlan(normalizedQuery: string): SearchQueryPlan {
       continue;
     }
 
+    // SQLite FTS only supports postfix prefix matching. Other wildcard placement is preserved for
+    // UI affordances but compiled as a literal term for the FTS query itself.
     // Only postfix wildcard is supported. Leading/infix wildcards are treated literally.
     const withoutWildcards = token.replaceAll("*", "").trim();
     if (withoutWildcards.length === 0) {
@@ -429,6 +433,8 @@ function parseAdvancedQuery(tokens: AdvancedToken[]): {
         break;
       }
 
+      // Adjacent terms are treated as AND, which mirrors how most users expect whitespace search
+      // to work while still allowing explicit AND/NOT control.
       let operator: "and" | "not" = "and";
       if (next.type === "and") {
         consume();
@@ -601,6 +607,8 @@ function hasPositiveLeaf(node: AdvancedNode, negated: boolean): boolean {
     return !negated;
   }
   if (node.type === "not") {
+    // "A NOT B" still needs A to anchor the FTS query. Purely negated expressions are rejected
+    // because FTS cannot efficiently answer "everything except X" on their own.
     return hasPositiveLeaf(node.left, negated);
   }
   return hasPositiveLeaf(node.left, negated) || hasPositiveLeaf(node.right, negated);

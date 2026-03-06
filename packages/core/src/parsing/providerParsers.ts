@@ -48,6 +48,8 @@ type ParseProviderPayloadArgs = {
   diagnostics: ParserDiagnostic[];
 };
 
+// Each provider emits different event shapes, but all parsers normalize into the same stream of
+// split messages so indexing/search can stay provider-agnostic.
 export function parseProviderPayload(args: ParseProviderPayloadArgs): ParsedProviderMessage[] {
   const { provider } = args;
 
@@ -162,6 +164,8 @@ function parseCodexPayload(args: ParseProviderPayloadArgs): ParsedProviderMessag
     const eventType = lowerString(eventRecord.type);
     const eventKind = lowerString(eventRecord.kind ?? eventRecord.event_type);
     if (!eventType && eventKind) {
+      // Older/synthetic Codex records sometimes encode the interesting part in "kind" rather than
+      // the response_item payload shape used by newer transcripts.
       const segments = parseSyntheticCodexSegments(eventKind, eventRecord);
       if (segments.length === 0) {
         continue;
@@ -442,6 +446,8 @@ function cursorRoleCategory(role: string | null, fallback: MessageCategory): Mes
 
 function stripCursorWrapperTags(text: string): string {
   let result = text;
+  // Cursor wraps prompts with extra XML-ish scaffolding that is useful to the agent but noisy in
+  // history views. Strip the wrappers while preserving the human-readable text payload.
   result = result.replace(/<user_query>\s*/g, "").replace(/\s*<\/user_query>/g, "");
   result = result.replace(/<system_reminder>[\s\S]*?<\/system_reminder>/g, "");
   result = result.replace(/<agent_skills>[\s\S]*?<\/agent_skills>/g, "");
@@ -460,6 +466,8 @@ function parseClaudeSegments(
   event: Record<string, unknown>,
 ): EventSegment[] {
   const segments: EventSegment[] = [];
+  // Claude often co-locates assistant text, thinking, and tool traffic in one event. Keep them as
+  // separate segments so downstream filters can treat each category independently.
   const blocks = parseStructuredBlocks(event.content);
   const aggregateText = blocks
     .filter((block) => block.kind === "text" || block.kind === "thinking")
@@ -550,6 +558,8 @@ function parseCodexSegments(
   }
 
   if (payloadType === "function_call" || payloadType === "custom_tool_call") {
+    // Tool calls are promoted into a synthetic JSON payload so the indexer can extract a stable
+    // tool name/args pair later without depending on provider-specific field names.
     return buildCodexToolUseSegment(
       sessionId,
       sequence,
@@ -597,6 +607,8 @@ function parseGeminiUserSegments(event: Record<string, unknown>): EventSegment[]
 
 function parseGeminiAssistantSegments(event: Record<string, unknown>): EventSegment[] {
   const segments: EventSegment[] = [];
+  // Gemini exposes thoughts both as a top-level side channel and inline blocks. Preserve both so
+  // the UI can show reasoning messages even when the provider mixes representations.
   for (const thought of extractGeminiThoughts(event.thoughts)) {
     segments.push({ category: "thinking", content: thought });
   }

@@ -107,6 +107,8 @@ const DEFAULT_TIMER: AppStateStoreTimer = {
   clearTimeout,
 };
 
+// AppStateStore persists only sanitized UI state. Invalid or stale values are dropped on read so a
+// corrupted settings file cannot break startup.
 export class AppStateStore {
   private readonly filePath: string;
   private readonly fileSystem: AppStateStoreFileSystem;
@@ -176,6 +178,7 @@ export class AppStateStore {
       this.timer.clearTimeout(this.persistTimer);
     }
 
+    // Debounce small UI changes into one write because pane resize/scroll can be very chatty.
     this.persistTimer = this.timer.setTimeout(() => {
       this.persistTimer = null;
       persistState(this.filePath, this.state, this.fileSystem, this.onPersistError);
@@ -203,6 +206,7 @@ function readState(filePath: string, fileSystem: AppStateStoreFileSystem): AppSt
     }
 
     const record = parsed as Record<string, unknown>;
+    // Sanitize each subtree independently so one malformed section does not discard the other.
     const pane = sanitizePaneState(record.pane);
     const window = sanitizeWindowState(record.window);
     return {
@@ -241,6 +245,8 @@ function sanitizePaneState(value: unknown): PaneState | null {
   }
   const projectPaneCollapsed = sanitizeOptionalBoolean(record.projectPaneCollapsed);
   const sessionPaneCollapsed = sanitizeOptionalBoolean(record.sessionPaneCollapsed);
+  // Provider arrays are healed to include newly-added providers so older settings files do not hide
+  // data just because they were saved before a provider existed.
   const projectProviders = addMissingProviders(
     sanitizeStringArray(record.projectProviders, PROVIDER_VALUES),
   );

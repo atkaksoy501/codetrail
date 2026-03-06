@@ -33,6 +33,8 @@ type PaneStateSnapshot = IpcResponse<"ui:getState">;
 type PaneStatePersistRequest = IpcRequest<"ui:setState">;
 type HydratableKey = Exclude<keyof PaneStateSnapshot, "projectPaneWidth" | "sessionPaneWidth">;
 
+// Pane state hydration/persistence is isolated here so the main history controller can treat
+// stored UI state as another asynchronous data source rather than mixing it into render logic.
 export function usePaneStateSync(args: {
   initialPaneStateHydrated?: boolean;
   logError: (context: string, error: unknown) => void;
@@ -113,6 +115,8 @@ export function usePaneStateSync(args: {
       if (cancelled || hydrationRafId !== null) {
         return;
       }
+      // Delay the "hydrated" flip by a frame so restore setters land before downstream effects that
+      // react to hydrated state.
       hydrationRafId = window.requestAnimationFrame(() => {
         hydrationRafId = null;
         if (!cancelled) {
@@ -162,6 +166,8 @@ export function usePaneStateSync(args: {
           systemMessageRegexRules: setSystemMessageRegexRules,
         };
 
+        // Hydrate scalar settings generically, then repair selection separately because the three
+        // selection fields form a coupled state machine.
         for (const [key, setter] of Object.entries(setters) as Array<
           [HydratableKey, (value: Exclude<PaneStateSnapshot[HydratableKey], null>) => void]
         >) {
@@ -266,6 +272,8 @@ export function usePaneStateSync(args: {
       return;
     }
 
+    // Persist on a short debounce so drag-resize and scroll updates do not cause synchronous IPC
+    // chatter on every animation frame.
     const timer = window.setTimeout(() => {
       void codetrail.invoke("ui:setState", paneStateToPersist).catch((error: unknown) => {
         logError("Failed saving UI state", error);

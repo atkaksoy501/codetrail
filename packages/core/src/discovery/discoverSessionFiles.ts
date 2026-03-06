@@ -75,6 +75,8 @@ export const DEFAULT_DISCOVERY_CONFIG: DiscoveryConfig = {
   includeClaudeSubagents: false,
 };
 
+// Discovery stays deliberately tolerant: missing roots, unreadable files, and provider-specific
+// oddities should reduce coverage, not abort a full indexing run.
 export function discoverSessionFiles(
   config: DiscoveryConfig = DEFAULT_DISCOVERY_CONFIG,
   dependencies: DiscoveryDependencies = {},
@@ -154,6 +156,8 @@ function discoverClaudeFiles(
       continue;
     }
 
+    // Claude subagents live under a parent session directory but need their own stable identity so
+    // they can coexist with the main transcript in the database.
     for (const sessionDir of safeReadDir(projectDir, dependencies)) {
       if (!sessionDir.isDirectory()) {
         continue;
@@ -228,6 +232,8 @@ function discoverCodexFiles(
     }
     const meta = readCodexJsonlMeta(filePath, dependencies);
     const sourceSessionId = meta.sessionId ?? basename(filePath, ".jsonl");
+    // Codex can emit multiple physical files for the same logical session id, so the indexed
+    // identity includes the file path to avoid collisions.
     const sessionIdentity = providerSessionIdentity("codex", sourceSessionId, filePath);
     const projectPath = meta.cwd ?? "";
 
