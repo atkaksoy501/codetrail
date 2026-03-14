@@ -13,6 +13,7 @@ import {
 import { type AppStateStore, createAppStateStore } from "./appStateStore";
 import { bootstrapMainProcess, shutdownMainProcess } from "./bootstrap";
 import { appendDebugLog } from "./debugLog";
+import { createBeforeQuitHandler } from "./quitLifecycle";
 
 let mainWindowRef: BrowserWindow | null = null;
 let debugLogPathCache: string | null = null;
@@ -298,18 +299,22 @@ if (hasSingleInstanceLock) {
       return;
     }
 
-    let shuttingDown = false;
-    app.on("before-quit", (event) => {
-      writeDebugLog("before-quit");
-      appStateStore.flush();
-      if (!shuttingDown) {
-        shuttingDown = true;
-        event.preventDefault();
-        shutdownMainProcess().finally(() => {
-          app.quit();
-        });
-      }
-    });
+    app.on(
+      "before-quit",
+      createBeforeQuitHandler({
+        flushAppState: () => {
+          appStateStore.flush();
+        },
+        writeDebugLog,
+        shutdownMainProcess,
+        exitApp: (exitCode) => {
+          app.exit(exitCode);
+        },
+        logShutdownError: (error) => {
+          logAppError("shutdown failure", error);
+        },
+      }),
+    );
 
     app.on("activate", () => {
       if (BrowserWindow.getAllWindows().length === 0) {
