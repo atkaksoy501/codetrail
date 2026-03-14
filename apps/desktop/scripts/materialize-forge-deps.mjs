@@ -1,3 +1,4 @@
+import { createRequire } from "node:module";
 import { existsSync, mkdirSync, readFileSync, realpathSync, symlinkSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -36,12 +37,12 @@ function materializeForPackage(packagePath) {
     return;
   }
 
-  const parentNodeModulesPath = dirname(realPackagePath);
   const nestedNodeModulesPath = join(realPackagePath, "node_modules");
+  const packageRequire = createRequire(join(realPackagePath, "package.json"));
   mkdirSync(nestedNodeModulesPath, { recursive: true });
 
   for (const depName of dependencyNames) {
-    const sourcePath = join(parentNodeModulesPath, depName);
+    const sourcePath = resolveDependencyPath(packageRequire, depName);
     if (!existsSync(sourcePath)) {
       continue;
     }
@@ -58,4 +59,12 @@ function materializeForPackage(packagePath) {
 
 function resolveRealPath(inputPath) {
   return realpathSync(resolve(inputPath));
+}
+
+function resolveDependencyPath(packageRequire, depName) {
+  try {
+    return dirname(packageRequire.resolve(`${depName}/package.json`));
+  } catch {
+    return "";
+  }
 }
