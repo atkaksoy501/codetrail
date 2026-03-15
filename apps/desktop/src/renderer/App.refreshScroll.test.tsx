@@ -8,7 +8,13 @@ import { App, setTestStrategyIntervalOverrides } from "./App";
 import { createAppClient } from "./test/appTestFixtures";
 import { renderWithClient } from "./test/renderWithClient";
 
-const FAST_OVERRIDES = { "5s": 100, "10s": 200, "30s": 300, "1min": 400, "5min": 500, watch: 600, off: 0 } as const;
+const FAST_OVERRIDES = {
+  "scan-5s": 100,
+  "scan-10s": 200,
+  "scan-30s": 300,
+  "scan-1min": 400,
+  "scan-5min": 500,
+} as const;
 
 // Helper: generate a session detail response with N messages on a given page.
 function makeSessionDetail({
@@ -157,7 +163,7 @@ describe("App refresh scroll preservation", () => {
 
     // Enable periodic refresh (3s).
     await user.click(screen.getByRole("button", { name: "Auto-refresh strategy" }));
-    await user.click(screen.getByRole("option", { name: "5s" }));
+    await user.click(screen.getByRole("option", { name: "5s scan" }));
 
     const callsBefore = client.invoke.mock.calls.filter(
       ([channel]) => channel === "sessions:getDetail",
@@ -213,7 +219,7 @@ describe("App refresh scroll preservation", () => {
 
     // Enable periodic refresh.
     await user.click(screen.getByRole("button", { name: "Auto-refresh strategy" }));
-    await user.click(screen.getByRole("option", { name: "5s" }));
+    await user.click(screen.getByRole("option", { name: "5s scan" }));
 
     await vi.advanceTimersByTimeAsync(110);
 
@@ -265,7 +271,7 @@ describe("App refresh scroll preservation", () => {
     // In jsdom, scrollTop defaults to 0 which is the top edge — pinned for DESC.
     // Enable periodic refresh.
     await user.click(screen.getByRole("button", { name: "Auto-refresh strategy" }));
-    await user.click(screen.getByRole("option", { name: "5s" }));
+    await user.click(screen.getByRole("option", { name: "5s scan" }));
 
     await vi.advanceTimersByTimeAsync(110);
 
@@ -302,7 +308,7 @@ describe("App refresh scroll preservation", () => {
 
     // Enable periodic refresh.
     await user.click(screen.getByRole("button", { name: "Auto-refresh strategy" }));
-    await user.click(screen.getByRole("option", { name: "5s" }));
+    await user.click(screen.getByRole("option", { name: "5s scan" }));
 
     const detailCallsBefore = client.invoke.mock.calls.filter(
       ([channel]) => channel === "sessions:getDetail",
@@ -351,7 +357,7 @@ describe("App refresh scroll preservation", () => {
 
     // Enable periodic refresh.
     await user.click(screen.getByRole("button", { name: "Auto-refresh strategy" }));
-    await user.click(screen.getByRole("option", { name: "5s" }));
+    await user.click(screen.getByRole("option", { name: "5s scan" }));
 
     // Navigate to page 2, then mock as scrolled away.
     await user.click(screen.getByRole("button", { name: "Next page" }));
@@ -391,7 +397,7 @@ describe("App refresh scroll preservation", () => {
 
     // Enable periodic refresh.
     await user.click(screen.getByRole("button", { name: "Auto-refresh strategy" }));
-    await user.click(screen.getByRole("option", { name: "5s" }));
+    await user.click(screen.getByRole("option", { name: "5s scan" }));
 
     // Toggle sort direction — this should invalidate any pending refresh context.
     await user.click(screen.getByRole("button", { name: /Sort .* descending/i }));
@@ -437,7 +443,7 @@ describe("App refresh scroll preservation", () => {
     if (messageList) mockScrolledNearBottom(messageList);
 
     await user.click(screen.getByRole("button", { name: "Auto-refresh strategy" }));
-    await user.click(screen.getByRole("option", { name: "5s" }));
+    await user.click(screen.getByRole("option", { name: "5s scan" }));
 
     await vi.advanceTimersByTimeAsync(110);
 
@@ -474,7 +480,7 @@ describe("App refresh scroll preservation", () => {
     if (messageList) mockScrolledJustOutsideBottom(messageList);
 
     await user.click(screen.getByRole("button", { name: "Auto-refresh strategy" }));
-    await user.click(screen.getByRole("option", { name: "5s" }));
+    await user.click(screen.getByRole("option", { name: "5s scan" }));
 
     const callsBefore = client.invoke.mock.calls.filter(
       ([channel]) => channel === "sessions:getDetail",
@@ -531,7 +537,7 @@ describe("App refresh scroll preservation", () => {
     if (messageList) mockScrolledAwayFromTop(messageList);
 
     await user.click(screen.getByRole("button", { name: "Auto-refresh strategy" }));
-    await user.click(screen.getByRole("option", { name: "5s" }));
+    await user.click(screen.getByRole("option", { name: "5s scan" }));
 
     await vi.advanceTimersByTimeAsync(110);
 
@@ -574,7 +580,7 @@ describe("App refresh scroll preservation", () => {
     if (messageList) mockScrolledToTop(messageList);
 
     await user.click(screen.getByRole("button", { name: "Auto-refresh strategy" }));
-    await user.click(screen.getByRole("option", { name: "5s" }));
+    await user.click(screen.getByRole("option", { name: "5s scan" }));
 
     await vi.advanceTimersByTimeAsync(110);
 
@@ -647,7 +653,7 @@ describe("App refresh scroll preservation", () => {
     // The default projectAllSortDirection is "desc", so newest is at top.
     // jsdom scrollTop=0 → pinned for DESC → auto-scroll mode.
     await user.click(screen.getByRole("button", { name: "Auto-refresh strategy" }));
-    await user.click(screen.getByRole("option", { name: "5s" }));
+    await user.click(screen.getByRole("option", { name: "5s scan" }));
 
     // Navigate to page 2 (away from page 0).
     await user.click(screen.getByRole("button", { name: "Next page" }));
@@ -709,7 +715,7 @@ describe("App refresh scroll preservation", () => {
     if (messageList) mockScrolledAway(messageList);
 
     await user.click(screen.getByRole("button", { name: "Auto-refresh strategy" }));
-    await user.click(screen.getByRole("option", { name: "5s" }));
+    await user.click(screen.getByRole("option", { name: "5s scan" }));
 
     await vi.advanceTimersByTimeAsync(110);
 
@@ -751,7 +757,7 @@ describe("App refresh scroll preservation", () => {
     if (messageList) mockScrolledAway(messageList);
 
     await user.click(screen.getByRole("button", { name: "Auto-refresh strategy" }));
-    await user.click(screen.getByRole("option", { name: "5s" }));
+    await user.click(screen.getByRole("option", { name: "5s scan" }));
 
     // Fire 3 refresh ticks.
     for (let tick = 0; tick < 3; tick++) {
@@ -844,7 +850,7 @@ describe("App refresh scroll preservation", () => {
 
     // Enable periodic refresh.
     await user.click(screen.getByRole("button", { name: "Auto-refresh strategy" }));
-    await user.click(screen.getByRole("option", { name: "5s" }));
+    await user.click(screen.getByRole("option", { name: "5s scan" }));
 
     // Switch to Session Beta before the refresh tick fires.
     await user.click(screen.getByText("Session Beta"));

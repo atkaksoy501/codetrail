@@ -14,6 +14,7 @@ import type {
   RegularFontSize,
   ThemeMode,
 } from "../../shared/uiPreferences";
+import type { NonOffRefreshStrategy } from "../app/autoRefresh";
 import { createMockCodetrailClient } from "../test/mockCodetrailClient";
 import { renderWithClient } from "../test/renderWithClient";
 import { usePaneStateSync } from "./usePaneStateSync";
@@ -29,6 +30,8 @@ function Harness({ logError }: { logError: (context: string, error: unknown) => 
     ["assistant"],
   );
   const [searchProviders, setSearchProviders] = useState<Provider[]>(["claude"]);
+  const [preferredAutoRefreshStrategy, setPreferredAutoRefreshStrategy] =
+    useState<NonOffRefreshStrategy>("watch-5s");
   const [theme, setTheme] = useState<ThemeMode>("light");
   const [monoFontFamily, setMonoFontFamily] = useState<MonoFontFamily>("droid_sans_mono");
   const [regularFontFamily, setRegularFontFamily] = useState<RegularFontFamily>("current");
@@ -73,6 +76,7 @@ function Harness({ logError }: { logError: (context: string, error: unknown) => 
       historyCategories,
       expandedByDefaultCategories,
       searchProviders,
+      preferredAutoRefreshStrategy,
       theme,
       monoFontFamily,
       regularFontFamily,
@@ -99,6 +103,7 @@ function Harness({ logError }: { logError: (context: string, error: unknown) => 
     setHistoryCategories,
     setExpandedByDefaultCategories,
     setSearchProviders,
+    setPreferredAutoRefreshStrategy,
     setTheme,
     setMonoFontFamily,
     setRegularFontFamily,
@@ -144,6 +149,7 @@ describe("usePaneStateSync", () => {
           historyCategories: ["assistant", "user"],
           expandedByDefaultCategories: ["assistant"],
           searchProviders: ["claude"],
+          preferredAutoRefreshStrategy: "scan-10s",
           theme: "dark",
           monoFontFamily: "droid_sans_mono",
           regularFontFamily: "inter",
@@ -188,6 +194,7 @@ describe("usePaneStateSync", () => {
     expect(saveCalls.length).toBeGreaterThan(0);
     const lastSavePayload = saveCalls.at(-1)?.[1];
     expect(lastSavePayload).toMatchObject({
+      preferredAutoRefreshStrategy: "scan-10s",
       systemMessageRegexRules: {
         claude: ["^<command-name>"],
         codex: ["^<environment_context>"],

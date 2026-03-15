@@ -48,22 +48,25 @@ describe("FileWatcherService", () => {
     await service.start();
 
     expect(subscribe).toHaveBeenCalledTimes(2);
-    expect(subscribe).toHaveBeenCalledWith("/root/a", expect.any(Function));
-    expect(subscribe).toHaveBeenCalledWith("/root/b", expect.any(Function));
+    expect(subscribe).toHaveBeenCalledWith("/root/a", expect.any(Function), {});
+    expect(subscribe).toHaveBeenCalledWith("/root/b", expect.any(Function), {});
+    expect(service.getWatchedRoots()).toEqual(["/root/a", "/root/b"]);
     expect(service.isRunning()).toBe(true);
   });
 
   it("skips roots that do not exist", async () => {
-    mockExistsSync.mockImplementation((p) => p !== "/root/missing");
+    mockExistsSync.mockImplementation((path) => path !== "/root/missing");
 
     const { subscribe } = createMockSubscribe();
     const onFilesChanged = vi.fn();
 
-    const service = new FileWatcherService(["/root/exists", "/root/missing"], onFilesChanged, { subscribe });
+    const service = new FileWatcherService(["/root/exists", "/root/missing"], onFilesChanged, {
+      subscribe,
+    });
     await service.start();
 
     expect(subscribe).toHaveBeenCalledTimes(1);
-    expect(subscribe).toHaveBeenCalledWith("/root/exists", expect.any(Function));
+    expect(subscribe).toHaveBeenCalledWith("/root/exists", expect.any(Function), {});
   });
 
   it("unsubscribes all subscriptions on stop", async () => {
@@ -303,10 +306,10 @@ describe("FileWatcherService", () => {
     const onError = vi.fn();
 
     const service = new FileWatcherService(["/root/a"], onFilesChanged, { subscribe, onError });
-    await service.start();
+    await expect(service.start()).rejects.toThrow("No watcher subscriptions were established");
 
     expect(onError).toHaveBeenCalledWith(expect.objectContaining({ message: "subscribe failed" }));
-    expect(service.isRunning()).toBe(true);
+    expect(service.isRunning()).toBe(false);
   });
 
   it("calls onError when onFilesChanged throws", async () => {
@@ -324,5 +327,46 @@ describe("FileWatcherService", () => {
     await vi.advanceTimersByTimeAsync(10);
 
     expect(onError).toHaveBeenCalledWith(processingError);
+  });
+
+  it("passes subscribe options through to the watcher backend", async () => {
+    const { subscribe } = createMockSubscribe();
+    const onFilesChanged = vi.fn();
+
+    const service = new FileWatcherService(["/root/a"], onFilesChanged, {
+      subscribe,
+      subscribeOptions: { backend: "kqueue" },
+    });
+    await service.start();
+
+    expect(subscribe).toHaveBeenCalledWith(
+      "/root/a",
+      expect.any(Function),
+      { backend: "kqueue" },
+    );
+  });
+
+  it("reports pending queue status", async () => {
+    const { subscribe, callbacks } = createMockSubscribe();
+    const onFilesChanged = vi.fn();
+
+    const service = new FileWatcherService(["/root/a"], onFilesChanged, {
+      subscribe,
+      debounceMs: 10,
+    });
+    await service.start();
+
+    expect(service.getStatus()).toEqual({
+      running: true,
+      processing: false,
+      pendingPathCount: 0,
+    });
+
+    callbacks[0]!(null, [{ path: "/root/a/file.jsonl", type: "update" as const }]);
+    expect(service.getStatus()).toEqual({
+      running: true,
+      processing: false,
+      pendingPathCount: 1,
+    });
   });
 });

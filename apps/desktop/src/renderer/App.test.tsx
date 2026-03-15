@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 
 import { App } from "./App";
+import type { PaneStateSnapshot } from "./app/types";
 import { SEARCH_PLACEHOLDERS } from "./lib/searchPlaceholders";
 import { createAppClient, installScrollIntoViewMock } from "./test/appTestFixtures";
 import { renderWithClient } from "./test/renderWithClient";
@@ -114,6 +115,111 @@ describe("App shell", () => {
       expect(screen.getByRole("button", { name: "Indexing in progress" })).toBeDisabled();
     });
     expect(screen.getByRole("button", { name: "Force reindex" })).toBeDisabled();
+  });
+
+  it("restores the last selected auto-refresh mode with Cmd/Ctrl+Shift+R", async () => {
+    const user = userEvent.setup();
+    const client = createAppClient();
+
+    renderWithClient(<App />, client);
+
+    await waitFor(() => {
+      expect(screen.getByText("Project One")).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: "Auto-refresh strategy" }));
+    await user.click(screen.getByRole("option", { name: "10s scan" }));
+
+    expect(
+      screen.getByRole("button", { name: "Auto-refresh strategy" }).textContent,
+    ).toContain("10s scan");
+
+    fireEvent.keyDown(window, { key: "R", metaKey: true, shiftKey: true });
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: "Auto-refresh strategy" }).textContent,
+      ).toContain("Off");
+    });
+
+    fireEvent.keyDown(window, { key: "R", metaKey: true, shiftKey: true });
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: "Auto-refresh strategy" }).textContent,
+      ).toContain("10s scan");
+    });
+  });
+
+  it("hydrates the preferred auto-refresh mode without enabling it on startup", async () => {
+    const client = createAppClient();
+
+    renderWithClient(
+      <App
+        initialPaneState={{
+          projectPaneWidth: 300,
+          sessionPaneWidth: 320,
+          preferredAutoRefreshStrategy: "watch-3s",
+        } as PaneStateSnapshot}
+      />,
+      client,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Project One")).toBeInTheDocument();
+    });
+
+    expect(screen.getByRole("button", { name: "Auto-refresh strategy" }).textContent).toContain(
+      "Off",
+    );
+
+    fireEvent.keyDown(window, { key: "R", metaKey: true, shiftKey: true });
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: "Auto-refresh strategy" }).textContent,
+      ).toContain("Watch (3s debounce)");
+    });
+  });
+
+  it("starts watcher mode with the selected debounce", async () => {
+    const user = userEvent.setup();
+    const client = createAppClient();
+
+    renderWithClient(<App />, client);
+
+    await waitFor(() => {
+      expect(screen.getByText("Project One")).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: "Auto-refresh strategy" }));
+    await user.click(screen.getByRole("option", { name: "Watch (1s debounce)" }));
+
+    await waitFor(() => {
+      expect(client.invoke).toHaveBeenCalledWith("watcher:start", { debounceMs: 1000 });
+    });
+  });
+
+  it("shows the watcher queue count on the auto-refresh control", async () => {
+    const user = userEvent.setup();
+    const client = createAppClient({
+      "watcher:getStatus": () => ({
+        running: true,
+        processing: false,
+        pendingPathCount: 2,
+      }),
+    });
+
+    renderWithClient(<App />, client);
+
+    await waitFor(() => {
+      expect(screen.getByText("Project One")).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: "Auto-refresh strategy" }));
+    await user.click(screen.getByRole("option", { name: "Watch (1s debounce)" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("2")).toBeInTheDocument();
+    });
   });
 
   it("passes per-mode message sort direction to detail requests and toggles on click", async () => {

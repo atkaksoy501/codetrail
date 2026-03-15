@@ -82,7 +82,10 @@ function createRendererClient(handlers: Record<string, ChannelHandler>) {
       return SETTINGS_INFO;
     }
     if (channel === "watcher:start") {
-      return { ok: true, watchedRoots: [] };
+      return { ok: true, watchedRoots: [], backend: "default" };
+    }
+    if (channel === "watcher:getStatus") {
+      return { running: false, processing: false, pendingPathCount: 0 };
     }
     if (channel === "watcher:stop") {
       return { ok: true };

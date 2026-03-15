@@ -1,16 +1,31 @@
 import { existsSync } from "node:fs";
+import { resolve } from "node:path";
 
 import * as watcher from "@parcel/watcher";
 
 const WATCHED_EXTENSIONS = [".jsonl", ".json"];
 const DEFAULT_DEBOUNCE_MS = 5000;
 
-type SubscribeFn = typeof watcher.subscribe;
-
+type SubscribeBackend = watcher.Options["backend"] | "kqueue";
+type SubscribeOptions = Omit<watcher.Options, "backend"> & {
+  backend?: SubscribeBackend;
+};
+type SubscribeFn = (
+  root: string,
+  callback: watcher.SubscribeCallback,
+  options?: SubscribeOptions,
+) => Promise<watcher.AsyncSubscription>;
 export type FileWatcherOptions = {
   debounceMs?: number;
   onError?: (error: unknown) => void;
   subscribe?: SubscribeFn;
+  subscribeOptions?: SubscribeOptions;
+};
+
+export type FileWatcherStatus = {
+  running: boolean;
+  processing: boolean;
+  pendingPathCount: number;
 };
 
 export class FileWatcherService {
@@ -19,8 +34,10 @@ export class FileWatcherService {
   private readonly debounceMs: number;
   private readonly onError: (error: unknown) => void;
   private readonly subscribeFn: SubscribeFn;
+  private readonly subscribeOptions: SubscribeOptions;
 
   private subscriptions: watcher.AsyncSubscription[] = [];
+  private watchedRoots: string[] = [];
   private debounceTimer: ReturnType<typeof setTimeout> | null = null;
   private pendingPaths = new Set<string>();
   private processing = false;
@@ -36,8 +53,10 @@ export class FileWatcherService {
     this.roots = roots;
     this.onFilesChanged = onFilesChanged;
     this.debounceMs = options.debounceMs ?? DEFAULT_DEBOUNCE_MS;
-    this.onError = options.onError ?? ((error) => console.error("FileWatcherService error:", error));
-    this.subscribeFn = options.subscribe ?? watcher.subscribe;
+    this.onError =
+      options.onError ?? ((error) => console.error("FileWatcherService error:", error));
+    this.subscribeFn = options.subscribe ?? (watcher.subscribe as SubscribeFn);
+    this.subscribeOptions = options.subscribeOptions ?? {};
   }
 
   async start(): Promise<void> {
@@ -47,6 +66,7 @@ export class FileWatcherService {
 
     this.running = true;
     this.stopped = false;
+    this.watchedRoots = [];
 
     for (const root of this.roots) {
       if (!existsSync(root)) {
@@ -54,32 +74,45 @@ export class FileWatcherService {
       }
 
       try {
-        const subscription = await this.subscribeFn(root, (err, events) => {
-          if (err) {
-            this.onError(err);
-            return;
-          }
-
-          for (const event of events) {
-            if (WATCHED_EXTENSIONS.some((ext) => event.path.endsWith(ext))) {
-              this.pendingPaths.add(event.path);
+        const watchedRoot = resolve(root);
+        const subscription = await this.subscribeFn(
+          watchedRoot,
+          (err, events) => {
+            if (err) {
+              this.onError(err);
+              return;
             }
-          }
 
-          if (this.pendingPaths.size > 0) {
-            this.scheduleDebouncedFlush();
-          }
-        });
+            for (const event of events) {
+              const eventPath = resolve(event.path);
+              if (WATCHED_EXTENSIONS.some((ext) => eventPath.endsWith(ext))) {
+                this.pendingPaths.add(eventPath);
+              }
+            }
+
+            if (this.pendingPaths.size > 0) {
+              this.scheduleDebouncedFlush();
+            }
+          },
+          this.subscribeOptions,
+        );
 
         // Guard against stop() having been called while subscribeFn was awaited
         if (this.stopped) {
           await subscription.unsubscribe();
         } else {
           this.subscriptions.push(subscription);
+          this.watchedRoots.push(watchedRoot);
         }
       } catch (error) {
         this.onError(error);
       }
+    }
+
+    if (this.subscriptions.length === 0) {
+      this.running = false;
+      this.watchedRoots = [];
+      throw new Error("No watcher subscriptions were established");
     }
   }
 
@@ -112,6 +145,18 @@ export class FileWatcherService {
 
   isRunning(): boolean {
     return this.running;
+  }
+
+  getWatchedRoots(): string[] {
+    return [...this.watchedRoots];
+  }
+
+  getStatus(): FileWatcherStatus {
+    return {
+      running: this.running,
+      processing: this.processing,
+      pendingPathCount: this.pendingPaths.size,
+    };
   }
 
   private scheduleDebouncedFlush(): void {

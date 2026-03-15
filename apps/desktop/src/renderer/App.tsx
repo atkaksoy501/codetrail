@@ -5,14 +5,22 @@ import type { MessageCategory, Provider, SearchMode } from "@codetrail/core";
 import {
   ADVANCED_SYNTAX_ITEMS,
   COMMON_SYNTAX_ITEMS,
-  PROVIDERS,
   SHORTCUT_ITEMS,
 } from "./app/constants";
+import {
+  DEFAULT_PREFERRED_REFRESH_STRATEGY,
+  type RefreshStrategy,
+  type ScanRefreshStrategy,
+  WATCH_STRATEGY_TO_DEBOUNCE_MS,
+  SCAN_STRATEGY_TO_INTERVAL_MS,
+  isScanRefreshStrategy,
+  isWatchRefreshStrategy,
+} from "./app/autoRefresh";
 import type { MainView, PaneStateSnapshot } from "./app/types";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { SettingsView } from "./components/SettingsView";
 import { ShortcutsDialog } from "./components/ShortcutsDialog";
-import { type RefreshStrategy, TopBar } from "./components/TopBar";
+import { TopBar } from "./components/TopBar";
 import { HistoryDetailPane } from "./features/HistoryDetailPane";
 import { HistoryLayout } from "./features/HistoryLayout";
 import { SearchView } from "./features/SearchView";
@@ -23,19 +31,11 @@ import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { isMissingCodetrailClient, useCodetrailClient } from "./lib/codetrailClient";
 import { toErrorMessage, toggleValue } from "./lib/viewUtils";
 
-const STRATEGY_TO_INTERVAL_MS: Record<RefreshStrategy, number> = {
-  off: 0,
-  watch: 0,
-  "5s": 5_000,
-  "10s": 10_000,
-  "30s": 30_000,
-  "1min": 60_000,
-  "5min": 300_000,
-};
-
 // Module-level override for tests — keeps the component API clean
-let _testStrategyIntervalOverrides: Partial<Record<RefreshStrategy, number>> | null = null;
-export function setTestStrategyIntervalOverrides(overrides: Partial<Record<RefreshStrategy, number>> | null): void {
+let _testStrategyIntervalOverrides: Partial<Record<ScanRefreshStrategy, number>> | null = null;
+export function setTestStrategyIntervalOverrides(
+  overrides: Partial<Record<ScanRefreshStrategy, number>> | null,
+): void {
   _testStrategyIntervalOverrides = overrides;
 }
 
@@ -53,7 +53,8 @@ export function App({
   const [advancedSearchEnabled, setAdvancedSearchEnabled] = useState(false);
   const [showReindexConfirm, setShowReindexConfirm] = useState(false);
   const [refreshStrategy, setRefreshStrategy] = useState<RefreshStrategy>("off");
-  const [preferredRefreshStrategy, setPreferredRefreshStrategy] = useState<RefreshStrategy>("watch");
+  const [watcherPendingPathCount, setWatcherPendingPathCount] = useState(0);
+  const [autoRefreshScanInFlight, setAutoRefreshScanInFlight] = useState(false);
   const [searchProviders, setSearchProviders] = useState<Provider[]>(
     initialPaneState?.searchProviders ?? [],
   );
@@ -87,6 +88,8 @@ export function App({
     setHistoryCategories: history.setHistoryCategories,
     logError,
   });
+  const preferredRefreshStrategy =
+    history.preferredAutoRefreshStrategy ?? DEFAULT_PREFERRED_REFRESH_STRATEGY;
 
   useEffect(() => {
     if (mainView !== "settings" || appearance.settingsInfo || appearance.settingsLoading) {
@@ -148,6 +151,38 @@ export function App({
     };
   }, [codetrail, logError, reloadIndexedData]);
 
+  useEffect(() => {
+    if (!isWatchRefreshStrategy(refreshStrategy)) {
+      setWatcherPendingPathCount(0);
+      return;
+    }
+
+    let cancelled = false;
+
+    const syncWatcherStatus = async () => {
+      try {
+        const status = await codetrail.invoke("watcher:getStatus", {});
+        if (!cancelled) {
+          setWatcherPendingPathCount(status.pendingPathCount);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          logError("Watcher status refresh failed", error);
+        }
+      }
+    };
+
+    void syncWatcherStatus();
+    const intervalId = window.setInterval(() => {
+      void syncWatcherStatus();
+    }, 250);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [codetrail, logError, refreshStrategy]);
+
   const focusSessionSearch = useCallback(() => {
     setMainView("history");
     history.focusSessionSearch();
@@ -181,30 +216,48 @@ export function App({
     await handleRefresh(true);
   }, [handleRefresh]);
   const indexing = refreshing || indexingInBackground;
+  const updateRefreshStrategy = useCallback(
+    (nextValue: RefreshStrategy | ((value: RefreshStrategy) => RefreshStrategy)) => {
+      setRefreshStrategy((current) => {
+        const next =
+          typeof nextValue === "function" ? nextValue(current) : nextValue;
+        if (next !== "off") {
+          history.setPreferredAutoRefreshStrategy(next);
+        }
+        return next;
+      });
+    },
+    [history],
+  );
 
   const refreshingRef = useRef(false);
   useEffect(() => {
     refreshingRef.current = indexing;
   }, [indexing]);
 
-  // Periodic polling timer — runs for timed strategies only (watch mode uses the file watcher)
-  const pollingIntervalMs =
-    _testStrategyIntervalOverrides?.[refreshStrategy] ?? STRATEGY_TO_INTERVAL_MS[refreshStrategy] ?? 0;
+  const pollingIntervalMs = isScanRefreshStrategy(refreshStrategy)
+    ? (_testStrategyIntervalOverrides?.[refreshStrategy] ??
+      SCAN_STRATEGY_TO_INTERVAL_MS[refreshStrategy])
+    : 0;
   useEffect(() => {
     if (pollingIntervalMs <= 0) return;
     const id = window.setInterval(() => {
       if (refreshingRef.current) return;
-      void handleRefresh(false);
+      setAutoRefreshScanInFlight(true);
+      void handleRefresh(false).finally(() => {
+        setAutoRefreshScanInFlight(false);
+      });
     }, pollingIntervalMs);
     return () => window.clearInterval(id);
   }, [handleRefresh, pollingIntervalMs]);
 
-  // Start/stop file watcher when strategy changes to/from "watch"
   useEffect(() => {
-    if (refreshStrategy !== "watch") return;
+    if (!isWatchRefreshStrategy(refreshStrategy)) return;
 
     void codetrail
-      .invoke("watcher:start", {})
+      .invoke("watcher:start", {
+        debounceMs: WATCH_STRATEGY_TO_DEBOUNCE_MS[refreshStrategy],
+      })
       .then((result) => {
         if (!result.ok) {
           logError("File watcher started but no roots were watched", new Error("ok=false"));
@@ -220,13 +273,6 @@ export function App({
       });
     };
   }, [codetrail, logError, refreshStrategy]);
-
-  // Track the preferred strategy for toggle behavior
-  useEffect(() => {
-    if (refreshStrategy !== "off") {
-      setPreferredRefreshStrategy(refreshStrategy);
-    }
-  }, [refreshStrategy]);
 
   useKeyboardShortcuts({
     mainView,
@@ -253,8 +299,30 @@ export function App({
     applyZoomAction: appearance.applyZoomAction,
     triggerIncrementalRefresh: () => void handleIncrementalRefresh(),
     togglePeriodicRefresh: () =>
-      setRefreshStrategy((v) => (v !== "off" ? "off" : preferredRefreshStrategy)),
+      updateRefreshStrategy((value) => (value !== "off" ? "off" : preferredRefreshStrategy)),
   });
+
+  const autoRefreshStatusLabel = isWatchRefreshStrategy(refreshStrategy)
+    ? `${watcherPendingPathCount}`
+    : isScanRefreshStrategy(refreshStrategy)
+      ? autoRefreshScanInFlight
+        ? "Refreshing..."
+        : "Auto"
+      : null;
+  const autoRefreshStatusTone = isWatchRefreshStrategy(refreshStrategy)
+    ? ("queued" as const)
+    : isScanRefreshStrategy(refreshStrategy)
+      ? autoRefreshScanInFlight
+        ? ("running" as const)
+        : ("queued" as const)
+      : null;
+  const autoRefreshStatusTooltip = isWatchRefreshStrategy(refreshStrategy)
+    ? "Number of changed files currently queued by the watcher before auto-refresh runs."
+    : isScanRefreshStrategy(refreshStrategy)
+      ? autoRefreshScanInFlight
+        ? "Automatic scan refresh is currently running."
+        : "Automatic scan refresh is enabled and waiting for the next interval."
+      : null;
 
   return (
     <main className="app-shell">
@@ -283,7 +351,10 @@ export function App({
         onIncrementalRefresh={() => void handleIncrementalRefresh()}
         onForceRefresh={() => setShowReindexConfirm(true)}
         refreshStrategy={refreshStrategy}
-        onRefreshStrategyChange={setRefreshStrategy}
+        onRefreshStrategyChange={updateRefreshStrategy}
+        autoRefreshStatusLabel={autoRefreshStatusLabel}
+        autoRefreshStatusTone={autoRefreshStatusTone}
+        autoRefreshStatusTooltip={autoRefreshStatusTooltip}
         onToggleFocus={() => setFocusMode((value) => !value)}
         onToggleHelp={() => setMainView((value) => (value === "help" ? "history" : "help"))}
         onToggleSettings={() =>

@@ -715,7 +715,7 @@ body.platform-macos .titlebar-left {
   gap: 8px;
 }
 
-/* Periodic refresh dropdown */
+/* Auto-refresh dropdown */
 .tb-dropdown {
   position: relative;
   -webkit-app-region: no-drag;
@@ -727,6 +727,30 @@ body.platform-macos .titlebar-left {
 
 .tb-dropdown-trigger .toolbar-icon {
   pointer-events: none;
+}
+
+.tb-refresh-status {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 2px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.tb-refresh-status-queued {
+  background: var(--accent-orange-dim);
+  color: var(--accent-orange);
+  border: 1px solid var(--accent-orange-border);
+}
+
+.tb-refresh-status-running {
+  background: var(--accent-blue-dim);
+  color: var(--accent-blue);
+  border: 1px solid var(--accent-blue-border);
 }
 
 .tb-dropdown-menu {

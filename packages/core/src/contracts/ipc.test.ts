@@ -207,6 +207,7 @@ const channelExamples: Record<IpcChannel, ChannelExample> = {
       projectAllSortDirection: "desc",
       sessionPage: 0,
       sessionScrollTop: 0,
+      preferredAutoRefreshStrategy: "watch-5s",
       systemMessageRegexRules: {
         claude: ["^<command-name>"],
         codex: ["^<environment_context>"],
@@ -226,8 +227,12 @@ const channelExamples: Record<IpcChannel, ChannelExample> = {
     response: { percent: 100 },
   },
   "watcher:start": {
+    request: { debounceMs: 3000 },
+    response: { ok: true, watchedRoots: ["/home/user/.claude/projects"], backend: "default" },
+  },
+  "watcher:getStatus": {
     request: {},
-    response: { ok: true, watchedRoots: ["/home/user/.claude/projects"] },
+    response: { running: true, processing: false, pendingPathCount: 3 },
   },
   "watcher:stop": {
     request: {},

@@ -16,6 +16,7 @@ import type {
   RegularFontSize,
   ThemeMode,
 } from "../../shared/uiPreferences";
+import type { NonOffRefreshStrategy } from "../app/autoRefresh";
 import { createHistorySelection } from "../app/historySelection";
 import type { HistorySelection } from "../app/types";
 import { useCodetrailClient } from "../lib/codetrailClient";
@@ -47,6 +48,7 @@ export function usePaneStateSync(args: {
   setHistoryCategories: Dispatch<SetStateAction<MessageCategory[]>>;
   setExpandedByDefaultCategories: Dispatch<SetStateAction<MessageCategory[]>>;
   setSearchProviders: Dispatch<SetStateAction<Provider[]>>;
+  setPreferredAutoRefreshStrategy: Dispatch<SetStateAction<NonOffRefreshStrategy>>;
   setTheme: Dispatch<SetStateAction<ThemeMode>>;
   setMonoFontFamily: Dispatch<SetStateAction<MonoFontFamily>>;
   setRegularFontFamily: Dispatch<SetStateAction<RegularFontFamily>>;
@@ -80,6 +82,7 @@ export function usePaneStateSync(args: {
     setHistoryCategories,
     setExpandedByDefaultCategories,
     setSearchProviders,
+    setPreferredAutoRefreshStrategy,
     setTheme,
     setMonoFontFamily,
     setRegularFontFamily,
@@ -147,6 +150,7 @@ export function usePaneStateSync(args: {
           historyCategories: setHistoryCategories,
           expandedByDefaultCategories: setExpandedByDefaultCategories,
           searchProviders: setSearchProviders,
+          preferredAutoRefreshStrategy: setPreferredAutoRefreshStrategy,
           theme: setTheme,
           monoFontFamily: setMonoFontFamily,
           regularFontFamily: setRegularFontFamily,
@@ -235,6 +239,7 @@ export function usePaneStateSync(args: {
     setProjectPaneCollapsed,
     setExpandedByDefaultCategories,
     setSearchProviders,
+    setPreferredAutoRefreshStrategy,
     setSelectedProjectId,
     setSelectedSessionId,
     setHistoryMode,

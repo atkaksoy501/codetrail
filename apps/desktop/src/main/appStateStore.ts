@@ -72,6 +72,16 @@ const MONO_FONT_SIZE_VALUES: MonoFontSize[] = [...UI_MONO_FONT_SIZE_VALUES];
 const REGULAR_FONT_SIZE_VALUES: RegularFontSize[] = [...UI_REGULAR_FONT_SIZE_VALUES];
 const HISTORY_MODE_VALUES = ["session", "bookmarks", "project_all"] as const;
 const SORT_DIRECTION_VALUES = ["asc", "desc"] as const;
+const AUTO_REFRESH_STRATEGY_VALUES = [
+  "watch-1s",
+  "watch-3s",
+  "watch-5s",
+  "scan-5s",
+  "scan-10s",
+  "scan-30s",
+  "scan-1min",
+  "scan-5min",
+] as const;
 const DEFAULT_FILE_SYSTEM: AppStateStoreFileSystem = {
   existsSync: (path) => existsSync(path),
   mkdirSync: (path, options) => mkdirSync(path, options),
@@ -269,6 +279,10 @@ function sanitizePaneState(value: unknown): PaneState | null {
     SCROLL_TOP_MIN,
     SCROLL_TOP_MAX,
   );
+  const preferredAutoRefreshStrategy = sanitizeStringValue(
+    record.preferredAutoRefreshStrategy,
+    AUTO_REFRESH_STRATEGY_VALUES,
+  );
   const systemMessageRegexRules = sanitizeSystemMessageRegexRules(record.systemMessageRegexRules);
 
   return {
@@ -296,6 +310,7 @@ function sanitizePaneState(value: unknown): PaneState | null {
     ...(projectAllSortDirection ? { projectAllSortDirection } : {}),
     ...(sessionPage === null ? {} : { sessionPage }),
     ...(sessionScrollTop === null ? {} : { sessionScrollTop }),
+    ...(preferredAutoRefreshStrategy ? { preferredAutoRefreshStrategy } : {}),
     ...(systemMessageRegexRules ? { systemMessageRegexRules } : {}),
   };
 }

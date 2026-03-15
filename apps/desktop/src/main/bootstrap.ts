@@ -17,7 +17,7 @@ import {
 import type { AppStateStore } from "./appStateStore";
 import { initializeBookmarkStore, resolveBookmarksDbPath } from "./data/bookmarkStore";
 import { type QueryService, createQueryService } from "./data/queryService";
-import { FileWatcherService } from "./fileWatcherService";
+import { type FileWatcherOptions, FileWatcherService } from "./fileWatcherService";
 import { WorkerIndexingRunner } from "./indexingRunner";
 import { registerIpcHandlers } from "./ipc";
 
@@ -101,21 +101,6 @@ export async function bootstrapMainProcess(
     geminiHistoryRoot,
     DEFAULT_DISCOVERY_CONFIG.cursorRoot,
   ];
-  if (activeFileWatcher) {
-    await activeFileWatcher.stop();
-  }
-  const fileWatcher = new FileWatcherService(watcherRoots, async (changedPaths) => {
-    invalidateAllowedRootsCache();
-    await indexingRunner.enqueueChangedFiles(changedPaths).catch((error: unknown) => {
-      if (options.onBackgroundError) {
-        options.onBackgroundError("watcher-triggered indexing failed", error);
-        return;
-      }
-      console.error("[codetrail] watcher-triggered indexing failed", error);
-    });
-  });
-  activeFileWatcher = fileWatcher;
-
   registerIpcHandlers(ipcMain, {
     "app:getHealth": () => ({
       status: "ok",
@@ -225,9 +210,71 @@ export async function bootstrapMainProcess(
         percent: clampedPercent,
       };
     },
-    "watcher:start": async () => {
-      try {
+    "watcher:start": async (payload) => {
+      if (activeFileWatcher) {
+        await activeFileWatcher.stop();
+        activeFileWatcher = null;
+      }
+
+      const createFileWatcher = (watcherOptions: FileWatcherOptions) =>
+        new FileWatcherService(
+          watcherRoots,
+          async (changedPaths) => {
+            invalidateAllowedRootsCache();
+            await indexingRunner.enqueueChangedFiles(changedPaths).catch((error: unknown) => {
+              if (options.onBackgroundError) {
+                options.onBackgroundError("watcher-triggered indexing failed", error);
+                return;
+              }
+              console.error("[codetrail] watcher-triggered indexing failed", error);
+            });
+          },
+          watcherOptions,
+        );
+
+      const startWatcher = async (
+        watcherOptions: FileWatcherOptions,
+        backend: "default" | "kqueue",
+      ) => {
+        const fileWatcher = createFileWatcher({
+          ...watcherOptions,
+          debounceMs: payload.debounceMs,
+        });
         await fileWatcher.start();
+        activeFileWatcher = fileWatcher;
+        return {
+          backend,
+          watchedRoots: fileWatcher.getWatchedRoots(),
+        };
+      };
+
+      try {
+        let startedWatcher: {
+          backend: "default" | "kqueue";
+          watchedRoots: string[];
+        };
+
+        if (process.platform === "darwin") {
+          try {
+            // Codex transcript appends on this macOS setup were missed by both Parcel's default
+            // FSEvents backend and a direct CoreServices FSEvents probe, while Parcel's kqueue
+            // backend consistently observed them. We force kqueue here for correctness and keep
+            // the default backend only as a fallback if kqueue subscription setup fails.
+            startedWatcher = await startWatcher(
+              { subscribeOptions: { backend: "kqueue" } },
+              "kqueue",
+            );
+          } catch (error) {
+            console.warn(
+              "[codetrail] Failed to start kqueue watcher on macOS, falling back to default backend",
+              error,
+            );
+            startedWatcher = await startWatcher({}, "default");
+          }
+        } else {
+          startedWatcher = await startWatcher({}, "default");
+        }
+
         // Run one full incremental scan to bring the DB up to date before relying on events
         void indexingRunner.enqueue({ force: false }).catch((error: unknown) => {
           if (options.onBackgroundError) {
@@ -236,13 +283,23 @@ export async function bootstrapMainProcess(
           }
           console.error("[codetrail] watcher initial scan failed", error);
         });
-        return { ok: true, watchedRoots: watcherRoots };
+        return {
+          ok: true,
+          watchedRoots: startedWatcher.watchedRoots,
+          backend: startedWatcher.backend,
+        };
       } catch {
-        return { ok: false, watchedRoots: [] };
+        return { ok: false, watchedRoots: [], backend: "default" as const };
       }
     },
+    "watcher:getStatus": async () => {
+      return activeFileWatcher?.getStatus() ?? { running: false, processing: false, pendingPathCount: 0 };
+    },
     "watcher:stop": async () => {
-      await fileWatcher.stop();
+      if (activeFileWatcher) {
+        await activeFileWatcher.stop();
+        activeFileWatcher = null;
+      }
       return { ok: true };
     },
   });

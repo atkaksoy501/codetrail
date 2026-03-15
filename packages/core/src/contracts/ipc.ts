@@ -130,6 +130,16 @@ const themeModeSchema = z.enum([
 ]);
 const sortDirectionSchema = z.enum(["asc", "desc"]);
 const searchModeSchema = z.enum(["simple", "advanced"]);
+const preferredAutoRefreshStrategySchema = z.enum([
+  "watch-1s",
+  "watch-3s",
+  "watch-5s",
+  "scan-5s",
+  "scan-10s",
+  "scan-30s",
+  "scan-1min",
+  "scan-5min",
+]);
 const systemMessageRegexRulesSchema = z.object({
   claude: z.array(z.string()),
   codex: z.array(z.string()),
@@ -165,6 +175,7 @@ export const paneStateBaseSchema = z.object({
   projectAllSortDirection: sortDirectionSchema,
   sessionPage: z.number().int().nonnegative(),
   sessionScrollTop: z.number().int().nonnegative(),
+  preferredAutoRefreshStrategy: preferredAutoRefreshStrategySchema,
   systemMessageRegexRules: systemMessageRegexRulesSchema,
 });
 
@@ -383,10 +394,21 @@ export const ipcContractSchemas = {
     response: uiZoomResponseSchema,
   },
   "watcher:start": {
-    request: z.object({}),
+    request: z.object({
+      debounceMs: z.union([z.literal(1000), z.literal(3000), z.literal(5000)]),
+    }),
     response: z.object({
       ok: z.boolean(),
+      backend: z.enum(["default", "kqueue"]),
       watchedRoots: z.array(z.string()),
+    }),
+  },
+  "watcher:getStatus": {
+    request: z.object({}),
+    response: z.object({
+      running: z.boolean(),
+      processing: z.boolean(),
+      pendingPathCount: z.number().int().nonnegative(),
     }),
   },
   "watcher:stop": {

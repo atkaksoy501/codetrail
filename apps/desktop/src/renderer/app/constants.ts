@@ -118,7 +118,7 @@ export const SHORTCUT_ITEMS = [
   {
     group: "Refresh",
     shortcut: "Cmd/Ctrl+Shift+R",
-    description: "Toggle periodic auto-refresh",
+    description: "Toggle auto-refresh",
   },
   { group: "System", shortcut: "Cmd/Ctrl++", description: "Zoom in" },
   { group: "System", shortcut: "Cmd/Ctrl+-", description: "Zoom out" },

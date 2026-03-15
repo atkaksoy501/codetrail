@@ -23,6 +23,10 @@ import {
   PROVIDERS,
 } from "../app/constants";
 import {
+  DEFAULT_PREFERRED_REFRESH_STRATEGY,
+  type NonOffRefreshStrategy,
+} from "../app/autoRefresh";
+import {
   createHistorySelection,
   createHistorySelectionFromPaneState,
   setHistorySelectionProjectId,
@@ -181,6 +185,10 @@ export function useHistoryController({
   );
   const [sessionQueryInput, setSessionQueryInput] = useState("");
   const [bookmarkQueryInput, setBookmarkQueryInput] = useState("");
+  const [preferredAutoRefreshStrategy, setPreferredAutoRefreshStrategy] =
+    useState<NonOffRefreshStrategy>(
+      initialPaneState?.preferredAutoRefreshStrategy ?? DEFAULT_PREFERRED_REFRESH_STRATEGY,
+    );
   const [historyCategories, setHistoryCategories] = useState<MessageCategory[]>(
     initialPaneState?.historyCategories ?? [...DEFAULT_MESSAGE_CATEGORIES],
   );
@@ -304,6 +312,7 @@ export function useHistoryController({
       historyCategories,
       expandedByDefaultCategories,
       searchProviders,
+      preferredAutoRefreshStrategy,
       theme: appearance.theme,
       monoFontFamily: appearance.monoFontFamily,
       regularFontFamily: appearance.regularFontFamily,
@@ -340,6 +349,7 @@ export function useHistoryController({
       projectProviders,
       projectSortDirection,
       searchProviders,
+      preferredAutoRefreshStrategy,
       selectedProjectId,
       selectedSessionId,
       sessionPage,
@@ -395,6 +405,7 @@ export function useHistoryController({
     setHistoryCategories,
     setExpandedByDefaultCategories,
     setSearchProviders,
+    setPreferredAutoRefreshStrategy,
     setTheme: appearance.setTheme,
     setMonoFontFamily: appearance.setMonoFontFamily,
     setRegularFontFamily: appearance.setRegularFontFamily,
@@ -819,6 +830,8 @@ export function useHistoryController({
     setExpandedByDefaultCategories,
     systemMessageRegexRules,
     setSystemMessageRegexRules,
+    preferredAutoRefreshStrategy,
+    setPreferredAutoRefreshStrategy,
     projectPaneCollapsed,
     setProjectPaneCollapsed,
     sessionPaneCollapsed,

@@ -1,26 +1,24 @@
 import { Fragment, type Dispatch, type SetStateAction, useEffect, useRef, useState } from "react";
 
 import { THEME_GROUPS, getThemeLabel, type ThemeMode } from "../../shared/uiPreferences";
+import {
+  REFRESH_STRATEGY_OPTIONS,
+  type RefreshStrategy,
+} from "../app/autoRefresh";
 import { ToolbarIcon } from "./ToolbarIcon";
-
-export type RefreshStrategy = "off" | "watch" | "5s" | "10s" | "30s" | "1min" | "5min";
-
-const REFRESH_STRATEGY_OPTIONS: { label: string; value: RefreshStrategy }[] = [
-  { label: "Off", value: "off" },
-  { label: "Watch", value: "watch" },
-  { label: "5s", value: "5s" },
-  { label: "10s", value: "10s" },
-  { label: "30s", value: "30s" },
-  { label: "1min", value: "1min" },
-  { label: "5min", value: "5min" },
-];
 
 function RefreshStrategyDropdown({
   value,
   onChange,
+  statusLabel,
+  statusTone,
+  statusTooltip,
 }: {
   value: RefreshStrategy;
   onChange: Dispatch<SetStateAction<RefreshStrategy>>;
+  statusLabel: string | null;
+  statusTone: "queued" | "running" | null;
+  statusTooltip: string | null;
 }) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -50,6 +48,15 @@ function RefreshStrategyDropdown({
       >
         <ToolbarIcon name="refresh" />
         {selectedLabel}
+        {statusLabel ? (
+          <span
+            className={`tb-refresh-status tb-refresh-status-${statusTone ?? "queued"}`}
+            aria-live="polite"
+            title={statusTooltip ?? undefined}
+          >
+            {statusLabel}
+          </span>
+        ) : null}
       </button>
       {open ? (
         <div className="tb-dropdown-menu" role="listbox" aria-label="Auto-refresh strategy">
@@ -160,6 +167,9 @@ export function TopBar({
   onForceRefresh,
   refreshStrategy,
   onRefreshStrategyChange,
+  autoRefreshStatusLabel,
+  autoRefreshStatusTone,
+  autoRefreshStatusTooltip,
   onToggleFocus,
   onToggleHelp,
   onToggleSettings,
@@ -175,6 +185,9 @@ export function TopBar({
   onForceRefresh: () => void;
   refreshStrategy: RefreshStrategy;
   onRefreshStrategyChange: Dispatch<SetStateAction<RefreshStrategy>>;
+  autoRefreshStatusLabel: string | null;
+  autoRefreshStatusTone: "queued" | "running" | null;
+  autoRefreshStatusTooltip: string | null;
   onToggleFocus: () => void;
   onToggleHelp: () => void;
   onToggleSettings: () => void;
@@ -215,6 +228,9 @@ export function TopBar({
         <RefreshStrategyDropdown
           value={refreshStrategy}
           onChange={onRefreshStrategyChange}
+          statusLabel={autoRefreshStatusLabel}
+          statusTone={autoRefreshStatusTone}
+          statusTooltip={autoRefreshStatusTooltip}
         />
         <button
           type="button"

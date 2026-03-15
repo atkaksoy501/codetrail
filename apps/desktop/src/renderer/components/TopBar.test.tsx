@@ -30,6 +30,9 @@ describe("TopBar", () => {
         onForceRefresh={onForceRefresh}
         refreshStrategy="off"
         onRefreshStrategyChange={vi.fn()}
+        autoRefreshStatusLabel={null}
+        autoRefreshStatusTone={null}
+        autoRefreshStatusTooltip={null}
         onToggleFocus={onToggleFocus}
         onToggleHelp={onToggleHelp}
         onToggleSettings={onToggleSettings}
@@ -77,6 +80,9 @@ describe("TopBar", () => {
         onForceRefresh={vi.fn()}
         refreshStrategy="off"
         onRefreshStrategyChange={vi.fn()}
+        autoRefreshStatusLabel={null}
+        autoRefreshStatusTone={null}
+        autoRefreshStatusTooltip={null}
         onToggleFocus={vi.fn()}
         onToggleHelp={vi.fn()}
         onToggleSettings={vi.fn()}
@@ -96,5 +102,46 @@ describe("TopBar", () => {
     expect(screen.getByRole("button", { name: "Exit focus mode" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Choose theme" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Open settings" })).toBeInTheDocument();
+  });
+
+  it("shows the mixed watch and scan auto-refresh options", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <TopBar
+        mainView="history"
+        theme="light"
+        indexing={false}
+        focusMode={false}
+        focusDisabled={false}
+        onToggleSearchView={vi.fn()}
+        onThemeChange={vi.fn()}
+        onIncrementalRefresh={vi.fn()}
+        onForceRefresh={vi.fn()}
+        refreshStrategy="watch-5s"
+        onRefreshStrategyChange={vi.fn()}
+        autoRefreshStatusLabel="3"
+        autoRefreshStatusTone="queued"
+        autoRefreshStatusTooltip="Number of changed files currently queued by the watcher before auto-refresh runs."
+        onToggleFocus={vi.fn()}
+        onToggleHelp={vi.fn()}
+        onToggleSettings={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Auto-refresh strategy" }));
+
+    expect(screen.getByRole("option", { name: "Watch (1s debounce)" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Watch (3s debounce)" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Watch (5s debounce)" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "5s scan" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "10s scan" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "30s scan" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "1 min scan" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "5 min scan" })).toBeInTheDocument();
+    expect(screen.getByText("3")).toHaveAttribute(
+      "title",
+      "Number of changed files currently queued by the watcher before auto-refresh runs.",
+    );
   });
 });

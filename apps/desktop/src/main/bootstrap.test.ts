@@ -26,7 +26,19 @@ const {
   mockToggleBookmark,
   mockRunSearchQuery,
   mockQueryServiceClose,
-} = vi.hoisted(() => ({
+  mockFileWatcherService,
+  mockFileWatcherInstances,
+} = vi.hoisted(() => {
+  const fileWatcherInstances: Array<{
+    roots: string[];
+    options: Record<string, unknown>;
+    start: ReturnType<typeof vi.fn>;
+    stop: ReturnType<typeof vi.fn>;
+    getWatchedRoots: ReturnType<typeof vi.fn>;
+    getStatus: ReturnType<typeof vi.fn>;
+  }> = [];
+
+  return {
   mockGetPath: vi.fn((key: string) => {
     if (key === "home") {
       return "/Users/test";
@@ -82,7 +94,21 @@ const {
   mockToggleBookmark: vi.fn((payload) => ({ bookmarked: payload.bookmarked })),
   mockRunSearchQuery: vi.fn((payload) => ({ items: [{ id: "m1", ...payload }], total: 1 })),
   mockQueryServiceClose: vi.fn(),
-}));
+  mockFileWatcherInstances: fileWatcherInstances,
+  mockFileWatcherService: vi.fn((roots: string[], _onFilesChanged: unknown, options: Record<string, unknown> = {}) => {
+    const instance = {
+      roots,
+      options,
+      start: vi.fn(async () => {}),
+      stop: vi.fn(async () => {}),
+      getWatchedRoots: vi.fn(() => roots),
+      getStatus: vi.fn(() => ({ running: false, processing: false, pendingPathCount: 0 })),
+    };
+    fileWatcherInstances.push(instance);
+    return instance;
+  }),
+  };
+});
 
 vi.mock("@codetrail/core", async () => {
   const actual = await vi.importActual<typeof import("@codetrail/core")>("@codetrail/core");
@@ -117,6 +143,10 @@ vi.mock("./indexingRunner", () => ({
 
 vi.mock("./ipc", () => ({
   registerIpcHandlers: mockRegisterIpcHandlers,
+}));
+
+vi.mock("./fileWatcherService", () => ({
+  FileWatcherService: mockFileWatcherService,
 }));
 
 vi.mock("node:fs/promises", () => ({
@@ -167,6 +197,7 @@ describe("bootstrapMainProcess", () => {
     monoFontSize: "13px",
     regularFontSize: "14px",
     useMonospaceForAllMessages: true,
+    preferredAutoRefreshStrategy: "watch-5s",
     selectedProjectId: "project-1",
     selectedSessionId: "session-1",
     historyMode: "bookmarks",
@@ -189,6 +220,7 @@ describe("bootstrapMainProcess", () => {
     handlers = {};
     setPaneState = vi.fn();
     vi.clearAllMocks();
+    mockFileWatcherInstances.length = 0;
     void shutdownMainProcess();
 
     mockWorkerIndexingRunner.mockImplementation(() => ({
@@ -421,6 +453,7 @@ describe("bootstrapMainProcess", () => {
       monoFontSize: "13px",
       regularFontSize: "14px",
       useMonospaceForAllMessages: true,
+      preferredAutoRefreshStrategy: "watch-5s",
       selectedProjectId: "project-1",
       selectedSessionId: "session-1",
       historyMode: "bookmarks",
@@ -437,7 +470,7 @@ describe("bootstrapMainProcess", () => {
         gemini: [],
         cursor: [],
       },
-      });
+    });
 
     const updated = {
       ...paneState,
@@ -448,6 +481,137 @@ describe("bootstrapMainProcess", () => {
     };
     expect(getRequiredHandler(handlers, "ui:setState")(updated)).toEqual({ ok: true });
     expect(setPaneState).toHaveBeenCalledWith(updated);
+  });
+
+  it("starts macOS watchers with kqueue and runs a catch-up incremental scan after startup", async () => {
+    const originalPlatform = process.platform;
+    Object.defineProperty(process, "platform", { value: "darwin" });
+
+    try {
+      await bootstrapMainProcess({ runStartupIndexing: false });
+
+      const startWatcher = getRequiredHandler(handlers, "watcher:start");
+      const result = (await startWatcher({ debounceMs: 3000 })) as {
+        ok: boolean;
+        watchedRoots: string[];
+        backend: string;
+      };
+
+      expect(result).toEqual({
+        ok: true,
+        watchedRoots: ["/claude/root", "/codex/root", "/gemini/root", "/Users/test/.gemini/history", "/cursor/root"],
+        backend: "kqueue",
+      });
+      expect(mockFileWatcherService).toHaveBeenCalledWith(
+        ["/claude/root", "/codex/root", "/gemini/root", "/Users/test/.gemini/history", "/cursor/root"],
+        expect.any(Function),
+        expect.objectContaining({
+          debounceMs: 3000,
+          subscribeOptions: { backend: "kqueue" },
+        }),
+      );
+      expect(mockFileWatcherInstances[0]?.start).toHaveBeenCalledTimes(1);
+      expect(mockEnqueue).toHaveBeenCalledWith({ force: false });
+    } finally {
+      Object.defineProperty(process, "platform", { value: originalPlatform });
+    }
+  });
+
+  it("falls back to the default watcher backend when kqueue startup fails on macOS", async () => {
+    const originalPlatform = process.platform;
+    const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    Object.defineProperty(process, "platform", { value: "darwin" });
+
+    try {
+      await bootstrapMainProcess({ runStartupIndexing: false });
+      mockFileWatcherService
+        .mockImplementationOnce((roots: string[], _onFilesChanged: unknown, options: Record<string, unknown> = {}) => {
+          const instance = {
+            roots,
+            options,
+            start: vi.fn(async () => {
+              throw new Error("kqueue unavailable");
+            }),
+            stop: vi.fn(async () => {}),
+            getWatchedRoots: vi.fn(() => roots),
+            getStatus: vi.fn(() => ({ running: false, processing: false, pendingPathCount: 0 })),
+          };
+          mockFileWatcherInstances.push(instance);
+          return instance;
+        })
+        .mockImplementationOnce((roots: string[], _onFilesChanged: unknown, options: Record<string, unknown> = {}) => {
+          const instance = {
+            roots,
+            options,
+            start: vi.fn(async () => {}),
+            stop: vi.fn(async () => {}),
+            getWatchedRoots: vi.fn(() => roots),
+            getStatus: vi.fn(() => ({ running: false, processing: false, pendingPathCount: 0 })),
+          };
+          mockFileWatcherInstances.push(instance);
+          return instance;
+        });
+
+      const startWatcher = getRequiredHandler(handlers, "watcher:start");
+      const result = (await startWatcher({ debounceMs: 1000 })) as {
+        ok: boolean;
+        watchedRoots: string[];
+        backend: string;
+      };
+
+      expect(result.backend).toBe("default");
+      expect(mockFileWatcherService).toHaveBeenNthCalledWith(
+        1,
+        ["/claude/root", "/codex/root", "/gemini/root", "/Users/test/.gemini/history", "/cursor/root"],
+        expect.any(Function),
+        expect.objectContaining({
+          debounceMs: 1000,
+          subscribeOptions: { backend: "kqueue" },
+        }),
+      );
+      expect(mockFileWatcherService).toHaveBeenNthCalledWith(
+        2,
+        ["/claude/root", "/codex/root", "/gemini/root", "/Users/test/.gemini/history", "/cursor/root"],
+        expect.any(Function),
+        expect.objectContaining({
+          debounceMs: 1000,
+        }),
+      );
+      expect(consoleWarnSpy).toHaveBeenCalledWith(
+        "[codetrail] Failed to start kqueue watcher on macOS, falling back to default backend",
+        expect.any(Error),
+      );
+    } finally {
+      consoleWarnSpy.mockRestore();
+      Object.defineProperty(process, "platform", { value: originalPlatform });
+    }
+  });
+
+  it("reports watcher queue status through IPC", async () => {
+    await bootstrapMainProcess({ runStartupIndexing: false });
+
+    await expect(getRequiredHandler(handlers, "watcher:getStatus")({})).resolves.toEqual({
+      running: false,
+      processing: false,
+      pendingPathCount: 0,
+    });
+
+    await getRequiredHandler(handlers, "watcher:start")({ debounceMs: 5000 });
+    const firstWatcher = mockFileWatcherInstances[0];
+    if (!firstWatcher) {
+      throw new Error("Expected watcher instance");
+    }
+    firstWatcher.getStatus = vi.fn(() => ({
+      running: true,
+      processing: false,
+      pendingPathCount: 2,
+    }));
+
+    await expect(getRequiredHandler(handlers, "watcher:getStatus")({})).resolves.toEqual({
+      running: true,
+      processing: false,
+      pendingPathCount: 2,
+    });
   });
 
   it("handles zoom get/in/out/reset and explicit percent actions", async () => {

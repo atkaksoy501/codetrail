@@ -122,7 +122,8 @@ describe("registerIpcHandlers", () => {
         "ui:setZoom": () => ({
           percent: 100,
         }),
-        "watcher:start": () => ({ ok: true, watchedRoots: [] }),
+        "watcher:start": () => ({ ok: true, watchedRoots: [], backend: "default" }),
+        "watcher:getStatus": () => ({ running: false, processing: false, pendingPathCount: 0 }),
         "watcher:stop": () => ({ ok: true }),
       },
     );
@@ -236,7 +237,8 @@ describe("registerIpcHandlers", () => {
         "ui:setState": () => ({ ok: true }),
         "ui:getZoom": () => ({ percent: 100 }),
         "ui:setZoom": () => ({ percent: 0 }) as never,
-        "watcher:start": () => ({ ok: true, watchedRoots: [] }),
+        "watcher:start": () => ({ ok: true, watchedRoots: [], backend: "default" }),
+        "watcher:getStatus": () => ({ running: false, processing: false, pendingPathCount: 0 }),
         "watcher:stop": () => ({ ok: true }),
       },
     );
