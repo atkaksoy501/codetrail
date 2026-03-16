@@ -230,7 +230,7 @@ describe("FileWatcherService", () => {
     const { subscribe, callbacks } = createMockSubscribe();
     let finishProcessing: (() => void) | null = null;
     const onFilesChanged = vi.fn(
-      (_paths: string[]) =>
+      (_batch: FileWatcherBatch) =>
         new Promise<void>((resolve) => {
           finishProcessing = () => resolve();
         }),
@@ -317,7 +317,7 @@ describe("FileWatcherService", () => {
     const { subscribe, callbacks } = createMockSubscribe();
     let finishProcessing: (() => void) | null = null;
     const onFilesChanged = vi.fn(
-      (_paths: string[]) =>
+      (_batch: FileWatcherBatch) =>
         new Promise<void>((resolve) => {
           finishProcessing = () => resolve();
         }),
@@ -384,7 +384,7 @@ describe("FileWatcherService", () => {
   it("calls onError when onFilesChanged throws", async () => {
     const { subscribe, callbacks } = createMockSubscribe();
     const processingError = new Error("processing failed");
-    const onFilesChanged = vi.fn(async (_paths: string[]) => {
+    const onFilesChanged = vi.fn(async (_batch: FileWatcherBatch) => {
       throw processingError;
     });
     const onError = vi.fn();

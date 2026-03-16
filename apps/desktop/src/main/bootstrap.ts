@@ -24,6 +24,7 @@ import {
 } from "./fileWatcherService";
 import { WorkerIndexingRunner } from "./indexingRunner";
 import { registerIpcHandlers } from "./ipc";
+import { WatchStatsStore } from "./watchStatsStore";
 
 const MIN_ZOOM_PERCENT = 60;
 const MAX_ZOOM_PERCENT = 175;
@@ -64,10 +65,12 @@ export async function bootstrapMainProcess(
 
   const dbBootstrap = initializeDatabase(dbPath);
   initializeBookmarkStore(bookmarksDbPath);
+  const watchStatsStore = new WatchStatsStore();
   const indexingRunner = new WorkerIndexingRunner(dbPath, {
     bookmarksDbPath,
     getSystemMessageRegexRules: () =>
       options.appStateStore?.getPaneState()?.systemMessageRegexRules,
+    onJobSettled: (event) => watchStatsStore.recordJobSettled(event),
     ...(options.onIndexingFileIssue ? { onFileIssue: options.onIndexingFileIssue } : {}),
     ...(options.onIndexingNotice ? { onNotice: options.onIndexingNotice } : {}),
   });
@@ -132,7 +135,12 @@ export async function bootstrapMainProcess(
     }),
     "indexer:refresh": async (payload) => {
       invalidateAllowedRootsCache();
-      const job = await indexingRunner.enqueue({ force: payload.force });
+      const job = await indexingRunner.enqueue(
+        { force: payload.force },
+        {
+          source: payload.force ? "manual_force_reindex" : "manual_incremental",
+        },
+      );
       return { jobId: job.jobId };
     },
     "indexer:getStatus": () => indexingRunner.getStatus(),
@@ -225,9 +233,18 @@ export async function bootstrapMainProcess(
           watcherRoots,
           async (batch: FileWatcherBatch) => {
             invalidateAllowedRootsCache();
+            watchStatsStore.recordWatcherTrigger({
+              changedPathCount: batch.changedPaths.length,
+              requiresFullScan: batch.requiresFullScan,
+            });
             const enqueuePromise = batch.requiresFullScan
-              ? indexingRunner.enqueue({ force: false })
-              : indexingRunner.enqueueChangedFiles(batch.changedPaths);
+              ? indexingRunner.enqueue(
+                  { force: false },
+                  { source: "watch_fallback_incremental" },
+                )
+              : indexingRunner.enqueueChangedFiles(batch.changedPaths, {
+                  source: "watch_targeted",
+                });
             await enqueuePromise.catch((error: unknown) => {
               if (options.onBackgroundError) {
                 options.onBackgroundError("watcher-triggered indexing failed", error, {
@@ -252,6 +269,10 @@ export async function bootstrapMainProcess(
         });
         await fileWatcher.start();
         activeFileWatcher = fileWatcher;
+        watchStatsStore.recordWatcherStart({
+          backend,
+          watchedRootCount: fileWatcher.getWatchedRoots().length,
+        });
         return {
           backend,
           watchedRoots: fileWatcher.getWatchedRoots(),
@@ -288,13 +309,15 @@ export async function bootstrapMainProcess(
         }
 
         // Run one full incremental scan to bring the DB up to date before relying on events
-        void indexingRunner.enqueue({ force: false }).catch((error: unknown) => {
-          if (options.onBackgroundError) {
-            options.onBackgroundError("watcher initial scan failed", error);
-            return;
-          }
-          console.error("[codetrail] watcher initial scan failed", error);
-        });
+        void indexingRunner
+          .enqueue({ force: false }, { source: "watch_initial_scan" })
+          .catch((error: unknown) => {
+            if (options.onBackgroundError) {
+              options.onBackgroundError("watcher initial scan failed", error);
+              return;
+            }
+            console.error("[codetrail] watcher initial scan failed", error);
+          });
         return {
           ok: true,
           watchedRoots: startedWatcher.watchedRoots,
@@ -309,6 +332,7 @@ export async function bootstrapMainProcess(
         activeFileWatcher?.getStatus() ?? { running: false, processing: false, pendingPathCount: 0 }
       );
     },
+    "watcher:getStats": async () => watchStatsStore.snapshot(),
     "watcher:stop": async () => {
       if (activeFileWatcher) {
         await activeFileWatcher.stop();
@@ -319,13 +343,15 @@ export async function bootstrapMainProcess(
   });
 
   if (options.runStartupIndexing ?? true) {
-    void indexingRunner.enqueue({ force: false }).catch((error: unknown) => {
-      if (options.onBackgroundError) {
-        options.onBackgroundError("startup incremental indexing failed", error);
-        return;
-      }
-      console.error("[codetrail] startup incremental indexing failed", error);
-    });
+    void indexingRunner
+      .enqueue({ force: false }, { source: "startup_incremental" })
+      .catch((error: unknown) => {
+        if (options.onBackgroundError) {
+          options.onBackgroundError("startup incremental indexing failed", error);
+          return;
+        }
+        console.error("[codetrail] startup incremental indexing failed", error);
+      });
   }
 
   return {
