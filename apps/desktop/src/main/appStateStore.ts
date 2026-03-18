@@ -18,9 +18,12 @@ import {
   UI_THEME_VALUES,
 } from "../shared/uiPreferences";
 
-type PaneStateFull = IpcRequest<"ui:setState">;
+type PaneStateFull = IpcRequest<"ui:setPaneState">;
 export type PaneState = Partial<PaneStateFull> &
   Pick<PaneStateFull, "projectPaneWidth" | "sessionPaneWidth">;
+type IndexingConfigState = Partial<IpcRequest<"indexer:setConfig">>;
+type PersistedPaneState = PaneState;
+type IndexingState = IndexingConfigState;
 
 export type WindowState = {
   width: number;
@@ -31,7 +34,8 @@ export type WindowState = {
 };
 
 type AppState = {
-  pane?: PaneState;
+  pane?: PersistedPaneState;
+  indexing?: IndexingState;
   window?: WindowState;
 };
 
@@ -124,13 +128,29 @@ export class AppStateStore {
   }
 
   setPaneState(value: PaneState): void {
-    const pane = sanitizePaneState(value);
+    const pane = sanitizePaneState(value, this.state.indexing?.enabledProviders);
     if (!pane) {
       return;
     }
     this.state = {
       ...this.state,
       pane,
+    };
+    this.schedulePersist();
+  }
+
+  getIndexingState(): IndexingState | null {
+    return this.state.indexing ?? null;
+  }
+
+  setIndexingState(value: IndexingState): void {
+    const indexing = sanitizeIndexingState(value);
+    if (!indexing) {
+      return;
+    }
+    this.state = {
+      ...this.state,
+      indexing,
     };
     this.schedulePersist();
   }
@@ -193,10 +213,12 @@ function readState(filePath: string, fileSystem: AppStateStoreFileSystem): AppSt
 
     const record = parsed as Record<string, unknown>;
     // Sanitize each subtree independently so one malformed section does not discard the other.
-    const pane = sanitizePaneState(record.pane);
+    const indexing = sanitizeIndexingState(record.indexing ?? record.pane);
+    const pane = sanitizePaneState(record.pane, indexing?.enabledProviders);
     const window = sanitizeWindowState(record.window);
     return {
       ...(pane ? { pane } : {}),
+      ...(indexing ? { indexing } : {}),
       ...(window ? { window } : {}),
     };
   } catch {
@@ -218,7 +240,10 @@ function persistState(
   }
 }
 
-function sanitizePaneState(value: unknown): PaneState | null {
+function sanitizePaneState(
+  value: unknown,
+  enabledProviderScope: Provider[] | undefined = undefined,
+): PersistedPaneState | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return null;
   }
@@ -233,8 +258,10 @@ function sanitizePaneState(value: unknown): PaneState | null {
   const sessionPaneCollapsed = sanitizeOptionalBoolean(record.sessionPaneCollapsed);
   // Provider arrays are healed to include newly-added providers so older settings files do not hide
   // data just because they were saved before a provider existed.
+  const enabledProviders = enabledProviderScope ?? PROVIDER_VALUES;
   const projectProviders = addMissingProviders(
-    sanitizeStringArray(record.projectProviders, PROVIDER_VALUES),
+    sanitizeStringArray(record.projectProviders, enabledProviders),
+    enabledProviders,
   );
   const historyCategories = sanitizeStringArray(record.historyCategories, CATEGORY_VALUES);
   const expandedByDefaultCategories = sanitizeStringArray(
@@ -242,7 +269,8 @@ function sanitizePaneState(value: unknown): PaneState | null {
     CATEGORY_VALUES,
   );
   const searchProviders = addMissingProviders(
-    sanitizeStringArray(record.searchProviders, PROVIDER_VALUES),
+    sanitizeStringArray(record.searchProviders, enabledProviders),
+    enabledProviders,
   );
   const theme = sanitizeStringValue(record.theme, THEME_VALUES);
   const monoFontFamily = sanitizeStringValue(record.monoFontFamily, MONO_FONT_VALUES);
@@ -315,6 +343,28 @@ function sanitizePaneState(value: unknown): PaneState | null {
   };
 }
 
+function sanitizeIndexingState(value: unknown): IndexingState | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+  const enabledProviders = sanitizeStringArray(record.enabledProviders, PROVIDER_VALUES);
+  const removeMissingSessionsDuringIncrementalIndexing = sanitizeOptionalBoolean(
+    record.removeMissingSessionsDuringIncrementalIndexing,
+  );
+  if (!enabledProviders && removeMissingSessionsDuringIncrementalIndexing === null) {
+    return null;
+  }
+
+  return {
+    ...(enabledProviders ? { enabledProviders } : {}),
+    ...(removeMissingSessionsDuringIncrementalIndexing === null
+      ? {}
+      : { removeMissingSessionsDuringIncrementalIndexing }),
+  };
+}
+
 function sanitizeWindowState(value: unknown): WindowState | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return null;
@@ -358,12 +408,15 @@ function sanitizeOptionalInt(value: unknown, min: number, max: number): number |
   return sanitizeInt(value, min, max);
 }
 
-function addMissingProviders(providers: Provider[] | null): Provider[] | null {
+function addMissingProviders(
+  providers: Provider[] | null,
+  universe: readonly Provider[] = PROVIDER_VALUES,
+): Provider[] | null {
   if (providers === null) {
     return null;
   }
   const result = [...providers];
-  for (const provider of PROVIDER_VALUES) {
+  for (const provider of universe) {
     if (!result.includes(provider)) {
       result.push(provider);
     }

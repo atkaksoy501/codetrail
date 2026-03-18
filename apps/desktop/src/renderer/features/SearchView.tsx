@@ -1,6 +1,8 @@
 import type { Dispatch, SetStateAction } from "react";
 
-import { CATEGORIES, PROVIDERS } from "../app/constants";
+import type { Provider } from "@codetrail/core/browser";
+
+import { CATEGORIES } from "../app/constants";
 import type { ProjectSummary } from "../app/types";
 import { ToolbarIcon } from "../components/ToolbarIcon";
 import { HighlightedText } from "../components/messages/MessagePresentation";
@@ -12,12 +14,14 @@ type SearchController = ReturnType<typeof useSearchController>;
 
 export function SearchView({
   search,
+  enabledProviders,
   projects,
   advancedSearchEnabled,
   setAdvancedSearchEnabled,
   onSelectResult,
 }: {
   search: SearchController;
+  enabledProviders: Provider[];
   projects: ProjectSummary[];
   advancedSearchEnabled: boolean;
   setAdvancedSearchEnabled: Dispatch<SetStateAction<boolean>>;
@@ -104,7 +108,7 @@ export function SearchView({
             ))}
           </select>
           <div className="chip-row">
-            {PROVIDERS.map((provider) => (
+            {enabledProviders.map((provider) => (
               <button
                 key={provider}
                 type="button"

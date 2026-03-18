@@ -28,6 +28,7 @@ export type DiscoveryConfig = {
   cursorRoot: string;
   copilotRoot: string;
   includeClaudeSubagents: boolean;
+  enabledProviders?: Provider[];
 };
 
 export type ResolvedDiscoveryProviderConfig = {
@@ -39,6 +40,7 @@ export type ResolvedDiscoveryProviderConfig = {
 
 export type ResolvedDiscoveryConfig = {
   providers: Record<Provider, ResolvedDiscoveryProviderConfig>;
+  enabledProviders: Provider[];
 };
 
 export type GeminiProjectResolution = {

@@ -85,6 +85,10 @@ describe("AppStateStore", () => {
         copilot: [],
       },
     });
+    store.setIndexingState({
+      enabledProviders: ["claude", "codex", "gemini", "cursor", "copilot"],
+      removeMissingSessionsDuringIncrementalIndexing: true,
+    });
     store.setWindowState({ width: 1440, height: 920, x: 48, y: 72, isMaximized: false });
     store.flush();
 
@@ -117,6 +121,10 @@ describe("AppStateStore", () => {
         copilot: [],
       },
     });
+    expect(reloaded.getIndexingState()).toEqual({
+      enabledProviders: ["claude", "codex", "gemini", "cursor", "copilot"],
+      removeMissingSessionsDuringIncrementalIndexing: true,
+    });
     expect(reloaded.getWindowState()).toEqual({
       width: 1440,
       height: 920,
@@ -127,6 +135,7 @@ describe("AppStateStore", () => {
 
     const raw = readFileSync(filePath, "utf8");
     expect(raw).toContain('"pane"');
+    expect(raw).toContain('"indexing"');
     expect(raw).toContain('"window"');
 
     rmSync(dir, { recursive: true, force: true });
@@ -179,6 +188,9 @@ describe("AppStateStore", () => {
           projectProviders: ["claude", "future-provider", "claude", 42],
           historyCategories: ["assistant", "future-category", "assistant", null],
         },
+        indexing: {
+          enabledProviders: ["claude", "future-provider", "claude", 42],
+        },
       }),
     });
 
@@ -187,8 +199,40 @@ describe("AppStateStore", () => {
     expect(store.getPaneState()).toEqual({
       projectPaneWidth: 300,
       sessionPaneWidth: 360,
-      projectProviders: ["claude", "codex", "gemini", "cursor", "copilot"],
+      projectProviders: ["claude"],
       historyCategories: ["assistant"],
+    });
+    expect(store.getIndexingState()).toEqual({
+      enabledProviders: ["claude"],
+    });
+  });
+
+  it("drops disabled providers from saved project and search filters", () => {
+    const filePath = "/tmp/codetrail-enabled-providers-ui-state.json";
+    const fs = createMemoryFs({
+      [filePath]: JSON.stringify({
+        pane: {
+          projectPaneWidth: 300,
+          sessionPaneWidth: 360,
+          projectProviders: ["claude", "codex"],
+          searchProviders: ["codex", "cursor"],
+        },
+        indexing: {
+          enabledProviders: ["claude", "cursor"],
+        },
+      }),
+    });
+
+    const store = new AppStateStore(filePath, { fs });
+
+    expect(store.getPaneState()).toEqual({
+      projectPaneWidth: 300,
+      sessionPaneWidth: 360,
+      projectProviders: ["claude", "cursor"],
+      searchProviders: ["cursor", "claude"],
+    });
+    expect(store.getIndexingState()).toEqual({
+      enabledProviders: ["claude", "cursor"],
     });
   });
 

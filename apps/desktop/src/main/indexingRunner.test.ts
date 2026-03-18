@@ -4,6 +4,10 @@ import type { Provider, SystemMessageRegexRules } from "@codetrail/core";
 
 import { WorkerIndexingRunner, shouldUseIndexingWorker } from "./indexingRunner";
 
+type OpenDatabaseFn = typeof import("@codetrail/core").openDatabase;
+type EnsureDatabaseSchemaFn = typeof import("@codetrail/core").ensureDatabaseSchema;
+type ClearProvidersDataFn = typeof import("@codetrail/core").clearProvidersData;
+
 type WorkerMessage =
   | { type: "result"; ok: true }
   | { type: "result"; ok: false; message: string; stack?: string }
@@ -35,7 +39,9 @@ type WorkerRequest = {
   dbPath: string;
   forceReindex?: boolean;
   changedFilePaths?: string[];
-  systemMessageRegexRules?: Partial<SystemMessageRegexRules>;
+  enabledProviders?: Provider[] | undefined;
+  systemMessageRegexRules?: Partial<SystemMessageRegexRules> | undefined;
+  removeMissingSessionsDuringIncrementalIndexing?: boolean | undefined;
 };
 
 type WorkerController = {
@@ -237,6 +243,99 @@ describe("WorkerIndexingRunner", () => {
       {},
     );
     expect(bookmarkHarness.reconcileWithIndexedData).toHaveBeenCalledWith("/tmp/codetrail.db");
+  });
+
+  it("passes enabled providers into indexing jobs", async () => {
+    const runIncrementalIndexing = vi.fn(() => makeIndexingResult());
+    const bookmarkHarness = createBookmarkStoreHarness();
+    const runner = new WorkerIndexingRunner("/tmp/codetrail.db", {
+      runIncrementalIndexing,
+      resolveWorkerUrl: () => null,
+      createBookmarkStore: bookmarkHarness.createBookmarkStore,
+      getEnabledProviders: () => ["claude", "cursor"],
+    });
+
+    await runner.enqueue({ force: false });
+
+    expect(runIncrementalIndexing).toHaveBeenCalledWith(
+      {
+        dbPath: "/tmp/codetrail.db",
+        forceReindex: false,
+        enabledProviders: ["claude", "cursor"],
+      },
+      {},
+    );
+  });
+
+  it("allows explicit provider-scoped refresh jobs", async () => {
+    const runIncrementalIndexing = vi.fn(() => makeIndexingResult());
+    const bookmarkHarness = createBookmarkStoreHarness();
+    const runner = new WorkerIndexingRunner("/tmp/codetrail.db", {
+      runIncrementalIndexing,
+      resolveWorkerUrl: () => null,
+      createBookmarkStore: bookmarkHarness.createBookmarkStore,
+      getEnabledProviders: () => ["claude", "cursor"],
+    });
+
+    await runner.enqueue({ force: false, providers: ["codex"] });
+
+    expect(runIncrementalIndexing).toHaveBeenCalledWith(
+      {
+        dbPath: "/tmp/codetrail.db",
+        forceReindex: false,
+        enabledProviders: ["codex"],
+      },
+      {},
+    );
+  });
+
+  it("passes the missing-session pruning toggle into indexing jobs", async () => {
+    const runIncrementalIndexing = vi.fn(() => makeIndexingResult());
+    const bookmarkHarness = createBookmarkStoreHarness();
+    const runner = new WorkerIndexingRunner("/tmp/codetrail.db", {
+      runIncrementalIndexing,
+      resolveWorkerUrl: () => null,
+      createBookmarkStore: bookmarkHarness.createBookmarkStore,
+      getRemoveMissingSessionsDuringIncrementalIndexing: () => true,
+    });
+
+    await runner.enqueue({ force: false });
+
+    expect(runIncrementalIndexing).toHaveBeenCalledWith(
+      {
+        dbPath: "/tmp/codetrail.db",
+        forceReindex: false,
+        removeMissingSessionsDuringIncrementalIndexing: true,
+      },
+      {},
+    );
+  });
+
+  it("purges only requested providers and reconciles bookmarks", async () => {
+    const openDatabase = vi.fn(() => ({ close: vi.fn() }));
+    const ensureDatabaseSchema = vi.fn(() => ({
+      schemaVersion: 1,
+      schemaRebuilt: false,
+      tables: [],
+    }));
+    const clearProvidersData = vi.fn();
+    const bookmarkHarness = createBookmarkStoreHarness();
+    const runner = new WorkerIndexingRunner("/tmp/codetrail.db", {
+      resolveWorkerUrl: () => null,
+      createBookmarkStore: bookmarkHarness.createBookmarkStore,
+      openDatabase: openDatabase as unknown as OpenDatabaseFn,
+      ensureDatabaseSchema: ensureDatabaseSchema as unknown as EnsureDatabaseSchemaFn,
+      clearProvidersData: clearProvidersData as unknown as ClearProvidersDataFn,
+    });
+
+    const result = await runner.purgeProviders(["codex", "copilot", "codex"]);
+
+    expect(result).toEqual({ jobId: "purge-1" });
+    expect(openDatabase).toHaveBeenCalledWith("/tmp/codetrail.db");
+    expect(ensureDatabaseSchema).toHaveBeenCalledTimes(1);
+    expect(clearProvidersData).toHaveBeenCalledWith(expect.anything(), ["codex", "copilot"]);
+    expect(bookmarkHarness.reconcileWithIndexedData).toHaveBeenCalledWith("/tmp/codetrail.db");
+    expect(bookmarkHarness.close).toHaveBeenCalledTimes(1);
   });
 
   it("uses worker path when worker returns success", async () => {

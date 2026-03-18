@@ -33,6 +33,8 @@ export type IndexingConfig = {
   dbPath: string;
   forceReindex?: boolean;
   discoveryConfig?: Partial<DiscoveryConfig>;
+  enabledProviders?: Provider[];
+  removeMissingSessionsDuringIncrementalIndexing?: boolean;
   systemMessageRegexRules?: SystemMessageRegexRuleOverrides;
 };
 
@@ -224,6 +226,7 @@ export function runIncrementalIndexing(
   const discoveryConfig: DiscoveryConfig = {
     ...DEFAULT_DISCOVERY_CONFIG,
     ...config.discoveryConfig,
+    ...(config.enabledProviders ? { enabledProviders: config.enabledProviders } : {}),
   };
   const discoveredFiles = resolvedDependencies.discoverSessionFiles(discoveryConfig);
   const discoveredByFilePath = new Map(discoveredFiles.map((file) => [file.filePath, file]));
@@ -255,8 +258,19 @@ export function runIncrementalIndexing(
     diagnostics.warnings += compiledSystemMessageRules.invalidCount;
 
     if (!config.forceReindex) {
+      const enabledProviderSet = new Set(discoveryConfig.enabledProviders);
       for (const existing of existingRows) {
         if (discoveredByFilePath.has(existing.file_path)) {
+          continue;
+        }
+
+        // Disabled providers are always removed during incremental indexing. The pruning toggle
+        // only controls whether still-enabled providers lose indexed sessions when source files
+        // disappear from disk.
+        if (
+          enabledProviderSet.has(existing.provider) &&
+          !config.removeMissingSessionsDuringIncrementalIndexing
+        ) {
           continue;
         }
 
@@ -320,6 +334,7 @@ export function indexChangedFiles(
   const discoveryConfig: DiscoveryConfig = {
     ...DEFAULT_DISCOVERY_CONFIG,
     ...config.discoveryConfig,
+    ...(config.enabledProviders ? { enabledProviders: config.enabledProviders } : {}),
   };
 
   const discoveredFiles = changedFilePaths
@@ -350,11 +365,22 @@ export function indexChangedFiles(
     diagnostics.warnings += compiledSystemMessageRules.invalidCount;
 
     // Handle deleted/renamed files — clean up indexed data for paths that can no longer be discovered
+    // for disabled providers immediately, or for enabled providers only when the pruning toggle is
+    // on. This mirrors the full incremental path, just scoped to the changed file set.
     const discoveredPathSet = new Set(discoveredFiles.map((f) => f.filePath));
+    const enabledProviderSet = new Set(discoveryConfig.enabledProviders);
     for (const filePath of changedFilePaths) {
       if (discoveredPathSet.has(filePath)) continue;
       const existingSession = getSessionByFile.get(filePath) as SessionFileRow | undefined;
       if (existingSession) {
+        const existingIndexedFile = getIndexedFile.get(filePath) as IndexedFileRow | undefined;
+        if (
+          existingIndexedFile &&
+          enabledProviderSet.has(existingIndexedFile.provider) &&
+          !config.removeMissingSessionsDuringIncrementalIndexing
+        ) {
+          continue;
+        }
         deleteSessionDataForFilePath(db, filePath);
         db.prepare("DELETE FROM indexed_files WHERE file_path = ?").run(filePath);
         db.prepare("DELETE FROM index_checkpoints WHERE file_path = ?").run(filePath);

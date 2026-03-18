@@ -12,7 +12,6 @@ describe("TopBar", () => {
     const onToggleSearchView = vi.fn();
     const onThemeChange = vi.fn();
     const onIncrementalRefresh = vi.fn();
-    const onForceRefresh = vi.fn();
     const onToggleFocus = vi.fn();
     const onToggleHelp = vi.fn();
     const onToggleSettings = vi.fn();
@@ -27,7 +26,6 @@ describe("TopBar", () => {
         onToggleSearchView={onToggleSearchView}
         onThemeChange={onThemeChange}
         onIncrementalRefresh={onIncrementalRefresh}
-        onForceRefresh={onForceRefresh}
         refreshStrategy="off"
         onRefreshStrategyChange={vi.fn()}
         autoRefreshStatusLabel={null}
@@ -50,7 +48,6 @@ describe("TopBar", () => {
 
     await user.click(screen.getByRole("button", { name: "Global Search" }));
     await user.click(screen.getByRole("button", { name: "Incremental refresh" }));
-    await user.click(screen.getByRole("button", { name: "Force reindex" }));
     await user.click(screen.getByRole("button", { name: "Enter focus mode" }));
     await user.click(screen.getByRole("button", { name: "Open help" }));
     await user.click(screen.getByRole("button", { name: "Choose theme" }));
@@ -59,7 +56,6 @@ describe("TopBar", () => {
 
     expect(onToggleSearchView).toHaveBeenCalledTimes(1);
     expect(onIncrementalRefresh).toHaveBeenCalledTimes(1);
-    expect(onForceRefresh).toHaveBeenCalledTimes(1);
     expect(onToggleFocus).toHaveBeenCalledTimes(1);
     expect(onToggleHelp).toHaveBeenCalledTimes(1);
     expect(onThemeChange).toHaveBeenCalledWith("tomorrow-night");
@@ -77,7 +73,6 @@ describe("TopBar", () => {
         onToggleSearchView={vi.fn()}
         onThemeChange={vi.fn()}
         onIncrementalRefresh={vi.fn()}
-        onForceRefresh={vi.fn()}
         refreshStrategy="off"
         onRefreshStrategyChange={vi.fn()}
         autoRefreshStatusLabel={null}
@@ -98,7 +93,6 @@ describe("TopBar", () => {
       "Exit focus mode (Cmd/Ctrl+Shift+M)",
     );
     expect(screen.getByRole("button", { name: "Indexing in progress" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Force reindex" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Exit focus mode" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Choose theme" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Open settings" })).toBeInTheDocument();
@@ -117,7 +111,6 @@ describe("TopBar", () => {
         onToggleSearchView={vi.fn()}
         onThemeChange={vi.fn()}
         onIncrementalRefresh={vi.fn()}
-        onForceRefresh={vi.fn()}
         refreshStrategy="watch-5s"
         onRefreshStrategyChange={vi.fn()}
         autoRefreshStatusLabel="3"

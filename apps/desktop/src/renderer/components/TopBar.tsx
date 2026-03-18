@@ -161,7 +161,6 @@ export function TopBar({
   onToggleSearchView,
   onThemeChange,
   onIncrementalRefresh,
-  onForceRefresh,
   refreshStrategy,
   onRefreshStrategyChange,
   autoRefreshStatusLabel,
@@ -179,7 +178,6 @@ export function TopBar({
   onToggleSearchView: () => void;
   onThemeChange: (theme: ThemeMode) => void;
   onIncrementalRefresh: () => void;
-  onForceRefresh: () => void;
   refreshStrategy: RefreshStrategy;
   onRefreshStrategyChange: Dispatch<SetStateAction<RefreshStrategy>>;
   autoRefreshStatusLabel: string | null;
@@ -229,23 +227,6 @@ export function TopBar({
           statusTone={autoRefreshStatusTone}
           statusTooltip={autoRefreshStatusTooltip}
         />
-        <button
-          type="button"
-          className="tb-btn"
-          onClick={onForceRefresh}
-          disabled={indexing || refreshStrategy !== "off"}
-          aria-label="Force reindex"
-          title={
-            refreshStrategy !== "off"
-              ? "Disable auto-refresh before reindexing"
-              : indexing
-                ? "Indexing in progress..."
-                : "Force full reindex"
-          }
-        >
-          <ToolbarIcon name="reindex" />
-          Reindex
-        </button>
         <button
           type="button"
           className="tb-btn"

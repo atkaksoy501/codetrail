@@ -946,6 +946,17 @@ function runSearchQueryWithDatabase(
   db: DatabaseHandle,
   request: IpcRequest<"search:query">,
 ): IpcResponse<"search:query"> {
+  if (request.providers && request.providers.length === 0) {
+    return {
+      query: request.query,
+      queryError: null,
+      highlightPatterns: [],
+      totalCount: 0,
+      categoryCounts: makeEmptyCategoryCounts(),
+      results: [],
+    };
+  }
+
   const searchInput: {
     query: string;
     searchMode: "simple" | "advanced";

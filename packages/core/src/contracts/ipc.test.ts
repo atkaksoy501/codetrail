@@ -1,10 +1,19 @@
 import { describe, expect, it } from "vitest";
 
 import { createSettingsInfoFixture } from "../testing/settingsInfoFixture";
-import { type IpcChannel, ipcChannels, ipcContractSchemas, paneStateBaseSchema } from "./ipc";
+import {
+  type IpcChannel,
+  indexerConfigBaseSchema,
+  ipcChannels,
+  ipcContractSchemas,
+  paneStateBaseSchema,
+} from "./ipc";
 
 const allNullPaneState = Object.fromEntries(
   Object.keys(paneStateBaseSchema.shape).map((k) => [k, null]),
+);
+const allNullIndexerConfig = Object.fromEntries(
+  Object.keys(indexerConfigBaseSchema.shape).map((k) => [k, null]),
 );
 
 type ChannelExample = {
@@ -167,11 +176,11 @@ const channelExamples: Record<IpcChannel, ChannelExample> = {
     request: { path: "/tmp/file.txt" },
     response: { ok: true, error: null },
   },
-  "ui:getState": {
+  "ui:getPaneState": {
     request: {},
     response: allNullPaneState,
   },
-  "ui:setState": {
+  "ui:setPaneState": {
     request: {
       projectPaneWidth: 300,
       sessionPaneWidth: 360,
@@ -205,7 +214,17 @@ const channelExamples: Record<IpcChannel, ChannelExample> = {
         cursor: [],
         copilot: [],
       },
-      autoScrollEnabled: false,
+    },
+    response: { ok: true },
+  },
+  "indexer:getConfig": {
+    request: {},
+    response: allNullIndexerConfig,
+  },
+  "indexer:setConfig": {
+    request: {
+      enabledProviders: ["claude", "codex", "gemini", "cursor", "copilot"],
+      removeMissingSessionsDuringIncrementalIndexing: false,
     },
     response: { ok: true },
   },

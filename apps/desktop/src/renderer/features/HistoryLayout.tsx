@@ -1,6 +1,5 @@
 import type { Dispatch, SetStateAction } from "react";
 
-import { PROVIDERS } from "../app/constants";
 import { ProjectPane } from "../components/history/ProjectPane";
 import { SessionPane } from "../components/history/SessionPane";
 import { openInFileManager, openPath } from "../lib/pathActions";
@@ -40,7 +39,7 @@ export function HistoryLayout({
         collapsed={history.projectPaneCollapsed}
         projectQueryInput={history.projectQueryInput}
         projectProviders={history.projectProviders}
-        providers={PROVIDERS}
+        providers={history.enabledProviders}
         projectProviderCounts={history.projectProviderCounts}
         onToggleCollapsed={() => history.setProjectPaneCollapsed((value) => !value)}
         onProjectQueryChange={history.setProjectQueryInput}

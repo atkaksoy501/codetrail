@@ -7,8 +7,12 @@ import {
   type IndexingDependencies,
   type IndexingFileIssue,
   type IndexingNotice,
+  type Provider,
   type SystemMessageRegexRuleOverrides,
+  clearProvidersData,
+  ensureDatabaseSchema,
   indexChangedFiles,
+  openDatabase,
   runIncrementalIndexing,
 } from "@codetrail/core";
 import {
@@ -16,9 +20,16 @@ import {
   createBookmarkStore,
   resolveBookmarksDbPath,
 } from "./data/bookmarkStore";
+import {
+  type IndexingWorkerRequest,
+  buildSharedIndexingRequestSettings,
+  toChangedFilesIndexingConfig,
+  toIncrementalIndexingConfig,
+} from "./indexingRequestConfig";
 
 export type RefreshJobRequest = {
   force: boolean;
+  providers?: Provider[];
 };
 
 export type RefreshJobResponse = {
@@ -40,19 +51,14 @@ export type IndexingStatus = {
   completedJobs: number;
 };
 
-type IndexingWorkerRequest =
-  | {
-      kind: "incremental";
-      dbPath: string;
-      forceReindex: boolean;
-      systemMessageRegexRules?: SystemMessageRegexRuleOverrides;
-    }
-  | {
-      kind: "changedFiles";
-      dbPath: string;
-      changedFilePaths: string[];
-      systemMessageRegexRules?: SystemMessageRegexRuleOverrides;
-    };
+type MaintenanceJobRequest = {
+  kind: "maintenance";
+  operation: "purgeProviders";
+  dbPath: string;
+  providers: Provider[];
+};
+
+type QueuedJobRequest = IndexingWorkerRequest | MaintenanceJobRequest;
 
 type IndexingWorkerMessage =
   | {
@@ -89,13 +95,18 @@ export type IndexingRunnerDependencies = {
   createWorker?: (workerUrl: URL) => WorkerLike;
   createBackgroundProcess?: (workerUrl: URL) => WorkerLike;
   getSystemMessageRegexRules?: () => SystemMessageRegexRuleOverrides | undefined;
+  getEnabledProviders?: () => Provider[] | undefined;
+  getRemoveMissingSessionsDuringIncrementalIndexing?: () => boolean | undefined;
+  openDatabase?: typeof openDatabase;
+  ensureDatabaseSchema?: typeof ensureDatabaseSchema;
+  clearProvidersData?: typeof clearProvidersData;
   bookmarksDbPath?: string;
   createBookmarkStore?: (bookmarksDbPath: string) => BookmarkStore;
   onFileIssue?: (issue: IndexingFileIssue) => void;
   onNotice?: (notice: IndexingNotice) => void;
   onJobSettled?: (event: {
     source: IndexingJobSource;
-    request: IndexingWorkerRequest;
+    request: QueuedJobRequest;
     durationMs: number;
     success: boolean;
   }) => void;
@@ -121,6 +132,13 @@ export class WorkerIndexingRunner {
   private readonly getSystemMessageRegexRulesFn:
     | (() => SystemMessageRegexRuleOverrides | undefined)
     | null;
+  private readonly getEnabledProvidersFn: (() => Provider[] | undefined) | null;
+  private readonly getRemoveMissingSessionsDuringIncrementalIndexingFn:
+    | (() => boolean | undefined)
+    | null;
+  private readonly openDatabaseFn: typeof openDatabase;
+  private readonly ensureDatabaseSchemaFn: typeof ensureDatabaseSchema;
+  private readonly clearProvidersDataFn: typeof clearProvidersData;
   private readonly bookmarksDbPath: string;
   private readonly createBookmarkStoreFn: (bookmarksDbPath: string) => BookmarkStore;
   private readonly onFileIssue: ((issue: IndexingFileIssue) => void) | undefined;
@@ -128,7 +146,7 @@ export class WorkerIndexingRunner {
   private readonly onJobSettled:
     | ((event: {
         source: IndexingJobSource;
-        request: IndexingWorkerRequest;
+        request: QueuedJobRequest;
         durationMs: number;
         success: boolean;
       }) => void)
@@ -181,6 +199,12 @@ export class WorkerIndexingRunner {
         };
       });
     this.getSystemMessageRegexRulesFn = dependencies.getSystemMessageRegexRules ?? null;
+    this.getEnabledProvidersFn = dependencies.getEnabledProviders ?? null;
+    this.getRemoveMissingSessionsDuringIncrementalIndexingFn =
+      dependencies.getRemoveMissingSessionsDuringIncrementalIndexing ?? null;
+    this.openDatabaseFn = dependencies.openDatabase ?? openDatabase;
+    this.ensureDatabaseSchemaFn = dependencies.ensureDatabaseSchema ?? ensureDatabaseSchema;
+    this.clearProvidersDataFn = dependencies.clearProvidersData ?? clearProvidersData;
     this.bookmarksDbPath = dependencies.bookmarksDbPath ?? resolveBookmarksDbPath(dbPath);
     this.createBookmarkStoreFn = dependencies.createBookmarkStore ?? createBookmarkStore;
     this.onFileIssue = dependencies.onFileIssue;
@@ -193,15 +217,64 @@ export class WorkerIndexingRunner {
     options: { source?: IndexingJobSource } = {},
   ): Promise<RefreshJobResponse> {
     const systemMessageRegexRules = this.getSystemMessageRegexRulesFn?.();
+    const enabledProviders = request.providers ?? this.getEnabledProvidersFn?.();
+    const removeMissingSessionsDuringIncrementalIndexing =
+      this.getRemoveMissingSessionsDuringIncrementalIndexingFn?.();
+    const indexingRequest: IndexingWorkerRequest = {
+      kind: "incremental",
+      dbPath: this.dbPath,
+      forceReindex: request.force,
+      ...buildSharedIndexingRequestSettings({
+        enabledProviders,
+        removeMissingSessionsDuringIncrementalIndexing,
+        systemMessageRegexRules,
+      }),
+    };
     return this.enqueueJob(
       `refresh-${++this.sequence}`,
-      {
-        kind: "incremental",
-        dbPath: this.dbPath,
-        forceReindex: request.force,
-        ...(systemMessageRegexRules ? { systemMessageRegexRules } : {}),
-      },
       options.source ?? (request.force ? "manual_force_reindex" : "manual_incremental"),
+      indexingRequest,
+      () =>
+        runIndexingJob({
+          request: indexingRequest,
+          workerUrl: this.workerUrl,
+          runIncrementalIndexing: this.runIncrementalIndexingFn,
+          indexChangedFiles: this.indexChangedFilesFn,
+          createWorker: this.createWorkerFn,
+          createBackgroundProcess: this.createBackgroundProcessFn,
+          ...(this.onFileIssue ? { onFileIssue: this.onFileIssue } : {}),
+          ...(this.onNotice ? { onNotice: this.onNotice } : {}),
+        }),
+    );
+  }
+
+  async purgeProviders(
+    providers: Provider[],
+    options: { source?: IndexingJobSource } = {},
+  ): Promise<RefreshJobResponse> {
+    const uniqueProviders = [...new Set(providers)];
+    if (uniqueProviders.length === 0) {
+      return { jobId: `purge-${++this.sequence}-noop` };
+    }
+
+    return this.enqueueJob(
+      `purge-${++this.sequence}`,
+      options.source ?? "manual_incremental",
+      {
+        kind: "maintenance",
+        operation: "purgeProviders",
+        dbPath: this.dbPath,
+        providers: uniqueProviders,
+      },
+      async () => {
+        const db = this.openDatabaseFn(this.dbPath);
+        try {
+          this.ensureDatabaseSchemaFn(db);
+          this.clearProvidersDataFn(db, uniqueProviders);
+        } finally {
+          db.close();
+        }
+      },
     );
   }
 
@@ -213,30 +286,26 @@ export class WorkerIndexingRunner {
       return { jobId: `changed-${++this.sequence}-noop` };
     }
     const systemMessageRegexRules = this.getSystemMessageRegexRulesFn?.();
+    const enabledProviders = this.getEnabledProvidersFn?.();
+    const removeMissingSessionsDuringIncrementalIndexing =
+      this.getRemoveMissingSessionsDuringIncrementalIndexingFn?.();
+    const indexingRequest: IndexingWorkerRequest = {
+      kind: "changedFiles",
+      dbPath: this.dbPath,
+      changedFilePaths,
+      ...buildSharedIndexingRequestSettings({
+        enabledProviders,
+        removeMissingSessionsDuringIncrementalIndexing,
+        systemMessageRegexRules,
+      }),
+    };
     return this.enqueueJob(
       `changed-${++this.sequence}`,
-      {
-        kind: "changedFiles",
-        dbPath: this.dbPath,
-        changedFilePaths,
-        ...(systemMessageRegexRules ? { systemMessageRegexRules } : {}),
-      },
       options.source ?? "watch_targeted",
-    );
-  }
-
-  private async enqueueJob(
-    jobId: string,
-    request: IndexingWorkerRequest,
-    source: IndexingJobSource,
-  ): Promise<RefreshJobResponse> {
-    this.pendingJobs += 1;
-    const task = this.queue.then(async () => {
-      const startedAt = Date.now();
-      try {
-        this.activeJobId = jobId;
-        await runIndexingJob({
-          request,
+      indexingRequest,
+      () =>
+        runIndexingJob({
+          request: indexingRequest,
           workerUrl: this.workerUrl,
           runIncrementalIndexing: this.runIncrementalIndexingFn,
           indexChangedFiles: this.indexChangedFilesFn,
@@ -244,7 +313,22 @@ export class WorkerIndexingRunner {
           createBackgroundProcess: this.createBackgroundProcessFn,
           ...(this.onFileIssue ? { onFileIssue: this.onFileIssue } : {}),
           ...(this.onNotice ? { onNotice: this.onNotice } : {}),
-        });
+        }),
+    );
+  }
+
+  private async enqueueJob(
+    jobId: string,
+    source: IndexingJobSource,
+    request: QueuedJobRequest,
+    run: () => Promise<void> | void,
+  ): Promise<RefreshJobResponse> {
+    this.pendingJobs += 1;
+    const task = this.queue.then(async () => {
+      const startedAt = Date.now();
+      try {
+        this.activeJobId = jobId;
+        await run();
         const bookmarkStore = this.createBookmarkStoreFn(this.bookmarksDbPath);
         try {
           bookmarkStore.reconcileWithIndexedData(this.dbPath);
@@ -288,19 +372,6 @@ export class WorkerIndexingRunner {
   }
 }
 
-function extractIndexingConfig(request: IndexingWorkerRequest) {
-  const base = {
-    dbPath: request.dbPath,
-    ...(request.systemMessageRegexRules
-      ? { systemMessageRegexRules: request.systemMessageRegexRules }
-      : {}),
-  };
-  if (request.kind === "changedFiles") {
-    return { kind: "changedFiles" as const, ...base, changedFilePaths: request.changedFilePaths };
-  }
-  return { kind: "incremental" as const, ...base, forceReindex: request.forceReindex };
-}
-
 function runInProcess(
   request: IndexingWorkerRequest,
   fns: {
@@ -309,30 +380,11 @@ function runInProcess(
   },
   deps: IndexingDependencies,
 ): void {
-  const config = extractIndexingConfig(request);
-  if (config.kind === "changedFiles") {
-    fns.indexChangedFiles?.(
-      {
-        dbPath: config.dbPath,
-        ...(config.systemMessageRegexRules
-          ? { systemMessageRegexRules: config.systemMessageRegexRules }
-          : {}),
-      },
-      config.changedFilePaths,
-      deps,
-    );
+  if (request.kind === "changedFiles") {
+    fns.indexChangedFiles?.(toChangedFilesIndexingConfig(request), request.changedFilePaths, deps);
     return;
   }
-  fns.runIncrementalIndexing?.(
-    {
-      dbPath: config.dbPath,
-      forceReindex: config.forceReindex,
-      ...(config.systemMessageRegexRules
-        ? { systemMessageRegexRules: config.systemMessageRegexRules }
-        : {}),
-    },
-    deps,
-  );
+  fns.runIncrementalIndexing?.(toIncrementalIndexingConfig(request), deps);
 }
 
 async function runIndexingJob(args: {

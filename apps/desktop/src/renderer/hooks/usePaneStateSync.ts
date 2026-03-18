@@ -3,7 +3,6 @@ import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 
 import type {
   IpcRequest,
-  IpcResponse,
   MessageCategory,
   Provider,
   SystemMessageRegexRules,
@@ -31,8 +30,8 @@ type RestoredScrollTarget = {
 
 type HistoryMode = "session" | "bookmarks" | "project_all";
 type SortDirection = "asc" | "desc";
-type PaneStateSnapshot = IpcResponse<"ui:getState">;
-type PaneStatePersistRequest = IpcRequest<"ui:setState">;
+type PaneStatePersistRequest = IpcRequest<"ui:setPaneState">;
+type IndexingConfigPersistRequest = IpcRequest<"indexer:setConfig">;
 
 function hydrateIfPresent<T>(value: T | null, setter: (value: T) => void): void {
   if (value !== null) {
@@ -45,7 +44,9 @@ function hydrateIfPresent<T>(value: T | null, setter: (value: T) => void): void 
 export function usePaneStateSync(args: {
   initialPaneStateHydrated?: boolean;
   logError: (context: string, error: unknown) => void;
-  paneState: PaneStatePersistRequest;
+  paneState: PaneStatePersistRequest & IndexingConfigPersistRequest;
+  setEnabledProviders: Dispatch<SetStateAction<Provider[]>>;
+  setRemoveMissingSessionsDuringIncrementalIndexing: Dispatch<SetStateAction<boolean>>;
   setProjectPaneWidth: Dispatch<SetStateAction<number>>;
   setSessionPaneWidth: Dispatch<SetStateAction<number>>;
   setProjectPaneCollapsed: Dispatch<SetStateAction<boolean>>;
@@ -80,6 +81,8 @@ export function usePaneStateSync(args: {
     initialPaneStateHydrated = false,
     logError,
     paneState,
+    setEnabledProviders,
+    setRemoveMissingSessionsDuringIncrementalIndexing,
     setProjectPaneWidth,
     setSessionPaneWidth,
     setProjectPaneCollapsed,
@@ -112,6 +115,14 @@ export function usePaneStateSync(args: {
   } = args;
   const codetrail = useCodetrailClient();
   const [paneStateHydrated, setPaneStateHydrated] = useState(initialPaneStateHydrated);
+  const indexingConfigToPersist = useMemo<IndexingConfigPersistRequest>(
+    () => ({
+      enabledProviders: paneState.enabledProviders,
+      removeMissingSessionsDuringIncrementalIndexing:
+        paneState.removeMissingSessionsDuringIncrementalIndexing,
+    }),
+    [paneState.enabledProviders, paneState.removeMissingSessionsDuringIncrementalIndexing],
+  );
 
   useEffect(() => {
     if (initialPaneStateHydrated) {
@@ -133,75 +144,85 @@ export function usePaneStateSync(args: {
         }
       });
     };
-    void codetrail
-      .invoke("ui:getState", {})
-      .then((response) => {
+    void Promise.all([
+      codetrail.invoke("ui:getPaneState", {}),
+      codetrail.invoke("indexer:getConfig", {}),
+    ])
+      .then(([paneResponse, indexingResponse]) => {
         if (cancelled) {
           return;
         }
 
-        if (response.projectPaneWidth !== null) {
-          setProjectPaneWidth(clamp(response.projectPaneWidth, 230, 520));
+        hydrateIfPresent(indexingResponse.enabledProviders, setEnabledProviders);
+        hydrateIfPresent(
+          indexingResponse.removeMissingSessionsDuringIncrementalIndexing,
+          setRemoveMissingSessionsDuringIncrementalIndexing,
+        );
+        if (paneResponse.projectPaneWidth !== null) {
+          setProjectPaneWidth(clamp(paneResponse.projectPaneWidth, 230, 520));
         }
-        if (response.sessionPaneWidth !== null) {
-          setSessionPaneWidth(clamp(response.sessionPaneWidth, 250, 620));
+        if (paneResponse.sessionPaneWidth !== null) {
+          setSessionPaneWidth(clamp(paneResponse.sessionPaneWidth, 250, 620));
         }
 
-        hydrateIfPresent(response.projectPaneCollapsed, setProjectPaneCollapsed);
-        hydrateIfPresent(response.sessionPaneCollapsed, setSessionPaneCollapsed);
-        hydrateIfPresent(response.projectProviders, setProjectProviders);
-        hydrateIfPresent(response.historyCategories, setHistoryCategories);
-        hydrateIfPresent(response.expandedByDefaultCategories, setExpandedByDefaultCategories);
-        hydrateIfPresent(response.searchProviders, setSearchProviders);
-        hydrateIfPresent(response.preferredAutoRefreshStrategy, setPreferredAutoRefreshStrategy);
-        hydrateIfPresent(response.theme, setTheme);
-        hydrateIfPresent(response.monoFontFamily, setMonoFontFamily);
-        hydrateIfPresent(response.regularFontFamily, setRegularFontFamily);
-        hydrateIfPresent(response.monoFontSize, setMonoFontSize);
-        hydrateIfPresent(response.regularFontSize, setRegularFontSize);
-        hydrateIfPresent(response.useMonospaceForAllMessages, setUseMonospaceForAllMessages);
-        hydrateIfPresent(response.projectSortDirection, setProjectSortDirection);
-        hydrateIfPresent(response.sessionSortDirection, setSessionSortDirection);
-        hydrateIfPresent(response.messageSortDirection, setMessageSortDirection);
-        hydrateIfPresent(response.bookmarkSortDirection, setBookmarkSortDirection);
-        hydrateIfPresent(response.projectAllSortDirection, setProjectAllSortDirection);
-        hydrateIfPresent(response.sessionPage, setSessionPage);
-        hydrateIfPresent(response.sessionScrollTop, (value) => {
+        hydrateIfPresent(paneResponse.projectPaneCollapsed, setProjectPaneCollapsed);
+        hydrateIfPresent(paneResponse.sessionPaneCollapsed, setSessionPaneCollapsed);
+        hydrateIfPresent(paneResponse.projectProviders, setProjectProviders);
+        hydrateIfPresent(paneResponse.historyCategories, setHistoryCategories);
+        hydrateIfPresent(paneResponse.expandedByDefaultCategories, setExpandedByDefaultCategories);
+        hydrateIfPresent(paneResponse.searchProviders, setSearchProviders);
+        hydrateIfPresent(
+          paneResponse.preferredAutoRefreshStrategy,
+          setPreferredAutoRefreshStrategy,
+        );
+        hydrateIfPresent(paneResponse.theme, setTheme);
+        hydrateIfPresent(paneResponse.monoFontFamily, setMonoFontFamily);
+        hydrateIfPresent(paneResponse.regularFontFamily, setRegularFontFamily);
+        hydrateIfPresent(paneResponse.monoFontSize, setMonoFontSize);
+        hydrateIfPresent(paneResponse.regularFontSize, setRegularFontSize);
+        hydrateIfPresent(paneResponse.useMonospaceForAllMessages, setUseMonospaceForAllMessages);
+        hydrateIfPresent(paneResponse.projectSortDirection, setProjectSortDirection);
+        hydrateIfPresent(paneResponse.sessionSortDirection, setSessionSortDirection);
+        hydrateIfPresent(paneResponse.messageSortDirection, setMessageSortDirection);
+        hydrateIfPresent(paneResponse.bookmarkSortDirection, setBookmarkSortDirection);
+        hydrateIfPresent(paneResponse.projectAllSortDirection, setProjectAllSortDirection);
+        hydrateIfPresent(paneResponse.sessionPage, setSessionPage);
+        hydrateIfPresent(paneResponse.sessionScrollTop, (value) => {
           sessionScrollTopRef.current = value;
           setSessionScrollTop(value);
         });
         if (
-          response.systemMessageRegexRules &&
-          typeof response.systemMessageRegexRules === "object"
+          paneResponse.systemMessageRegexRules &&
+          typeof paneResponse.systemMessageRegexRules === "object"
         ) {
           setSystemMessageRegexRules({
             ...EMPTY_SYSTEM_MESSAGE_REGEX_RULES,
-            ...response.systemMessageRegexRules,
+            ...paneResponse.systemMessageRegexRules,
           });
         }
         if (setHistorySelection) {
           setHistorySelection(
             createHistorySelection(
-              response.historyMode ?? "project_all",
-              response.selectedProjectId ?? "",
-              response.selectedSessionId ?? "",
+              paneResponse.historyMode ?? "project_all",
+              paneResponse.selectedProjectId ?? "",
+              paneResponse.selectedSessionId ?? "",
             ),
           );
         } else {
-          hydrateIfPresent(response.selectedProjectId, setSelectedProjectId);
-          hydrateIfPresent(response.selectedSessionId, setSelectedSessionId);
-          hydrateIfPresent(response.historyMode, setHistoryMode);
+          hydrateIfPresent(paneResponse.selectedProjectId, setSelectedProjectId);
+          hydrateIfPresent(paneResponse.selectedSessionId, setSelectedSessionId);
+          hydrateIfPresent(paneResponse.historyMode, setHistoryMode);
         }
         if (
-          response.selectedSessionId !== null &&
-          response.sessionPage !== null &&
-          response.sessionScrollTop !== null &&
-          response.sessionScrollTop > 0
+          paneResponse.selectedSessionId !== null &&
+          paneResponse.sessionPage !== null &&
+          paneResponse.sessionScrollTop !== null &&
+          paneResponse.sessionScrollTop > 0
         ) {
           pendingRestoredSessionScrollRef.current = {
-            sessionId: response.selectedSessionId,
-            sessionPage: response.sessionPage,
-            scrollTop: response.sessionScrollTop,
+            sessionId: paneResponse.selectedSessionId,
+            sessionPage: paneResponse.sessionPage,
+            scrollTop: paneResponse.sessionScrollTop,
           };
         }
 
@@ -226,6 +247,8 @@ export function usePaneStateSync(args: {
     logError,
     pendingRestoredSessionScrollRef,
     sessionScrollTopRef,
+    setEnabledProviders,
+    setRemoveMissingSessionsDuringIncrementalIndexing,
     setHistoryCategories,
     setProjectPaneWidth,
     setProjectProviders,
@@ -257,10 +280,32 @@ export function usePaneStateSync(args: {
 
   const paneStateToPersist = useMemo<PaneStatePersistRequest>(
     () => ({
-      ...paneState,
       projectPaneWidth: Math.round(paneState.projectPaneWidth),
       sessionPaneWidth: Math.round(paneState.sessionPaneWidth),
+      projectPaneCollapsed: paneState.projectPaneCollapsed,
+      sessionPaneCollapsed: paneState.sessionPaneCollapsed,
+      projectProviders: paneState.projectProviders,
+      historyCategories: paneState.historyCategories,
+      expandedByDefaultCategories: paneState.expandedByDefaultCategories,
+      searchProviders: paneState.searchProviders,
+      preferredAutoRefreshStrategy: paneState.preferredAutoRefreshStrategy,
+      theme: paneState.theme,
+      monoFontFamily: paneState.monoFontFamily,
+      regularFontFamily: paneState.regularFontFamily,
+      monoFontSize: paneState.monoFontSize,
+      regularFontSize: paneState.regularFontSize,
+      useMonospaceForAllMessages: paneState.useMonospaceForAllMessages,
+      selectedProjectId: paneState.selectedProjectId,
+      selectedSessionId: paneState.selectedSessionId,
+      historyMode: paneState.historyMode,
+      projectSortDirection: paneState.projectSortDirection,
+      sessionSortDirection: paneState.sessionSortDirection,
+      messageSortDirection: paneState.messageSortDirection,
+      bookmarkSortDirection: paneState.bookmarkSortDirection,
+      projectAllSortDirection: paneState.projectAllSortDirection,
+      sessionPage: paneState.sessionPage,
       sessionScrollTop: Math.round(paneState.sessionScrollTop),
+      systemMessageRegexRules: paneState.systemMessageRegexRules,
     }),
     [paneState],
   );
@@ -273,7 +318,7 @@ export function usePaneStateSync(args: {
     // Persist on a short debounce so drag-resize and scroll updates do not cause synchronous IPC
     // chatter on every animation frame.
     const timer = window.setTimeout(() => {
-      void codetrail.invoke("ui:setState", paneStateToPersist).catch((error: unknown) => {
+      void codetrail.invoke("ui:setPaneState", paneStateToPersist).catch((error: unknown) => {
         logError("Failed saving UI state", error);
       });
     }, 180);
@@ -282,6 +327,24 @@ export function usePaneStateSync(args: {
       window.clearTimeout(timer);
     };
   }, [codetrail, logError, paneStateHydrated, paneStateToPersist]);
+
+  useEffect(() => {
+    if (!paneStateHydrated) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      void codetrail
+        .invoke("indexer:setConfig", indexingConfigToPersist)
+        .catch((error: unknown) => {
+          logError("Failed saving indexer config", error);
+        });
+    }, 180);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [codetrail, indexingConfigToPersist, logError, paneStateHydrated]);
 
   return { paneStateHydrated };
 }

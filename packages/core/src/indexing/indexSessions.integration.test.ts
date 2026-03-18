@@ -16,6 +16,201 @@ import { makeSessionId } from "./ids";
 import { runIncrementalIndexing } from "./indexSessions";
 
 describe("runIncrementalIndexing", () => {
+  it("purges disabled providers during incremental indexing", () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-enabled-providers-"));
+    const dbPath = join(dir, "index.db");
+
+    const claudeRoot = join(dir, ".claude", "projects");
+    const claudeProject = join(claudeRoot, "project-a");
+    mkdirSync(claudeProject, { recursive: true });
+    writeFileSync(
+      join(claudeProject, "claude-session-1.jsonl"),
+      `${JSON.stringify({
+        sessionId: "claude-session-1",
+        type: "user",
+        cwd: "/workspace/claude",
+        gitBranch: "main",
+        timestamp: "2026-02-27T10:00:00Z",
+        message: {
+          role: "user",
+          content: [{ type: "text", text: "Hello Claude" }],
+        },
+      })}\n`,
+    );
+
+    const codexRoot = join(dir, ".codex", "sessions", "2026", "02", "27");
+    mkdirSync(codexRoot, { recursive: true });
+    writeFileSync(
+      join(codexRoot, "rollout-codex-1.jsonl"),
+      `${[
+        JSON.stringify({
+          timestamp: "2026-02-27T11:00:00Z",
+          type: "session_meta",
+          payload: { id: "codex-session-1", cwd: "/workspace/codex", git: { branch: "dev" } },
+        }),
+        JSON.stringify({
+          timestamp: "2026-02-27T11:00:01Z",
+          type: "response_item",
+          payload: {
+            type: "message",
+            role: "assistant",
+            content: [{ type: "output_text", text: "Done Codex" }],
+          },
+        }),
+      ].join("\n")}\n`,
+    );
+
+    const discoveryConfig = {
+      claudeRoot,
+      codexRoot: join(dir, ".codex", "sessions"),
+      geminiRoot: join(dir, ".gemini", "tmp"),
+      geminiHistoryRoot: join(dir, ".gemini", "history"),
+      geminiProjectsPath: join(dir, ".gemini", "projects.json"),
+      cursorRoot: join(dir, ".cursor", "projects"),
+      copilotRoot: join(dir, ".copilot-workspace"),
+      includeClaudeSubagents: false,
+    };
+
+    runIncrementalIndexing({ dbPath, discoveryConfig });
+    const filtered = runIncrementalIndexing({
+      dbPath,
+      discoveryConfig,
+      enabledProviders: ["claude"],
+    });
+
+    expect(filtered.discoveredFiles).toBe(1);
+    expect(filtered.removedFiles).toBe(1);
+
+    const db = openDatabase(dbPath);
+    try {
+      expect(
+        (
+          db.prepare("SELECT COUNT(*) as c FROM sessions WHERE provider = 'claude'").get() as {
+            c: number;
+          }
+        ).c,
+      ).toBe(1);
+      expect(
+        (
+          db.prepare("SELECT COUNT(*) as c FROM sessions WHERE provider = 'codex'").get() as {
+            c: number;
+          }
+        ).c,
+      ).toBe(0);
+    } finally {
+      db.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("retains missing session files during incremental indexing by default", () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-index-missing-retain-"));
+    const dbPath = join(dir, "index.db");
+
+    const claudeRoot = join(dir, ".claude", "projects");
+    const claudeProject = join(claudeRoot, "project-a");
+    mkdirSync(claudeProject, { recursive: true });
+    const sessionFile = join(claudeProject, "claude-session-1.jsonl");
+    writeFileSync(
+      sessionFile,
+      `${JSON.stringify({
+        sessionId: "claude-session-1",
+        type: "user",
+        cwd: "/workspace/claude",
+        gitBranch: "main",
+        timestamp: "2026-02-27T10:00:00Z",
+        message: {
+          role: "user",
+          content: [{ type: "text", text: "Hello Claude" }],
+        },
+      })}\n`,
+    );
+
+    const discoveryConfig = {
+      claudeRoot,
+      codexRoot: join(dir, ".codex", "sessions"),
+      geminiRoot: join(dir, ".gemini", "tmp"),
+      geminiHistoryRoot: join(dir, ".gemini", "history"),
+      geminiProjectsPath: join(dir, ".gemini", "projects.json"),
+      cursorRoot: join(dir, ".cursor", "projects"),
+      copilotRoot: join(dir, ".copilot-workspace"),
+      includeClaudeSubagents: false,
+    };
+
+    runIncrementalIndexing({ dbPath, discoveryConfig });
+    rmSync(sessionFile);
+
+    const second = runIncrementalIndexing({ dbPath, discoveryConfig });
+    expect(second.removedFiles).toBe(0);
+
+    const db = openDatabase(dbPath);
+    try {
+      expect((db.prepare("SELECT COUNT(*) as c FROM sessions").get() as { c: number }).c).toBe(1);
+      expect((db.prepare("SELECT COUNT(*) as c FROM indexed_files").get() as { c: number }).c).toBe(
+        1,
+      );
+    } finally {
+      db.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("prunes missing session files during incremental indexing when enabled", () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-index-missing-prune-"));
+    const dbPath = join(dir, "index.db");
+
+    const claudeRoot = join(dir, ".claude", "projects");
+    const claudeProject = join(claudeRoot, "project-a");
+    mkdirSync(claudeProject, { recursive: true });
+    const sessionFile = join(claudeProject, "claude-session-1.jsonl");
+    writeFileSync(
+      sessionFile,
+      `${JSON.stringify({
+        sessionId: "claude-session-1",
+        type: "user",
+        cwd: "/workspace/claude",
+        gitBranch: "main",
+        timestamp: "2026-02-27T10:00:00Z",
+        message: {
+          role: "user",
+          content: [{ type: "text", text: "Hello Claude" }],
+        },
+      })}\n`,
+    );
+
+    const discoveryConfig = {
+      claudeRoot,
+      codexRoot: join(dir, ".codex", "sessions"),
+      geminiRoot: join(dir, ".gemini", "tmp"),
+      geminiHistoryRoot: join(dir, ".gemini", "history"),
+      geminiProjectsPath: join(dir, ".gemini", "projects.json"),
+      cursorRoot: join(dir, ".cursor", "projects"),
+      copilotRoot: join(dir, ".copilot-workspace"),
+      includeClaudeSubagents: false,
+    };
+
+    runIncrementalIndexing({ dbPath, discoveryConfig });
+    rmSync(sessionFile);
+
+    const second = runIncrementalIndexing({
+      dbPath,
+      discoveryConfig,
+      removeMissingSessionsDuringIncrementalIndexing: true,
+    });
+    expect(second.removedFiles).toBe(1);
+
+    const db = openDatabase(dbPath);
+    try {
+      expect((db.prepare("SELECT COUNT(*) as c FROM sessions").get() as { c: number }).c).toBe(0);
+      expect((db.prepare("SELECT COUNT(*) as c FROM indexed_files").get() as { c: number }).c).toBe(
+        0,
+      );
+    } finally {
+      db.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("indexes incrementally, supports force rebuild, and rebuilds on schema-version mismatch", () => {
     const dir = mkdtempSync(join(tmpdir(), "codetrail-index-"));
     const dbPath = join(dir, "index.db");

@@ -21,7 +21,6 @@ import {
   EMPTY_SYSTEM_MESSAGE_REGEX_RULES,
   PAGE_SIZE,
   PROJECT_ALL_NAV_ID,
-  PROVIDERS,
 } from "../app/constants";
 import {
   createHistorySelection,
@@ -47,6 +46,7 @@ import type {
 } from "../app/types";
 import { useDebouncedValue } from "../hooks/useDebouncedValue";
 import { usePaneStateSync } from "../hooks/usePaneStateSync";
+import { useReconcileProviderSelection } from "../hooks/useReconcileProviderSelection";
 import { useResizablePanes } from "../hooks/useResizablePanes";
 import { copyTextToClipboard } from "../lib/clipboard";
 import { useCodetrailClient } from "../lib/codetrailClient";
@@ -123,6 +123,8 @@ export function useHistoryController({
   initialPaneState,
   isHistoryLayout,
   searchMode,
+  enabledProviders,
+  setEnabledProviders,
   searchProviders,
   setSearchProviders,
   appearance,
@@ -131,6 +133,8 @@ export function useHistoryController({
   initialPaneState?: PaneStateSnapshot | null;
   isHistoryLayout: boolean;
   searchMode: SearchMode;
+  enabledProviders: Provider[];
+  setEnabledProviders: Dispatch<SetStateAction<Provider[]>>;
   searchProviders: Provider[];
   setSearchProviders: Dispatch<SetStateAction<Provider[]>>;
   appearance: AppearanceState;
@@ -142,8 +146,14 @@ export function useHistoryController({
   const initialSessionScrollTop = initialPaneState?.sessionScrollTop ?? 0;
 
   const [projectQueryInput, setProjectQueryInput] = useState("");
+  const [
+    removeMissingSessionsDuringIncrementalIndexing,
+    setRemoveMissingSessionsDuringIncrementalIndexing,
+  ] = useState(initialPaneState?.removeMissingSessionsDuringIncrementalIndexing ?? false);
   const [projectProviders, setProjectProviders] = useState<Provider[]>(
-    initialPaneState?.projectProviders ?? [...PROVIDERS],
+    (initialPaneState?.projectProviders ?? enabledProviders).filter((provider) =>
+      enabledProviders.includes(provider),
+    ),
   );
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [projectsLoaded, setProjectsLoaded] = useState(false);
@@ -279,14 +289,14 @@ export function useHistoryController({
   const historyMode = selection.mode;
 
   const sortedProjects = useMemo(() => {
-    const next = [...projects];
+    const next = projects.filter((project) => enabledProviders.includes(project.provider));
     next.sort((left, right) => {
       const byRecent =
         compareRecent(right.lastActivity, left.lastActivity) || left.name.localeCompare(right.name);
       return projectSortDirection === "desc" ? byRecent : -byRecent;
     });
     return next;
-  }, [projectSortDirection, projects]);
+  }, [enabledProviders, projectSortDirection, projects]);
 
   const sortedSessions = useMemo(() => {
     const next = [...sessions];
@@ -306,6 +316,8 @@ export function useHistoryController({
     () => ({
       // Keep the persisted snapshot derived from the controller's canonical selection state so
       // restoration does not drift from what the UI is actually rendering.
+      enabledProviders,
+      removeMissingSessionsDuringIncrementalIndexing,
       projectPaneWidth,
       sessionPaneWidth,
       projectPaneCollapsed,
@@ -342,9 +354,11 @@ export function useHistoryController({
       appearance.useMonospaceForAllMessages,
       bookmarkSortDirection,
       expandedByDefaultCategories,
+      enabledProviders,
       historyCategories,
       historyMode,
       messageSortDirection,
+      removeMissingSessionsDuringIncrementalIndexing,
       projectAllSortDirection,
       projectPaneCollapsed,
       projectPaneWidth,
@@ -399,6 +413,7 @@ export function useHistoryController({
     initialPaneStateHydrated: initialPaneState !== null,
     logError,
     paneState: paneStateForSync,
+    setEnabledProviders,
     setProjectPaneWidth,
     setSessionPaneWidth,
     setProjectPaneCollapsed,
@@ -408,6 +423,7 @@ export function useHistoryController({
     setExpandedByDefaultCategories,
     setSearchProviders,
     setPreferredAutoRefreshStrategy,
+    setRemoveMissingSessionsDuringIncrementalIndexing,
     setTheme: appearance.setTheme,
     setMonoFontFamily: appearance.setMonoFontFamily,
     setRegularFontFamily: appearance.setRegularFontFamily,
@@ -429,6 +445,8 @@ export function useHistoryController({
     sessionScrollTopRef,
     pendingRestoredSessionScrollRef,
   });
+
+  useReconcileProviderSelection(enabledProviders, setProjectProviders);
 
   const { loadProjects, loadSessions, loadBookmarks } = useHistoryDataEffects({
     codetrail,
@@ -845,6 +863,9 @@ export function useHistoryController({
     sortedSessions,
     selectedProject,
     selectedSession,
+    enabledProviders,
+    removeMissingSessionsDuringIncrementalIndexing,
+    setRemoveMissingSessionsDuringIncrementalIndexing,
     projectProviders,
     setProjectProviders,
     projectQueryInput,

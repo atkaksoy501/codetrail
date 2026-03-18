@@ -1,5 +1,7 @@
 import Database from "better-sqlite3";
 
+import type { Provider } from "../contracts/canonical";
+
 import { DATABASE_SCHEMA_VERSION } from "./constants";
 
 export type DatabaseBootstrapResult = {
@@ -166,6 +168,32 @@ export function clearIndexedData(db: SqliteDatabase): void {
   for (const table of dataTables) {
     db.exec(`DELETE FROM ${table}`);
   }
+}
+
+export function clearProvidersData(db: SqliteDatabase, providers: Provider[]): void {
+  const uniqueProviders = [...new Set(providers)];
+  if (uniqueProviders.length === 0) {
+    return;
+  }
+
+  const placeholders = uniqueProviders.map(() => "?").join(", ");
+  const purgeProviders = db.transaction((providerValues: Provider[]) => {
+    const deleteByProvider = (sql: string) => {
+      db.prepare(sql).run(...providerValues);
+    };
+
+    deleteByProvider(
+      `DELETE FROM tool_calls WHERE message_id IN (SELECT id FROM messages WHERE provider IN (${placeholders}))`,
+    );
+    deleteByProvider(`DELETE FROM message_fts WHERE provider IN (${placeholders})`);
+    deleteByProvider(`DELETE FROM messages WHERE provider IN (${placeholders})`);
+    deleteByProvider(`DELETE FROM index_checkpoints WHERE provider IN (${placeholders})`);
+    deleteByProvider(`DELETE FROM indexed_files WHERE provider IN (${placeholders})`);
+    deleteByProvider(`DELETE FROM sessions WHERE provider IN (${placeholders})`);
+    deleteByProvider(`DELETE FROM projects WHERE provider IN (${placeholders})`);
+  });
+
+  purgeProviders(uniqueProviders);
 }
 
 export function initializeDatabase(databasePath: string): DatabaseBootstrapResult {

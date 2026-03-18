@@ -1,5 +1,6 @@
 import type { AppStateStore, PaneState } from "./appStateStore";
 
+import type { Provider } from "@codetrail/core";
 import { createSettingsInfoFixture } from "@codetrail/core/testing";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -14,6 +15,7 @@ const {
   mockWorkerIndexingRunner,
   mockRegisterIpcHandlers,
   mockEnqueue,
+  mockPurgeProviders,
   mockEnqueueChangedFiles,
   mockGetStatus,
   mockStat,
@@ -70,6 +72,7 @@ const {
     mockWorkerIndexingRunner: vi.fn(),
     mockRegisterIpcHandlers: vi.fn(),
     mockEnqueue: vi.fn(async () => ({ jobId: "job-1" })),
+    mockPurgeProviders: vi.fn(async () => ({ jobId: "purge-1" })),
     mockEnqueueChangedFiles: vi.fn(async () => ({ jobId: "job-2" })),
     mockGetStatus: vi.fn(() => ({
       running: false,
@@ -205,6 +208,7 @@ function getRequiredHandler(handlers: HandlerMap, channel: string): Handler {
 describe("bootstrapMainProcess", () => {
   let handlers: HandlerMap;
   let setPaneState: ReturnType<typeof vi.fn>;
+  let setIndexingState: ReturnType<typeof vi.fn>;
   const paneState: PaneState = {
     projectPaneWidth: 220,
     sessionPaneWidth: 480,
@@ -243,12 +247,14 @@ describe("bootstrapMainProcess", () => {
   beforeEach(() => {
     handlers = {};
     setPaneState = vi.fn();
+    setIndexingState = vi.fn();
     vi.clearAllMocks();
     mockFileWatcherInstances.length = 0;
     void shutdownMainProcess();
 
     mockWorkerIndexingRunner.mockImplementation(() => ({
       enqueue: mockEnqueue,
+      purgeProviders: mockPurgeProviders,
       enqueueChangedFiles: mockEnqueueChangedFiles,
       getStatus: mockGetStatus,
     }));
@@ -272,10 +278,18 @@ describe("bootstrapMainProcess", () => {
   });
 
   it("wires all handlers and delegates query/indexing operations", async () => {
-    const appStateStore: Pick<AppStateStore, "getFilePath" | "getPaneState" | "setPaneState"> = {
+    const appStateStore: Pick<
+      AppStateStore,
+      "getFilePath" | "getPaneState" | "setPaneState" | "getIndexingState" | "setIndexingState"
+    > = {
       getFilePath: () => "/tmp/state.json",
       getPaneState: () => paneState,
+      getIndexingState: () => ({
+        enabledProviders: ["claude", "codex", "gemini", "cursor", "copilot"],
+        removeMissingSessionsDuringIncrementalIndexing: false,
+      }),
       setPaneState,
+      setIndexingState,
     };
 
     const result = await bootstrapMainProcess({
@@ -292,6 +306,7 @@ describe("bootstrapMainProcess", () => {
       "/tmp/codetrail.sqlite",
       expect.objectContaining({
         bookmarksDbPath: "/tmp/codetrail.sqlite.bookmarks",
+        getEnabledProviders: expect.any(Function),
         getSystemMessageRegexRules: expect.any(Function),
       }),
     );
@@ -396,10 +411,19 @@ describe("bootstrapMainProcess", () => {
 
     const searchPayload = { query: "error", limit: 20 };
     expect(getRequiredHandler(handlers, "search:query")(searchPayload)).toEqual({
-      items: [{ id: "m1", ...searchPayload }],
+      items: [
+        {
+          id: "m1",
+          ...searchPayload,
+          providers: ["claude", "codex", "gemini", "cursor", "copilot"],
+        },
+      ],
       total: 1,
     });
-    expect(mockRunSearchQuery).toHaveBeenCalledWith(searchPayload);
+    expect(mockRunSearchQuery).toHaveBeenCalledWith({
+      ...searchPayload,
+      providers: ["claude", "codex", "gemini", "cursor", "copilot"],
+    });
 
     await expect(getRequiredHandler(handlers, "indexer:refresh")({ force: true })).resolves.toEqual(
       {
@@ -463,10 +487,18 @@ describe("bootstrapMainProcess", () => {
   });
 
   it("hydrates and persists pane state through ui handlers", async () => {
-    const appStateStore: Pick<AppStateStore, "getFilePath" | "getPaneState" | "setPaneState"> = {
+    const appStateStore: Pick<
+      AppStateStore,
+      "getFilePath" | "getPaneState" | "setPaneState" | "getIndexingState" | "setIndexingState"
+    > = {
       getFilePath: () => "/tmp/state.json",
       getPaneState: () => paneState,
+      getIndexingState: () => ({
+        enabledProviders: ["claude", "codex", "gemini", "cursor", "copilot"],
+        removeMissingSessionsDuringIncrementalIndexing: false,
+      }),
       setPaneState,
+      setIndexingState,
     };
 
     await bootstrapMainProcess({
@@ -474,7 +506,7 @@ describe("bootstrapMainProcess", () => {
       runStartupIndexing: false,
     });
 
-    expect(getRequiredHandler(handlers, "ui:getState")({})).toEqual({
+    expect(getRequiredHandler(handlers, "ui:getPaneState")({})).toEqual({
       projectPaneWidth: 220,
       sessionPaneWidth: 480,
       projectPaneCollapsed: false,
@@ -508,6 +540,10 @@ describe("bootstrapMainProcess", () => {
         copilot: [],
       },
     });
+    expect(getRequiredHandler(handlers, "indexer:getConfig")({})).toEqual({
+      enabledProviders: ["claude", "codex", "gemini", "cursor", "copilot"],
+      removeMissingSessionsDuringIncrementalIndexing: false,
+    });
 
     const updated = {
       ...paneState,
@@ -516,8 +552,131 @@ describe("bootstrapMainProcess", () => {
       historyMode: "session" as const,
       sessionPage: 4,
     };
-    expect(getRequiredHandler(handlers, "ui:setState")(updated)).toEqual({ ok: true });
+    expect(getRequiredHandler(handlers, "ui:setPaneState")(updated)).toEqual({
+      ok: true,
+    });
     expect(setPaneState).toHaveBeenCalledWith(updated);
+  });
+
+  it("filters queries and watcher roots to enabled providers and runs a full incremental refresh on provider changes", async () => {
+    const currentPaneState: PaneState = {
+      ...paneState,
+      projectProviders: ["claude", "cursor"],
+      searchProviders: ["claude", "cursor"],
+    };
+    let currentIndexingState = {
+      enabledProviders: ["claude", "cursor"] as Provider[],
+      removeMissingSessionsDuringIncrementalIndexing: false,
+    };
+    const appStateStore: Pick<
+      AppStateStore,
+      "getFilePath" | "getPaneState" | "setPaneState" | "getIndexingState" | "setIndexingState"
+    > = {
+      getFilePath: () => "/tmp/state.json",
+      getPaneState: () => currentPaneState,
+      setPaneState: vi.fn(),
+      getIndexingState: () => currentIndexingState,
+      setIndexingState: vi.fn((value) => {
+        currentIndexingState = value;
+      }),
+    };
+
+    await bootstrapMainProcess({
+      appStateStore: appStateStore as AppStateStore,
+      runStartupIndexing: false,
+    });
+
+    getRequiredHandler(handlers, "projects:list")({ query: "" });
+    expect(mockListProjects).toHaveBeenLastCalledWith({
+      query: "",
+      providers: ["claude", "cursor"],
+    });
+
+    getRequiredHandler(handlers, "search:query")({ query: "bug", limit: 20 });
+    expect(mockRunSearchQuery).toHaveBeenLastCalledWith({
+      query: "bug",
+      limit: 20,
+      providers: ["claude", "cursor"],
+    });
+
+    const startWatcher = getRequiredHandler(handlers, "watcher:start");
+    await expect(startWatcher({ debounceMs: 3000 })).resolves.toMatchObject({
+      ok: true,
+      watchedRoots: ["/claude/root", "/cursor/root"],
+    });
+
+    mockEnqueue.mockClear();
+    await expect(
+      getRequiredHandler(
+        handlers,
+        "indexer:setConfig",
+      )({
+        enabledProviders: ["claude", "codex", "cursor"],
+        removeMissingSessionsDuringIncrementalIndexing: false,
+      }),
+    ).resolves.toEqual({ ok: true });
+
+    expect(mockFileWatcherInstances.at(-1)?.roots).toEqual([
+      "/claude/root",
+      "/codex/root",
+      "/cursor/root",
+    ]);
+    expect(mockPurgeProviders).not.toHaveBeenCalled();
+    expect(mockEnqueue).toHaveBeenCalledWith({ force: false }, { source: "manual_incremental" });
+  });
+
+  it("purges disabled providers and then runs a full incremental refresh", async () => {
+    const currentPaneState: PaneState = {
+      ...paneState,
+      projectProviders: ["claude", "codex", "cursor"],
+      searchProviders: ["claude", "codex", "cursor"],
+    };
+    let currentIndexingState = {
+      enabledProviders: ["claude", "codex", "cursor"] as Provider[],
+      removeMissingSessionsDuringIncrementalIndexing: false,
+    };
+    const appStateStore: Pick<
+      AppStateStore,
+      "getFilePath" | "getPaneState" | "setPaneState" | "getIndexingState" | "setIndexingState"
+    > = {
+      getFilePath: () => "/tmp/state.json",
+      getPaneState: () => currentPaneState,
+      setPaneState: vi.fn(),
+      getIndexingState: () => currentIndexingState,
+      setIndexingState: vi.fn((value) => {
+        currentIndexingState = value;
+      }),
+    };
+
+    await bootstrapMainProcess({
+      appStateStore: appStateStore as AppStateStore,
+      runStartupIndexing: false,
+    });
+
+    const startWatcher = getRequiredHandler(handlers, "watcher:start");
+    await expect(startWatcher({ debounceMs: 3000 })).resolves.toMatchObject({
+      ok: true,
+      watchedRoots: ["/claude/root", "/codex/root", "/cursor/root"],
+    });
+
+    mockEnqueue.mockClear();
+    mockPurgeProviders.mockClear();
+
+    await expect(
+      getRequiredHandler(
+        handlers,
+        "indexer:setConfig",
+      )({
+        enabledProviders: ["claude"],
+        removeMissingSessionsDuringIncrementalIndexing: false,
+      }),
+    ).resolves.toEqual({ ok: true });
+
+    expect(mockFileWatcherInstances.at(-1)?.roots).toEqual(["/claude/root"]);
+    expect(mockPurgeProviders).toHaveBeenCalledWith(["codex", "cursor"], {
+      source: "manual_incremental",
+    });
+    expect(mockEnqueue).toHaveBeenCalledWith({ force: false }, { source: "manual_incremental" });
   });
 
   it("starts macOS watchers with kqueue and runs a catch-up incremental scan after startup", async () => {

@@ -222,7 +222,7 @@ describe("indexChangedFiles", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it("cleans up indexed data when a file is deleted", () => {
+  it("keeps indexed data when a file is deleted by default", () => {
     const dir = mkdtempSync(join(tmpdir(), "codetrail-changed-delete-"));
     const dbPath = join(dir, "index.db");
 
@@ -268,15 +268,72 @@ describe("indexChangedFiles", () => {
     // Delete the file, then call indexChangedFiles with the same path
     rmSync(sessionFile);
     const second = indexChangedFiles({ dbPath, discoveryConfig }, [sessionFile]);
-    expect(second.removedFiles).toBe(1);
+    expect(second.removedFiles).toBe(0);
     expect(second.indexedFiles).toBe(0);
 
-    // Session and messages should be cleaned up
+    // Session and messages are retained until explicit pruning is enabled.
     const dbAfter = openDatabase(dbPath);
     expect((dbAfter.prepare("SELECT COUNT(*) as c FROM sessions").get() as { c: number }).c).toBe(
-      0,
+      1,
     );
     expect((dbAfter.prepare("SELECT COUNT(*) as c FROM messages").get() as { c: number }).c).toBe(
+      1,
+    );
+    expect(
+      (dbAfter.prepare("SELECT COUNT(*) as c FROM indexed_files").get() as { c: number }).c,
+    ).toBe(1);
+    dbAfter.close();
+
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("cleans up indexed data when file pruning is enabled", () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-changed-delete-prune-"));
+    const dbPath = join(dir, "index.db");
+
+    const claudeRoot = join(dir, ".claude", "projects");
+    const claudeProject = join(claudeRoot, "project-a");
+    mkdirSync(claudeProject, { recursive: true });
+
+    const sessionFile = join(claudeProject, "s1.jsonl");
+    writeFileSync(
+      sessionFile,
+      `${JSON.stringify({
+        sessionId: "s1",
+        type: "user",
+        cwd: "/workspace/app",
+        gitBranch: "main",
+        timestamp: "2026-02-27T10:00:00Z",
+        message: { role: "user", content: [{ type: "text", text: "Hello" }] },
+      })}\n`,
+    );
+
+    const discoveryConfig = {
+      claudeRoot,
+      codexRoot: join(dir, ".codex", "sessions"),
+      geminiRoot: join(dir, ".gemini", "tmp"),
+      geminiHistoryRoot: join(dir, ".gemini", "history"),
+      geminiProjectsPath: join(dir, ".gemini", "projects.json"),
+      cursorRoot: join(dir, ".cursor", "projects"),
+      copilotRoot: join(dir, ".copilot-workspace"),
+      includeClaudeSubagents: false,
+    };
+
+    indexChangedFiles({ dbPath, discoveryConfig }, [sessionFile]);
+
+    rmSync(sessionFile);
+    const second = indexChangedFiles(
+      {
+        dbPath,
+        discoveryConfig,
+        removeMissingSessionsDuringIncrementalIndexing: true,
+      },
+      [sessionFile],
+    );
+    expect(second.removedFiles).toBe(1);
+
+    const dbAfter = openDatabase(dbPath);
+    expect((dbAfter.prepare("SELECT COUNT(*) as c FROM sessions").get() as { c: number }).c).toBe(
       0,
     );
     expect(

@@ -40,6 +40,21 @@ export function toggleValue<T>(values: T[], value: T): T[] {
   return [...values, value];
 }
 
+export function reconcileProviderSelection(
+  current: Provider[],
+  previousEnabled: Provider[],
+  nextEnabled: Provider[],
+): Provider[] {
+  const next = current.filter((provider) => nextEnabled.includes(provider));
+  for (const provider of nextEnabled) {
+    if (previousEnabled.includes(provider) || next.includes(provider)) {
+      continue;
+    }
+    next.push(provider);
+  }
+  return next;
+}
+
 export function sessionActivityOf(session: SessionSummaryLike): string | null {
   return session.endedAt ?? session.startedAt;
 }

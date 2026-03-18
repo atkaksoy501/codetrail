@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import type { IpcResponse, MessageCategory } from "@codetrail/core/browser";
+import type { IpcResponse, MessageCategory, Provider } from "@codetrail/core/browser";
 import { createSettingsInfoFixture } from "@codetrail/core/testing";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -89,6 +89,12 @@ function createBaseProps() {
     onMonoFontSizeChange: vi.fn(),
     onRegularFontSizeChange: vi.fn(),
     onUseMonospaceForAllMessagesChange: vi.fn(),
+    enabledProviders: ["claude", "codex", "gemini", "cursor", "copilot"] as Provider[],
+    removeMissingSessionsDuringIncrementalIndexing: false,
+    canForceReindex: true,
+    onToggleProviderEnabled: vi.fn(),
+    onForceReindex: vi.fn(),
+    onRemoveMissingSessionsDuringIncrementalIndexingChange: vi.fn(),
     expandedByDefaultCategories: ["assistant"] as MessageCategory[],
     onToggleExpandedByDefault: vi.fn(),
     systemMessageRegexRules: {
@@ -124,6 +130,15 @@ describe("SettingsView", () => {
 
     render(<SettingsView info={info} loading={false} error={null} {...baseProps} />);
 
+    const sectionHeadings = screen
+      .getAllByRole("heading", { level: 3 })
+      .map((node) => node.textContent?.trim());
+    expect(sectionHeadings.indexOf("Default Expansion")).toBeLessThan(
+      sectionHeadings.indexOf("Providers"),
+    );
+    expect(sectionHeadings.indexOf("Providers")).toBeLessThan(
+      sectionHeadings.indexOf("Database Maintenance"),
+    );
     expect(screen.getByText("Storage")).toBeInTheDocument();
     expect(screen.getByText("Discovery Roots")).toBeInTheDocument();
     expect(screen.getByText("System Message Rules")).toBeInTheDocument();
@@ -141,6 +156,13 @@ describe("SettingsView", () => {
 
     await user.click(
       screen.getByRole("checkbox", { name: "Use monospaced fonts for all messages" }),
+    );
+    await user.click(screen.getByRole("checkbox", { name: "Claude" }));
+    await user.click(screen.getByRole("button", { name: "Force reindex" }));
+    await user.click(
+      screen.getByRole("checkbox", {
+        name: "Remove indexed sessions when source files disappear during incremental refresh",
+      }),
     );
     await user.click(screen.getByRole("button", { name: "User" }));
     await user.click(screen.getByRole("button", { name: "Add claude regex rule" }));
@@ -161,6 +183,11 @@ describe("SettingsView", () => {
     expect(baseProps.onRegularFontFamilyChange).toHaveBeenCalledWith("inter");
     expect(baseProps.onRegularFontSizeChange).toHaveBeenCalledWith("14px");
     expect(baseProps.onUseMonospaceForAllMessagesChange).toHaveBeenCalledWith(true);
+    expect(baseProps.onToggleProviderEnabled).toHaveBeenCalledWith("claude");
+    expect(baseProps.onForceReindex).toHaveBeenCalledTimes(1);
+    expect(baseProps.onRemoveMissingSessionsDuringIncrementalIndexingChange).toHaveBeenCalledWith(
+      true,
+    );
     expect(baseProps.onToggleExpandedByDefault).toHaveBeenCalledWith("user");
     expect(baseProps.onAddSystemMessageRegexRule).toHaveBeenCalledWith("claude");
     expect(baseProps.onUpdateSystemMessageRegexRule).toHaveBeenCalledWith(

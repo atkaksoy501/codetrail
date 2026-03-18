@@ -70,6 +70,12 @@ export function SettingsView({
   onMonoFontSizeChange,
   onRegularFontSizeChange,
   onUseMonospaceForAllMessagesChange,
+  enabledProviders,
+  removeMissingSessionsDuringIncrementalIndexing,
+  canForceReindex,
+  onToggleProviderEnabled,
+  onForceReindex,
+  onRemoveMissingSessionsDuringIncrementalIndexingChange,
   expandedByDefaultCategories,
   onToggleExpandedByDefault,
   systemMessageRegexRules,
@@ -97,6 +103,12 @@ export function SettingsView({
   onMonoFontSizeChange: (fontSize: MonoFontSize) => void;
   onRegularFontSizeChange: (fontSize: RegularFontSize) => void;
   onUseMonospaceForAllMessagesChange: (enabled: boolean) => void;
+  enabledProviders: Provider[];
+  removeMissingSessionsDuringIncrementalIndexing: boolean;
+  canForceReindex: boolean;
+  onToggleProviderEnabled: (provider: Provider) => void;
+  onForceReindex: () => void;
+  onRemoveMissingSessionsDuringIncrementalIndexingChange: (enabled: boolean) => void;
   expandedByDefaultCategories: MessageCategory[];
   onToggleExpandedByDefault: (category: MessageCategory) => void;
   systemMessageRegexRules: SystemMessageRegexRules;
@@ -328,6 +340,130 @@ export function SettingsView({
                     );
                   })}
                 </div>
+              </div>
+            </section>
+
+            <section className="settings-section">
+              <div className="settings-section-header">
+                <div className="settings-section-icon settings-section-icon-provider" aria-hidden>
+                  AI
+                </div>
+                <div>
+                  <h3>Providers</h3>
+                  <p>
+                    Choose which providers stay active in Codetrail. Disabled providers stop
+                    watching, indexing, and showing up in history until re-enabled.
+                  </p>
+                </div>
+              </div>
+              <div className="settings-section-body">
+                <div className="settings-provider-summary">
+                  <div className="settings-provider-summary-count">
+                    <span className="settings-provider-summary-value">
+                      {enabledProviders.length}
+                    </span>
+                    <span className="settings-provider-summary-label">
+                      of {PROVIDER_LIST.length} active
+                    </span>
+                  </div>
+                  <p>
+                    Turning a provider off removes its indexed history and bookmarks on the next
+                    refresh, but never touches the raw transcript files on disk.
+                  </p>
+                </div>
+                <div className="settings-provider-grid">
+                  {PROVIDER_LIST.map(({ id: provider, label }) => {
+                    const enabled = enabledProviders.includes(provider);
+                    return (
+                      <label
+                        key={provider}
+                        className={`settings-provider-card settings-provider-card-${provider}${
+                          enabled ? " enabled" : ""
+                        }`}
+                      >
+                        <div className="settings-provider-card-top">
+                          <span className={`settings-provider-badge settings-provider-${provider}`}>
+                            {label}
+                          </span>
+                          <span
+                            className={`settings-provider-state${
+                              enabled ? " enabled" : " disabled"
+                            }`}
+                          >
+                            {enabled ? "Enabled" : "Disabled"}
+                          </span>
+                        </div>
+                        <div className="settings-provider-card-copy">
+                          <strong>
+                            {enabled ? "Watching and indexing now" : "Currently paused"}
+                          </strong>
+                        </div>
+                        <span className="settings-provider-toggle">
+                          <input
+                            type="checkbox"
+                            aria-label={label}
+                            checked={enabled}
+                            onChange={() => onToggleProviderEnabled(provider)}
+                          />
+                          <span>{enabled ? "Active" : "Inactive"}</span>
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            </section>
+
+            <section className="settings-section">
+              <div className="settings-section-header">
+                <div className="settings-section-icon settings-section-icon-warning" aria-hidden>
+                  DB
+                </div>
+                <div>
+                  <h3>Database Maintenance</h3>
+                  <p>
+                    Rebuild or clean indexed history without touching the raw transcript files on
+                    disk.
+                  </p>
+                </div>
+              </div>
+              <div className="settings-section-body">
+                <div className="settings-maintenance-row">
+                  <div className="settings-maintenance-copy">
+                    <strong>Force reindex</strong>
+                    <p>
+                      Re-read all enabled provider session files from scratch and rebuild indexed
+                      history.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    className="tb-btn destructive settings-maintenance-action"
+                    onClick={onForceReindex}
+                    disabled={!canForceReindex}
+                    aria-label="Force reindex"
+                    title={
+                      canForceReindex
+                        ? "Force full reindex"
+                        : "Disable auto-refresh and wait for indexing to finish before reindexing"
+                    }
+                  >
+                    <ToolbarIcon name="reindex" />
+                    Reindex
+                  </button>
+                </div>
+                <label className="settings-checkbox-row">
+                  <input
+                    type="checkbox"
+                    checked={removeMissingSessionsDuringIncrementalIndexing}
+                    onChange={(event) =>
+                      onRemoveMissingSessionsDuringIncrementalIndexingChange(event.target.checked)
+                    }
+                  />
+                  <span>
+                    Remove indexed sessions when source files disappear during incremental refresh
+                  </span>
+                </label>
               </div>
             </section>
 

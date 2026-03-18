@@ -3,26 +3,14 @@ import { parentPort } from "node:worker_threads";
 import {
   type IndexingFileIssue,
   type IndexingNotice,
-  type SystemMessageRegexRuleOverrides,
   indexChangedFiles,
   runIncrementalIndexing,
 } from "@codetrail/core";
-
-type IncrementalRequest = {
-  kind: "incremental";
-  dbPath: string;
-  forceReindex: boolean;
-  systemMessageRegexRules?: SystemMessageRegexRuleOverrides;
-};
-
-type ChangedFilesRequest = {
-  kind: "changedFiles";
-  dbPath: string;
-  changedFilePaths: string[];
-  systemMessageRegexRules?: SystemMessageRegexRuleOverrides;
-};
-
-type IndexingWorkerRequest = IncrementalRequest | ChangedFilesRequest;
+import {
+  type IndexingWorkerRequest,
+  toChangedFilesIndexingConfig,
+  toIncrementalIndexingConfig,
+} from "./indexingRequestConfig";
 
 type IndexingWorkerResult =
   | {
@@ -97,26 +85,12 @@ function handleRequest(request: IndexingWorkerRequest): void {
   try {
     if (request.kind === "changedFiles") {
       indexChangedFiles(
-        {
-          dbPath: request.dbPath,
-          ...(request.systemMessageRegexRules
-            ? { systemMessageRegexRules: request.systemMessageRegexRules }
-            : {}),
-        },
+        toChangedFilesIndexingConfig(request),
         request.changedFilePaths,
         makeDependencies(),
       );
     } else {
-      runIncrementalIndexing(
-        {
-          dbPath: request.dbPath,
-          forceReindex: request.forceReindex,
-          ...(request.systemMessageRegexRules
-            ? { systemMessageRegexRules: request.systemMessageRegexRules }
-            : {}),
-        },
-        makeDependencies(),
-      );
+      runIncrementalIndexing(toIncrementalIndexingConfig(request), makeDependencies());
     }
     postMessage({ type: "result", ok: true });
   } catch (error) {

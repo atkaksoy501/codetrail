@@ -78,12 +78,22 @@ window.addEventListener("unhandledrejection", (event) => {
 
 async function bootRenderer(): Promise<void> {
   try {
-    const initialPaneStatePromise: Promise<IpcResponse<"ui:getState"> | null> =
+    const initialPaneStatePromise: Promise<
+      (IpcResponse<"ui:getPaneState"> & IpcResponse<"indexer:getConfig">) | null
+    > =
       typeof window.codetrail?.invoke === "function"
-        ? window.codetrail.invoke("ui:getState", {}).catch((error: unknown) => {
-            console.error("[codetrail] failed loading initial ui state", error);
-            return null;
-          })
+        ? Promise.all([
+            window.codetrail.invoke("ui:getPaneState", {}),
+            window.codetrail.invoke("indexer:getConfig", {}),
+          ])
+            .then(([paneState, indexerConfig]) => ({
+              ...paneState,
+              ...indexerConfig,
+            }))
+            .catch((error: unknown) => {
+              console.error("[codetrail] failed loading initial ui state", error);
+              return null;
+            })
         : Promise.resolve(null);
     const [{ App }, { AppErrorBoundary }, initialPaneState] = await Promise.all([
       import("./App"),

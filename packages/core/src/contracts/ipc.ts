@@ -155,7 +155,7 @@ function createProviderZodShape<T extends z.ZodTypeAny>(
 const systemMessageRegexRulesSchema = buildSystemMessageRegexRulesSchema();
 
 // Single source of truth for pane state fields. The non-nullable base schema is used
-// directly as the ui:setState request. The nullable variant (for ui:getState responses
+// directly as the ui:setPaneState request. The nullable variant (for ui:getPaneState responses
 // where persisted values may be absent) is derived automatically.
 export const paneStateBaseSchema = z.object({
   projectPaneWidth: z.number().int().positive(),
@@ -193,6 +193,13 @@ function makeAllNullable<T extends z.ZodRawShape>(shape: T) {
 }
 
 const paneStateSchema = z.object(makeAllNullable(paneStateBaseSchema.shape));
+
+export const indexerConfigBaseSchema = z.object({
+  enabledProviders: z.array(providerSchema),
+  removeMissingSessionsDuringIncrementalIndexing: z.boolean(),
+});
+
+const indexerConfigSchema = z.object(makeAllNullable(indexerConfigBaseSchema.shape));
 
 const uiZoomResponseSchema = z.object({
   percent: z.number().int().positive(),
@@ -436,12 +443,22 @@ export const ipcContractSchemas = {
       error: z.string().nullable(),
     }),
   },
-  "ui:getState": {
+  "ui:getPaneState": {
     request: z.object({}),
     response: paneStateSchema,
   },
-  "ui:setState": {
+  "ui:setPaneState": {
     request: paneStateBaseSchema,
+    response: z.object({
+      ok: z.literal(true),
+    }),
+  },
+  "indexer:getConfig": {
+    request: z.object({}),
+    response: indexerConfigSchema,
+  },
+  "indexer:setConfig": {
+    request: indexerConfigBaseSchema,
     response: z.object({
       ok: z.literal(true),
     }),

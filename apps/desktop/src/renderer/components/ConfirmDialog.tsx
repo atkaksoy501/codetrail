@@ -33,6 +33,26 @@ export function ConfirmDialog({
     }
   }, [open]);
 
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    const onWindowKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") {
+        return;
+      }
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      dialogRef.current?.close();
+    };
+
+    window.addEventListener("keydown", onWindowKeyDown, true);
+    return () => {
+      window.removeEventListener("keydown", onWindowKeyDown, true);
+    };
+  }, [open]);
+
   return (
     <dialog
       ref={dialogRef}
@@ -47,8 +67,13 @@ export function ConfirmDialog({
       }}
       onKeyDown={(e) => {
         if (e.key === "Escape" && e.target === dialogRef.current) {
+          e.preventDefault();
           dialogRef.current?.close();
         }
+      }}
+      onCancel={(e) => {
+        e.preventDefault();
+        dialogRef.current?.close();
       }}
     >
       <div className="confirm-dialog-content">

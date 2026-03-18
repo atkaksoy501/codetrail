@@ -1,4 +1,4 @@
-import { paneStateBaseSchema } from "@codetrail/core/browser";
+import { indexerConfigBaseSchema, paneStateBaseSchema } from "@codetrail/core/browser";
 import { createSettingsInfoFixture } from "@codetrail/core/testing";
 
 import { createMockCodetrailClient } from "./mockCodetrailClient";
@@ -8,6 +8,9 @@ type ChannelHandler = (request: Request) => Promise<unknown> | unknown;
 
 const EMPTY_UI_STATE = Object.fromEntries(
   Object.keys(paneStateBaseSchema.shape).map((k) => [k, null]),
+);
+const EMPTY_INDEXER_CONFIG = Object.fromEntries(
+  Object.keys(indexerConfigBaseSchema.shape).map((k) => [k, null]),
 );
 
 const SETTINGS_INFO = createSettingsInfoFixture();
@@ -38,10 +41,16 @@ function createRendererClient(handlers: Record<string, ChannelHandler>) {
       return await handler(request);
     }
 
-    if (channel === "ui:getState") {
+    if (channel === "ui:getPaneState") {
       return EMPTY_UI_STATE;
     }
-    if (channel === "ui:setState") {
+    if (channel === "ui:setPaneState") {
+      return { ok: true };
+    }
+    if (channel === "indexer:getConfig") {
+      return EMPTY_INDEXER_CONFIG;
+    }
+    if (channel === "indexer:setConfig") {
       return { ok: true };
     }
     if (channel === "ui:getZoom") {

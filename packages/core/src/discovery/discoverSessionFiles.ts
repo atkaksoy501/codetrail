@@ -1,7 +1,7 @@
 import { homedir, platform } from "node:os";
 import { join } from "node:path";
 
-import type { Provider } from "../contracts/canonical";
+import { PROVIDER_VALUES, type Provider } from "../contracts/canonical";
 import {
   PROVIDER_METADATA,
   type ProviderDiscoveryPathKey,
@@ -43,6 +43,7 @@ export const DEFAULT_DISCOVERY_CONFIG: DiscoveryConfig = {
   cursorRoot: join(homedir(), ".cursor", "projects"),
   copilotRoot: defaultCopilotRoot(),
   includeClaudeSubagents: false,
+  enabledProviders: [...PROVIDER_VALUES],
 };
 
 export function resolveDiscoveryConfig(
@@ -60,7 +61,23 @@ export function resolveDiscoveryConfig(
         includeSubagents: provider === "claude" ? merged.includeClaudeSubagents : false,
       },
     })),
+    enabledProviders: resolveEnabledProviders(merged.enabledProviders),
   };
+}
+
+export function resolveEnabledProviders(enabledProviders: Provider[] | undefined): Provider[] {
+  if (!enabledProviders) {
+    return [...PROVIDER_VALUES];
+  }
+
+  const next: Provider[] = [];
+  for (const provider of enabledProviders) {
+    if (!PROVIDER_VALUES.includes(provider) || next.includes(provider)) {
+      continue;
+    }
+    next.push(provider);
+  }
+  return next;
 }
 
 function resolveProviderPaths(
@@ -97,16 +114,18 @@ export function discoverSessionFiles(
   const resolvedDependencies = resolveDiscoveryDependencies(dependencies);
   const resolvedConfig = resolveDiscoveryConfig(config);
 
-  return PROVIDER_ADAPTER_LIST.flatMap((provider) =>
-    provider.discoverAll(resolvedConfig, resolvedDependencies),
-  ).sort((left, right) => {
-    const byMtime = right.fileMtimeMs - left.fileMtimeMs;
-    if (byMtime !== 0) {
-      return byMtime;
-    }
+  return PROVIDER_ADAPTER_LIST.filter((provider) =>
+    resolvedConfig.enabledProviders.includes(provider.id),
+  )
+    .flatMap((provider) => provider.discoverAll(resolvedConfig, resolvedDependencies))
+    .sort((left, right) => {
+      const byMtime = right.fileMtimeMs - left.fileMtimeMs;
+      if (byMtime !== 0) {
+        return byMtime;
+      }
 
-    return left.filePath.localeCompare(right.filePath);
-  });
+      return left.filePath.localeCompare(right.filePath);
+    });
 }
 
 /**
@@ -127,6 +146,9 @@ export function discoverSingleFile(
   const resolvedConfig = resolveDiscoveryConfig(config);
 
   for (const provider of PROVIDER_ADAPTER_LIST) {
+    if (!resolvedConfig.enabledProviders.includes(provider.id)) {
+      continue;
+    }
     const discovered = provider.discoverOne(filePath, resolvedConfig, resolvedDependencies);
     if (discovered) {
       return discovered;
@@ -164,7 +186,11 @@ export function listDiscoveryWatchRoots(
   config: DiscoveryConfig = DEFAULT_DISCOVERY_CONFIG,
 ): string[] {
   const roots = new Set<string>();
+  const enabledProviders = new Set(resolveDiscoveryConfig(config).enabledProviders);
   for (const path of listDiscoverySettingsPaths(config)) {
+    if (!enabledProviders.has(path.provider)) {
+      continue;
+    }
     if (path.watch) {
       roots.add(path.value);
     }

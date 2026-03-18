@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import type { MessageCategory, Provider, SearchMode } from "@codetrail/core/browser";
+import {
+  type MessageCategory,
+  PROVIDER_LIST,
+  type Provider,
+  type SearchMode,
+} from "@codetrail/core/browser";
 
 import {
   DEFAULT_PREFERRED_REFRESH_STRATEGY,
@@ -11,7 +16,12 @@ import {
   isScanRefreshStrategy,
   isWatchRefreshStrategy,
 } from "./app/autoRefresh";
-import { ADVANCED_SYNTAX_ITEMS, COMMON_SYNTAX_ITEMS, SHORTCUT_ITEMS } from "./app/constants";
+import {
+  ADVANCED_SYNTAX_ITEMS,
+  COMMON_SYNTAX_ITEMS,
+  PROVIDERS,
+  SHORTCUT_ITEMS,
+} from "./app/constants";
 import type { MainView, PaneStateSnapshot, WatchStatsResponse } from "./app/types";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { SettingsView } from "./components/SettingsView";
@@ -24,6 +34,7 @@ import { useAppearanceController } from "./features/useAppearanceController";
 import { useHistoryController } from "./features/useHistoryController";
 import { useSearchController } from "./features/useSearchController";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
+import { useReconcileProviderSelection } from "./hooks/useReconcileProviderSelection";
 import { isMissingCodetrailClient, useCodetrailClient } from "./lib/codetrailClient";
 import { toErrorMessage, toggleValue } from "./lib/viewUtils";
 
@@ -48,14 +59,22 @@ export function App({
   const [focusMode, setFocusMode] = useState(false);
   const [advancedSearchEnabled, setAdvancedSearchEnabled] = useState(false);
   const [showReindexConfirm, setShowReindexConfirm] = useState(false);
+  const [pendingProviderDisable, setPendingProviderDisable] = useState<Provider | null>(null);
+  const [pendingMissingSessionCleanupEnable, setPendingMissingSessionCleanupEnable] =
+    useState(false);
   const [refreshStrategy, setRefreshStrategy] = useState<RefreshStrategy>("off");
   const [watcherPendingPathCount, setWatcherPendingPathCount] = useState(0);
   const [autoRefreshScanInFlight, setAutoRefreshScanInFlight] = useState(false);
   const [watchStats, setWatchStats] = useState<WatchStatsResponse | null>(null);
   const [watchStatsLoading, setWatchStatsLoading] = useState(false);
   const [watchStatsError, setWatchStatsError] = useState<string | null>(null);
+  const [enabledProviders, setEnabledProviders] = useState<Provider[]>(
+    initialPaneState?.enabledProviders ?? [...PROVIDERS],
+  );
   const [searchProviders, setSearchProviders] = useState<Provider[]>(
-    initialPaneState?.searchProviders ?? [],
+    (initialPaneState?.searchProviders ?? enabledProviders).filter((provider) =>
+      enabledProviders.includes(provider),
+    ),
   );
 
   const isHistoryLayout = mainView === "history" && !focusMode;
@@ -75,6 +94,8 @@ export function App({
     initialPaneState,
     isHistoryLayout,
     searchMode,
+    enabledProviders,
+    setEnabledProviders,
     searchProviders,
     setSearchProviders,
     appearance,
@@ -139,6 +160,8 @@ export function App({
     };
   }, [codetrail, mainView]);
 
+  useReconcileProviderSelection(enabledProviders, setSearchProviders);
+
   useEffect(() => {
     if (
       search.searchProjectId &&
@@ -151,6 +174,35 @@ export function App({
   const reloadIndexedData = useCallback(async () => {
     await Promise.all([history.handleRefreshAllData(), search.reloadSearch()]);
   }, [history.handleRefreshAllData, search.reloadSearch]);
+
+  const pendingProviderDisableLabel =
+    PROVIDER_LIST.find((provider) => provider.id === pendingProviderDisable)?.label ?? "Provider";
+  const handleProviderToggle = useCallback(
+    (provider: Provider) => {
+      if (enabledProviders.includes(provider)) {
+        setPendingProviderDisable(provider);
+        return;
+      }
+      setEnabledProviders((current) => [...current, provider]);
+    },
+    [enabledProviders],
+  );
+  const handleMissingSessionCleanupToggle = useCallback(
+    (enabled: boolean) => {
+      if (!enabled) {
+        history.setRemoveMissingSessionsDuringIncrementalIndexing(false);
+        return;
+      }
+      if (history.removeMissingSessionsDuringIncrementalIndexing) {
+        return;
+      }
+      setPendingMissingSessionCleanupEnable(true);
+    },
+    [
+      history.removeMissingSessionsDuringIncrementalIndexing,
+      history.setRemoveMissingSessionsDuringIncrementalIndexing,
+    ],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -405,7 +457,6 @@ export function App({
         }
         onThemeChange={appearance.setTheme}
         onIncrementalRefresh={() => void handleIncrementalRefresh()}
-        onForceRefresh={() => setShowReindexConfirm(true)}
         refreshStrategy={refreshStrategy}
         onRefreshStrategyChange={updateRefreshStrategy}
         autoRefreshStatusLabel={autoRefreshStatusLabel}
@@ -457,6 +508,7 @@ export function App({
         ) : mainView === "search" ? (
           <SearchView
             search={search}
+            enabledProviders={enabledProviders}
             projects={history.sortedProjects}
             advancedSearchEnabled={advancedSearchEnabled}
             setAdvancedSearchEnabled={setAdvancedSearchEnabled}
@@ -502,6 +554,16 @@ export function App({
               onMonoFontSizeChange={appearance.setMonoFontSize}
               onRegularFontSizeChange={appearance.setRegularFontSize}
               onUseMonospaceForAllMessagesChange={appearance.setUseMonospaceForAllMessages}
+              enabledProviders={enabledProviders}
+              removeMissingSessionsDuringIncrementalIndexing={
+                history.removeMissingSessionsDuringIncrementalIndexing
+              }
+              canForceReindex={!indexing && refreshStrategy === "off"}
+              onToggleProviderEnabled={handleProviderToggle}
+              onForceReindex={() => setShowReindexConfirm(true)}
+              onRemoveMissingSessionsDuringIncrementalIndexingChange={
+                handleMissingSessionCleanupToggle
+              }
               expandedByDefaultCategories={history.expandedByDefaultCategories}
               onToggleExpandedByDefault={(category) =>
                 history.setExpandedByDefaultCategories((value) =>
@@ -548,7 +610,7 @@ export function App({
       <ConfirmDialog
         open={showReindexConfirm}
         title="Force Reindex"
-        message="This will re-read and re-index all provider session files from scratch. This may take a while. Continue?"
+        message="This will re-read all enabled provider session files from scratch and rebuild indexed history from disk. If some old sessions only exist in the database because their raw transcript files were already cleaned up, they can disappear after this reindex. Continue?"
         confirmLabel="Reindex"
         cancelLabel="Cancel"
         onConfirm={() => {
@@ -556,6 +618,35 @@ export function App({
           void handleForceRefresh();
         }}
         onCancel={() => setShowReindexConfirm(false)}
+      />
+      <ConfirmDialog
+        open={pendingProviderDisable !== null}
+        title={`Disable ${pendingProviderDisableLabel}?`}
+        message={`Disabling ${pendingProviderDisableLabel} will delete all indexed sessions and all bookmarks for that provider from Codetrail. Raw transcript files on disk will not be touched. Continue?`}
+        confirmLabel="Disable Provider"
+        cancelLabel="Cancel"
+        onConfirm={() => {
+          if (!pendingProviderDisable) {
+            return;
+          }
+          setEnabledProviders((current) =>
+            current.filter((provider) => provider !== pendingProviderDisable),
+          );
+          setPendingProviderDisable(null);
+        }}
+        onCancel={() => setPendingProviderDisable(null)}
+      />
+      <ConfirmDialog
+        open={pendingMissingSessionCleanupEnable}
+        title="Enable Missing Session Cleanup?"
+        message="When this is enabled, incremental refreshes will delete indexed sessions whose raw transcript files can no longer be found on disk. This can also remove related bookmarks if their sessions disappear. Continue?"
+        confirmLabel="Enable Cleanup"
+        cancelLabel="Cancel"
+        onConfirm={() => {
+          history.setRemoveMissingSessionsDuringIncrementalIndexing(true);
+          setPendingMissingSessionCleanupEnable(false);
+        }}
+        onCancel={() => setPendingMissingSessionCleanupEnable(false)}
       />
     </main>
   );

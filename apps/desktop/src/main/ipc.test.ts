@@ -1,13 +1,16 @@
 import { describe, expect, it } from "vitest";
 
-import { type IpcResponse, paneStateBaseSchema } from "@codetrail/core";
+import { type IpcResponse, indexerConfigBaseSchema, paneStateBaseSchema } from "@codetrail/core";
 import { createSettingsInfoFixture } from "@codetrail/core/testing";
 
 import { registerIpcHandlers } from "./ipc";
 
 const allNullPaneState = Object.fromEntries(
   Object.keys(paneStateBaseSchema.shape).map((k) => [k, null]),
-) as IpcResponse<"ui:getState">;
+) as IpcResponse<"ui:getPaneState">;
+const allNullIndexerConfig = Object.fromEntries(
+  Object.keys(indexerConfigBaseSchema.shape).map((k) => [k, null]),
+) as IpcResponse<"indexer:getConfig">;
 const settingsInfo = createSettingsInfoFixture({
   storage: {
     settingsFile: "/tmp/codetrail/ui-state.json",
@@ -114,8 +117,12 @@ describe("registerIpcHandlers", () => {
           ok: true,
           error: null,
         }),
-        "ui:getState": () => allNullPaneState,
-        "ui:setState": () => ({
+        "ui:getPaneState": () => allNullPaneState,
+        "ui:setPaneState": () => ({
+          ok: true,
+        }),
+        "indexer:getConfig": () => allNullIndexerConfig,
+        "indexer:setConfig": () => ({
           ok: true,
         }),
         "ui:getZoom": () => ({
@@ -246,8 +253,10 @@ describe("registerIpcHandlers", () => {
           results: [],
         }),
         "path:openInFileManager": () => ({ ok: true, error: null }),
-        "ui:getState": () => allNullPaneState,
-        "ui:setState": () => ({ ok: true }),
+        "ui:getPaneState": () => allNullPaneState,
+        "ui:setPaneState": () => ({ ok: true }),
+        "indexer:getConfig": () => allNullIndexerConfig,
+        "indexer:setConfig": () => ({ ok: true }),
         "ui:getZoom": () => ({ percent: 100 }),
         "ui:setZoom": () => ({ percent: 0 }) as never,
         "watcher:start": () => ({ ok: true, watchedRoots: [], backend: "default" }),

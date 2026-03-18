@@ -10,10 +10,13 @@ import {
   type IndexingNotice,
   type IpcResponse,
   PROVIDER_LIST,
+  type Provider,
+  indexerConfigBaseSchema,
   initializeDatabase,
   listDiscoverySettingsPaths,
   listDiscoveryWatchRoots,
   paneStateBaseSchema,
+  resolveEnabledProviders,
   resolveSystemMessageRegexRules,
 } from "@codetrail/core";
 
@@ -50,8 +53,15 @@ export type BootstrapResult = {
 
 // The main process owns long-lived resources: databases, IPC handlers, indexing workers, and the
 // path allowlist used by shell integrations.
-let activeQueryService: QueryService | null = null;
-let activeFileWatcher: FileWatcherService | null = null;
+const runtimeState: {
+  queryService: QueryService | null;
+  fileWatcher: FileWatcherService | null;
+  watcherDebounceMs: 1000 | 3000 | 5000 | null;
+} = {
+  queryService: null,
+  fileWatcher: null,
+  watcherDebounceMs: null,
+};
 
 export async function bootstrapMainProcess(
   options: BootstrapOptions = {},
@@ -74,19 +84,30 @@ export async function bootstrapMainProcess(
   const dbBootstrap = initializeDatabase(dbPath);
   initializeBookmarkStore(bookmarksDbPath);
   const watchStatsStore = new WatchStatsStore();
+  const getEnabledProviders = () =>
+    resolveEnabledProviders(options.appStateStore?.getIndexingState()?.enabledProviders);
+  const getRemoveMissingSessionsDuringIncrementalIndexing = () =>
+    options.appStateStore?.getIndexingState()?.removeMissingSessionsDuringIncrementalIndexing ??
+    false;
+  const getEffectiveDiscoveryConfig = () => ({
+    ...discoveryConfig,
+    enabledProviders: getEnabledProviders(),
+  });
   const indexingRunner = new WorkerIndexingRunner(dbPath, {
     bookmarksDbPath,
+    getEnabledProviders,
+    getRemoveMissingSessionsDuringIncrementalIndexing,
     getSystemMessageRegexRules: () =>
       options.appStateStore?.getPaneState()?.systemMessageRegexRules,
     onJobSettled: (event) => watchStatsStore.recordJobSettled(event),
     ...(options.onIndexingFileIssue ? { onFileIssue: options.onIndexingFileIssue } : {}),
     ...(options.onIndexingNotice ? { onNotice: options.onIndexingNotice } : {}),
   });
-  if (activeQueryService) {
-    activeQueryService.close();
+  if (runtimeState.queryService) {
+    runtimeState.queryService.close();
   }
   const queryService = createQueryService(dbPath, { bookmarksDbPath });
-  activeQueryService = queryService;
+  runtimeState.queryService = queryService;
   let allowedRootsCache: { roots: string[]; expiresAt: number } | null = null;
   const readAllowedRoots = (): string[] => {
     const now = Date.now();
@@ -97,7 +118,7 @@ export async function bootstrapMainProcess(
           bookmarksDbPath,
           settingsFilePath,
           queryService,
-          discoveryConfig,
+          discoveryConfig: getEffectiveDiscoveryConfig(),
         }),
         expiresAt: now + 5_000,
       };
@@ -108,8 +129,83 @@ export async function bootstrapMainProcess(
     allowedRootsCache = null;
   };
 
-  const watcherRoots = listDiscoveryWatchRoots(discoveryConfig);
   const discoverySettingsPaths = listDiscoverySettingsPaths(discoveryConfig);
+  const applyEnabledProviderFilter = (providers: Provider[] | undefined): Provider[] =>
+    providers
+      ? providers.filter((provider) => getEnabledProviders().includes(provider))
+      : [...getEnabledProviders()];
+
+  const startWatcherWithConfig = async (debounceMs: 1000 | 3000 | 5000) => {
+    if (runtimeState.fileWatcher) {
+      await runtimeState.fileWatcher.stop();
+      runtimeState.fileWatcher = null;
+    }
+
+    const watcherRoots = listDiscoveryWatchRoots(getEffectiveDiscoveryConfig());
+    const createFileWatcher = (watcherOptions: FileWatcherOptions) =>
+      new FileWatcherService(
+        watcherRoots,
+        async (batch: FileWatcherBatch) => {
+          invalidateAllowedRootsCache();
+          watchStatsStore.recordWatcherTrigger({
+            changedPathCount: batch.changedPaths.length,
+            requiresFullScan: batch.requiresFullScan,
+          });
+          const enqueuePromise = batch.requiresFullScan
+            ? indexingRunner.enqueue({ force: false }, { source: "watch_fallback_incremental" })
+            : indexingRunner.enqueueChangedFiles(batch.changedPaths, {
+                source: "watch_targeted",
+              });
+          await enqueuePromise.catch((error: unknown) => {
+            if (options.onBackgroundError) {
+              options.onBackgroundError("watcher-triggered indexing failed", error, {
+                requiresFullScan: batch.requiresFullScan,
+                changedPathCount: batch.changedPaths.length,
+              });
+              return;
+            }
+            console.error("[codetrail] watcher-triggered indexing failed", error);
+          });
+        },
+        {
+          ...watcherOptions,
+          debounceMs,
+        },
+      );
+
+    const startWatcher = async (
+      watcherOptions: FileWatcherOptions,
+      backend: "default" | "kqueue",
+    ) => {
+      const fileWatcher = createFileWatcher(watcherOptions);
+      await fileWatcher.start();
+      runtimeState.fileWatcher = fileWatcher;
+      runtimeState.watcherDebounceMs = debounceMs;
+      watchStatsStore.recordWatcherStart({
+        backend,
+        watchedRootCount: fileWatcher.getWatchedRoots().length,
+      });
+      return {
+        backend,
+        watchedRoots: fileWatcher.getWatchedRoots(),
+      };
+    };
+
+    if (process.platform === "darwin") {
+      try {
+        return await startWatcher({ subscribeOptions: { backend: "kqueue" } }, "kqueue");
+      } catch (error) {
+        console.warn(
+          "[codetrail] Failed to start kqueue watcher on macOS, falling back to default backend",
+          error,
+        );
+        return startWatcher({}, "default");
+      }
+    }
+
+    return startWatcher({}, "default");
+  };
+
   registerIpcHandlers(ipcMain, {
     "app:getHealth": () => ({
       status: "ok",
@@ -152,13 +248,21 @@ export async function bootstrapMainProcess(
       return { jobId: job.jobId };
     },
     "indexer:getStatus": () => indexingRunner.getStatus(),
-    "projects:list": (payload) => queryService.listProjects(payload),
+    "projects:list": (payload) =>
+      queryService.listProjects({
+        ...payload,
+        providers: applyEnabledProviderFilter(payload.providers),
+      }),
     "projects:getCombinedDetail": (payload) => queryService.getProjectCombinedDetail(payload),
     "sessions:list": (payload) => queryService.listSessions(payload),
     "sessions:getDetail": (payload) => queryService.getSessionDetail(payload),
     "bookmarks:listProject": (payload) => queryService.listProjectBookmarks(payload),
     "bookmarks:toggle": (payload) => queryService.toggleBookmark(payload),
-    "search:query": (payload) => queryService.runSearchQuery(payload),
+    "search:query": (payload) =>
+      queryService.runSearchQuery({
+        ...payload,
+        providers: applyEnabledProviderFilter(payload.providers),
+      }),
     "path:openInFileManager": async (payload) => {
       if (!isAbsolute(payload.path)) {
         return { ok: false, error: "Path must be absolute." };
@@ -189,22 +293,82 @@ export async function bootstrapMainProcess(
         error: error.length > 0 ? error : null,
       };
     },
-    "ui:getState": () => {
+    "ui:getPaneState": () => {
       const paneState = options.appStateStore?.getPaneState();
       const result = Object.fromEntries(
-        Object.keys(paneStateBaseSchema.shape).map((key) => [
+        Object.keys(paneStateBaseSchema.shape)
+          .filter((key) => key !== "systemMessageRegexRules")
+          .map((key) => [key, paneState?.[key as keyof typeof paneState] ?? null]),
+      );
+      return {
+        ...result,
+        // systemMessageRegexRules needs special resolution to fill in defaults for new providers.
+        systemMessageRegexRules: resolveSystemMessageRegexRules(paneState?.systemMessageRegexRules),
+      } as IpcResponse<"ui:getPaneState">;
+    },
+    "ui:setPaneState": (payload) => {
+      options.appStateStore?.setPaneState(payload);
+      return { ok: true };
+    },
+    "indexer:getConfig": () => {
+      const indexingState = options.appStateStore?.getIndexingState();
+      const result = Object.fromEntries(
+        Object.keys(indexerConfigBaseSchema.shape).map((key) => [
           key,
-          paneState?.[key as keyof typeof paneState] ?? null,
+          indexingState?.[key as keyof typeof indexingState] ?? null,
         ]),
       );
-      // systemMessageRegexRules needs special resolution to fill in defaults for new providers.
-      result.systemMessageRegexRules = resolveSystemMessageRegexRules(
-        paneState?.systemMessageRegexRules,
-      );
-      return result as IpcResponse<"ui:getState">;
+      return {
+        ...result,
+        enabledProviders: getEnabledProviders(),
+        removeMissingSessionsDuringIncrementalIndexing:
+          getRemoveMissingSessionsDuringIncrementalIndexing(),
+      } as IpcResponse<"indexer:getConfig">;
     },
-    "ui:setState": (payload) => {
-      options.appStateStore?.setPaneState(payload);
+    "indexer:setConfig": async (payload) => {
+      const previousEnabledProviders = getEnabledProviders();
+      options.appStateStore?.setIndexingState(payload);
+      const nextEnabledProviders = getEnabledProviders();
+      const enabledProvidersChanged =
+        previousEnabledProviders.length !== nextEnabledProviders.length ||
+        previousEnabledProviders.some((provider) => !nextEnabledProviders.includes(provider));
+      if (enabledProvidersChanged) {
+        const disabledProviders = previousEnabledProviders.filter(
+          (provider) => !nextEnabledProviders.includes(provider),
+        );
+        invalidateAllowedRootsCache();
+        if (disabledProviders.length > 0) {
+          try {
+            await indexingRunner.purgeProviders(disabledProviders, {
+              source: "manual_incremental",
+            });
+          } catch (error) {
+            if (options.onBackgroundError) {
+              options.onBackgroundError("provider disable cleanup failed", error, {
+                providers: disabledProviders,
+              });
+            } else {
+              console.error("[codetrail] provider disable cleanup failed", error);
+            }
+          }
+        }
+        if (runtimeState.fileWatcher && runtimeState.watcherDebounceMs !== null) {
+          try {
+            await startWatcherWithConfig(runtimeState.watcherDebounceMs);
+          } catch {
+            runtimeState.watcherDebounceMs = null;
+          }
+        }
+      }
+      void indexingRunner
+        .enqueue({ force: false }, { source: "manual_incremental" })
+        .catch((error) => {
+          if (options.onBackgroundError) {
+            options.onBackgroundError("provider enablement refresh failed", error);
+          } else {
+            console.error("[codetrail] provider enablement refresh failed", error);
+          }
+        });
       return { ok: true };
     },
     "ui:getZoom": (_payload, event) => ({
@@ -231,87 +395,8 @@ export async function bootstrapMainProcess(
       };
     },
     "watcher:start": async (payload) => {
-      if (activeFileWatcher) {
-        await activeFileWatcher.stop();
-        activeFileWatcher = null;
-      }
-
-      const createFileWatcher = (watcherOptions: FileWatcherOptions) =>
-        new FileWatcherService(
-          watcherRoots,
-          async (batch: FileWatcherBatch) => {
-            invalidateAllowedRootsCache();
-            watchStatsStore.recordWatcherTrigger({
-              changedPathCount: batch.changedPaths.length,
-              requiresFullScan: batch.requiresFullScan,
-            });
-            const enqueuePromise = batch.requiresFullScan
-              ? indexingRunner.enqueue({ force: false }, { source: "watch_fallback_incremental" })
-              : indexingRunner.enqueueChangedFiles(batch.changedPaths, {
-                  source: "watch_targeted",
-                });
-            await enqueuePromise.catch((error: unknown) => {
-              if (options.onBackgroundError) {
-                options.onBackgroundError("watcher-triggered indexing failed", error, {
-                  requiresFullScan: batch.requiresFullScan,
-                  changedPathCount: batch.changedPaths.length,
-                });
-                return;
-              }
-              console.error("[codetrail] watcher-triggered indexing failed", error);
-            });
-          },
-          watcherOptions,
-        );
-
-      const startWatcher = async (
-        watcherOptions: FileWatcherOptions,
-        backend: "default" | "kqueue",
-      ) => {
-        const fileWatcher = createFileWatcher({
-          ...watcherOptions,
-          debounceMs: payload.debounceMs,
-        });
-        await fileWatcher.start();
-        activeFileWatcher = fileWatcher;
-        watchStatsStore.recordWatcherStart({
-          backend,
-          watchedRootCount: fileWatcher.getWatchedRoots().length,
-        });
-        return {
-          backend,
-          watchedRoots: fileWatcher.getWatchedRoots(),
-        };
-      };
-
       try {
-        let startedWatcher: {
-          backend: "default" | "kqueue";
-          watchedRoots: string[];
-        };
-
-        if (process.platform === "darwin") {
-          try {
-            // Codex transcript appends on this macOS setup were missed by both Parcel's default
-            // FSEvents backend and a direct CoreServices FSEvents probe, while Parcel's kqueue
-            // backend consistently observed them. We force kqueue here for correctness and keep
-            // the default backend only as a fallback if kqueue subscription setup fails. Because
-            // kqueue can still miss files created in brand-new nested directories, the watcher
-            // promotes structural events to a full incremental scan.
-            startedWatcher = await startWatcher(
-              { subscribeOptions: { backend: "kqueue" } },
-              "kqueue",
-            );
-          } catch (error) {
-            console.warn(
-              "[codetrail] Failed to start kqueue watcher on macOS, falling back to default backend",
-              error,
-            );
-            startedWatcher = await startWatcher({}, "default");
-          }
-        } else {
-          startedWatcher = await startWatcher({}, "default");
-        }
+        const startedWatcher = await startWatcherWithConfig(payload.debounceMs);
 
         // Run one full incremental scan to bring the DB up to date before relying on events
         void indexingRunner
@@ -334,15 +419,20 @@ export async function bootstrapMainProcess(
     },
     "watcher:getStatus": async () => {
       return (
-        activeFileWatcher?.getStatus() ?? { running: false, processing: false, pendingPathCount: 0 }
+        runtimeState.fileWatcher?.getStatus() ?? {
+          running: false,
+          processing: false,
+          pendingPathCount: 0,
+        }
       );
     },
     "watcher:getStats": async () => watchStatsStore.snapshot(),
     "watcher:stop": async () => {
-      if (activeFileWatcher) {
-        await activeFileWatcher.stop();
-        activeFileWatcher = null;
+      if (runtimeState.fileWatcher) {
+        await runtimeState.fileWatcher.stop();
+        runtimeState.fileWatcher = null;
       }
+      runtimeState.watcherDebounceMs = null;
       return { ok: true };
     },
   });
@@ -366,15 +456,16 @@ export async function bootstrapMainProcess(
 }
 
 export async function shutdownMainProcess(): Promise<void> {
-  if (activeFileWatcher) {
-    await activeFileWatcher.stop();
-    activeFileWatcher = null;
+  if (runtimeState.fileWatcher) {
+    await runtimeState.fileWatcher.stop();
+    runtimeState.fileWatcher = null;
   }
-  if (!activeQueryService) {
+  runtimeState.watcherDebounceMs = null;
+  if (!runtimeState.queryService) {
     return;
   }
-  activeQueryService.close();
-  activeQueryService = null;
+  runtimeState.queryService.close();
+  runtimeState.queryService = null;
 }
 
 function getAllowedOpenInFileManagerRoots(input: {
@@ -382,7 +473,7 @@ function getAllowedOpenInFileManagerRoots(input: {
   bookmarksDbPath: string;
   settingsFilePath: string;
   queryService: QueryService;
-  discoveryConfig: typeof DEFAULT_DISCOVERY_CONFIG;
+  discoveryConfig: typeof DEFAULT_DISCOVERY_CONFIG & { enabledProviders?: Provider[] };
 }): string[] {
   const roots = new Set<string>();
   const addRoot = (value: string | null | undefined) => {
@@ -410,7 +501,10 @@ function getAllowedOpenInFileManagerRoots(input: {
 
   try {
     // Indexed project paths are dynamic, so fold them into the static provider/app roots cache.
-    const projects = input.queryService.listProjects({ providers: undefined, query: "" });
+    const projects = input.queryService.listProjects({
+      providers: input.discoveryConfig.enabledProviders,
+      query: "",
+    });
     for (const project of projects.projects) {
       addRoot(project.path);
     }

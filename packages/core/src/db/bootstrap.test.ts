@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   clearIndexedData,
+  clearProvidersData,
   ensureDatabaseSchema,
   initializeDatabase,
   openDatabase,
@@ -132,6 +133,113 @@ describe("initializeDatabase", () => {
       projects: 0,
       indexedFiles: 0,
       checkpoints: 0,
+    });
+
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("clears only the requested providers", () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-db-provider-clear-"));
+    const dbPath = join(dir, "test-provider-clear.db");
+    initializeDatabase(dbPath);
+    const db = openDatabase(dbPath);
+
+    db.exec(`INSERT INTO projects (id, provider, name, path, created_at, updated_at) VALUES
+      ('p1', 'claude', 'Claude Project', '/tmp/claude', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z'),
+      ('p2', 'codex', 'Codex Project', '/tmp/codex', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')`);
+    db.exec(`INSERT INTO sessions (
+      id, project_id, provider, file_path, model_names, started_at, ended_at, duration_ms,
+      git_branch, cwd, message_count, token_input_total, token_output_total
+    ) VALUES
+      ('s1', 'p1', 'claude', '/tmp/claude/session.jsonl', 'claude-opus', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:01.000Z', 1000, 'main', '/tmp/claude', 1, 0, 0),
+      ('s2', 'p2', 'codex', '/tmp/codex/session.jsonl', 'gpt-5-codex', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:01.000Z', 1000, 'main', '/tmp/codex', 1, 0, 0)`);
+    db.exec(`INSERT INTO messages (
+      id, source_id, session_id, provider, category, content, created_at
+    ) VALUES
+      ('m1', 'src-1', 's1', 'claude', 'assistant', 'claude content', '2026-01-01T00:00:01.000Z'),
+      ('m2', 'src-2', 's2', 'codex', 'assistant', 'codex content', '2026-01-01T00:00:01.000Z')`);
+    db.exec(`INSERT INTO tool_calls (
+      id, message_id, tool_name, args_json, result_json, started_at, completed_at
+    ) VALUES
+      ('t1', 'm1', 'bash', '{}', null, null, null),
+      ('t2', 'm2', 'read_file', '{}', null, null, null)`);
+    db.exec(`INSERT INTO indexed_files (
+      file_path, provider, project_path, session_identity, file_size, file_mtime_ms, indexed_at
+    ) VALUES
+      ('/tmp/claude/session.jsonl', 'claude', '/tmp/claude', 'sid-1', 10, 10, '2026-01-01T00:00:01.000Z'),
+      ('/tmp/codex/session.jsonl', 'codex', '/tmp/codex', 'sid-2', 10, 10, '2026-01-01T00:00:01.000Z')`);
+    db.exec(`INSERT INTO index_checkpoints (
+      file_path, provider, session_id, session_identity, file_size, file_mtime_ms,
+      last_offset_bytes, last_line_number, last_event_index, next_message_sequence,
+      processing_state_json, source_metadata_json, head_hash, tail_hash, updated_at
+    ) VALUES
+      ('/tmp/claude/session.jsonl', 'claude', 's1', 'sid-1', 10, 10, 10, 1, 1, 1, '{}', '{}', 'head', 'tail', '2026-01-01T00:00:01.000Z'),
+      ('/tmp/codex/session.jsonl', 'codex', 's2', 'sid-2', 10, 10, 10, 1, 1, 1, '{}', '{}', 'head', 'tail', '2026-01-01T00:00:01.000Z')`);
+    db.exec(
+      `INSERT INTO message_fts (message_id, session_id, provider, category, content) VALUES
+        ('m1', 's1', 'claude', 'assistant', 'claude content'),
+        ('m2', 's2', 'codex', 'assistant', 'codex content')`,
+    );
+
+    clearProvidersData(db, ["codex"]);
+
+    const counts = {
+      claudeProjects: (
+        db.prepare("SELECT COUNT(*) as c FROM projects WHERE provider = 'claude'").get() as {
+          c: number;
+        }
+      ).c,
+      codexProjects: (
+        db.prepare("SELECT COUNT(*) as c FROM projects WHERE provider = 'codex'").get() as {
+          c: number;
+        }
+      ).c,
+      claudeMessages: (
+        db.prepare("SELECT COUNT(*) as c FROM messages WHERE provider = 'claude'").get() as {
+          c: number;
+        }
+      ).c,
+      codexMessages: (
+        db.prepare("SELECT COUNT(*) as c FROM messages WHERE provider = 'codex'").get() as {
+          c: number;
+        }
+      ).c,
+      codexToolCalls: (
+        db
+          .prepare(
+            "SELECT COUNT(*) as c FROM tool_calls WHERE message_id IN (SELECT id FROM messages WHERE provider = 'codex')",
+          )
+          .get() as { c: number }
+      ).c,
+      codexIndexedFiles: (
+        db.prepare("SELECT COUNT(*) as c FROM indexed_files WHERE provider = 'codex'").get() as {
+          c: number;
+        }
+      ).c,
+      codexCheckpoints: (
+        db
+          .prepare("SELECT COUNT(*) as c FROM index_checkpoints WHERE provider = 'codex'")
+          .get() as {
+          c: number;
+        }
+      ).c,
+      codexFts: (
+        db.prepare("SELECT COUNT(*) as c FROM message_fts WHERE provider = 'codex'").get() as {
+          c: number;
+        }
+      ).c,
+    };
+    db.close();
+
+    expect(counts).toEqual({
+      claudeProjects: 1,
+      codexProjects: 0,
+      claudeMessages: 1,
+      codexMessages: 0,
+      codexToolCalls: 0,
+      codexIndexedFiles: 0,
+      codexCheckpoints: 0,
+      codexFts: 0,
     });
 
     rmSync(dir, { recursive: true, force: true });

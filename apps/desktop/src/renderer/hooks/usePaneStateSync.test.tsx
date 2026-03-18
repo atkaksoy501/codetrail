@@ -19,9 +19,10 @@ import { createMockCodetrailClient } from "../test/mockCodetrailClient";
 import { renderWithClient } from "../test/renderWithClient";
 import { usePaneStateSync } from "./usePaneStateSync";
 
-// Hydration settles across two async phases in this hook: the `ui:getState` promise schedules a
-// requestAnimationFrame flip to "hydrated", and the hydrated effect then schedules the debounced
-// `ui:setState` persistence timer. Flush both phases before asserting persisted state.
+// Hydration settles across two async phases in this hook: the pane/indexer config requests
+// schedule a requestAnimationFrame flip to "hydrated", and the hydrated effects then schedule the
+// debounced `ui:setPaneState` / `indexer:setConfig` persistence timers. Flush both phases before
+// asserting persisted state.
 async function flushPaneStateTimers(): Promise<void> {
   await act(async () => {
     await Promise.resolve();
@@ -62,6 +63,11 @@ function installAnimationFrameTimerMocks() {
 function Harness({ logError }: { logError: (context: string, error: unknown) => void }) {
   const [projectPaneWidth, setProjectPaneWidth] = useState(280);
   const [sessionPaneWidth, setSessionPaneWidth] = useState(300);
+  const [enabledProviders, setEnabledProviders] = useState<Provider[]>(["claude", "codex"]);
+  const [
+    removeMissingSessionsDuringIncrementalIndexing,
+    setRemoveMissingSessionsDuringIncrementalIndexing,
+  ] = useState(false);
   const [projectPaneCollapsed, setProjectPaneCollapsed] = useState(false);
   const [sessionPaneCollapsed, setSessionPaneCollapsed] = useState(false);
   const [projectProviders, setProjectProviders] = useState<Provider[]>(["claude"]);
@@ -109,6 +115,8 @@ function Harness({ logError }: { logError: (context: string, error: unknown) => 
   const { paneStateHydrated } = usePaneStateSync({
     logError,
     paneState: {
+      enabledProviders,
+      removeMissingSessionsDuringIncrementalIndexing,
       projectPaneWidth,
       sessionPaneWidth,
       projectPaneCollapsed,
@@ -136,6 +144,8 @@ function Harness({ logError }: { logError: (context: string, error: unknown) => 
       sessionScrollTop,
       systemMessageRegexRules,
     },
+    setEnabledProviders,
+    setRemoveMissingSessionsDuringIncrementalIndexing,
     setProjectPaneWidth,
     setSessionPaneWidth,
     setProjectPaneCollapsed,
@@ -177,13 +187,13 @@ function Harness({ logError }: { logError: (context: string, error: unknown) => 
 }
 
 describe("usePaneStateSync", () => {
-  it("hydrates state from ui:getState and persists updates via ui:setState", async () => {
+  it("hydrates state from pane/indexer IPC and persists updates through split channels", async () => {
     const client = createMockCodetrailClient();
     const animationFrameMocks = installAnimationFrameTimerMocks();
 
     try {
       client.invoke.mockImplementation(async (channel) => {
-        if (channel === "ui:getState") {
+        if (channel === "ui:getPaneState") {
           return {
             projectPaneWidth: 340,
             sessionPaneWidth: 410,
@@ -219,6 +229,12 @@ describe("usePaneStateSync", () => {
             },
           };
         }
+        if (channel === "indexer:getConfig") {
+          return {
+            enabledProviders: ["claude", "cursor"],
+            removeMissingSessionsDuringIncrementalIndexing: true,
+          };
+        }
         return { ok: true };
       });
 
@@ -233,10 +249,12 @@ describe("usePaneStateSync", () => {
       expect(screen.getByTestId("history-mode").textContent).toBe("bookmarks");
       expect(screen.getByTestId("scroll").textContent).toBe("222");
 
-      const saveCalls = client.invoke.mock.calls.filter(([channel]) => channel === "ui:setState");
-      expect(saveCalls.length).toBeGreaterThan(0);
-      const lastSavePayload = saveCalls.at(-1)?.[1];
-      expect(lastSavePayload).toMatchObject({
+      const paneSaveCalls = client.invoke.mock.calls.filter(
+        ([channel]) => channel === "ui:setPaneState",
+      );
+      expect(paneSaveCalls.length).toBeGreaterThan(0);
+      const lastPaneSavePayload = paneSaveCalls.at(-1)?.[1];
+      expect(lastPaneSavePayload).toMatchObject({
         preferredAutoRefreshStrategy: "scan-10s",
         systemMessageRegexRules: {
           claude: ["^<command-name>"],
@@ -245,18 +263,26 @@ describe("usePaneStateSync", () => {
           cursor: [],
         },
       });
+      const indexerSaveCalls = client.invoke.mock.calls.filter(
+        ([channel]) => channel === "indexer:setConfig",
+      );
+      expect(indexerSaveCalls.length).toBeGreaterThan(0);
+      expect(indexerSaveCalls.at(-1)?.[1]).toMatchObject({
+        enabledProviders: ["claude", "cursor"],
+        removeMissingSessionsDuringIncrementalIndexing: true,
+      });
       expect(logError).not.toHaveBeenCalled();
     } finally {
       animationFrameMocks.restore();
     }
   });
 
-  it("logs errors when ui:getState fails", async () => {
+  it("logs errors when pane/indexer hydration fails", async () => {
     const animationFrameMocks = installAnimationFrameTimerMocks();
     const client = createMockCodetrailClient();
     try {
       client.invoke.mockImplementation(async (channel) => {
-        if (channel === "ui:getState") {
+        if (channel === "ui:getPaneState") {
           throw new Error("load failed");
         }
         return { ok: true };
@@ -280,7 +306,7 @@ describe("usePaneStateSync", () => {
 
     try {
       client.invoke.mockImplementation(async (channel) => {
-        if (channel === "ui:getState") {
+        if (channel === "ui:getPaneState") {
           return {
             projectPaneWidth: null,
             sessionPaneWidth: null,
@@ -310,7 +336,13 @@ describe("usePaneStateSync", () => {
             systemMessageRegexRules: {
               claude: ["^<command-name>"],
             },
-          } as IpcResponse<"ui:getState">;
+          } as IpcResponse<"ui:getPaneState">;
+        }
+        if (channel === "indexer:getConfig") {
+          return {
+            enabledProviders: null,
+            removeMissingSessionsDuringIncrementalIndexing: null,
+          } as IpcResponse<"indexer:getConfig">;
         }
         return { ok: true };
       });
@@ -321,7 +353,9 @@ describe("usePaneStateSync", () => {
 
       expect(screen.getByTestId("hydrated").textContent).toBe("yes");
 
-      const saveCalls = client.invoke.mock.calls.filter(([channel]) => channel === "ui:setState");
+      const saveCalls = client.invoke.mock.calls.filter(
+        ([channel]) => channel === "ui:setPaneState",
+      );
       const lastSavePayload = saveCalls.at(-1)?.[1];
       expect(lastSavePayload).toMatchObject({
         systemMessageRegexRules: {

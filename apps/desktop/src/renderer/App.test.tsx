@@ -10,6 +10,32 @@ import { SEARCH_PLACEHOLDERS } from "./lib/searchPlaceholders";
 import { createAppClient, installScrollIntoViewMock } from "./test/appTestFixtures";
 import { renderWithClient } from "./test/renderWithClient";
 
+function installDialogMock(): void {
+  Object.defineProperty(HTMLDialogElement.prototype, "showModal", {
+    configurable: true,
+    value() {
+      this.setAttribute("open", "");
+      Object.defineProperty(this, "open", {
+        configurable: true,
+        writable: true,
+        value: true,
+      });
+    },
+  });
+  Object.defineProperty(HTMLDialogElement.prototype, "close", {
+    configurable: true,
+    value() {
+      this.removeAttribute("open");
+      Object.defineProperty(this, "open", {
+        configurable: true,
+        writable: true,
+        value: false,
+      });
+      this.dispatchEvent(new Event("close"));
+    },
+  });
+}
+
 describe("App shell", () => {
   it("loads history, supports global search navigation, and opens settings", async () => {
     installScrollIntoViewMock();
@@ -119,7 +145,199 @@ describe("App shell", () => {
     expect(workspace.style.getPropertyValue("--session-pane-width")).toBe("320px");
   });
 
-  it("disables refresh and reindex controls while background indexing is active", async () => {
+  it("hides disabled provider toggles and projects", async () => {
+    installScrollIntoViewMock();
+    const client = createAppClient({
+      "projects:list": () => ({
+        projects: [
+          {
+            id: "project_1",
+            provider: "claude",
+            name: "Project One",
+            path: "/workspace/project-one",
+            sessionCount: 1,
+            lastActivity: "2026-03-01T10:00:05.000Z",
+          },
+          {
+            id: "project_2",
+            provider: "codex",
+            name: "Project Two",
+            path: "/workspace/project-two",
+            sessionCount: 1,
+            lastActivity: "2026-03-01T10:00:06.000Z",
+          },
+        ],
+      }),
+    });
+
+    renderWithClient(
+      <App
+        initialPaneState={
+          {
+            enabledProviders: ["claude"],
+            projectProviders: ["claude"],
+            searchProviders: ["claude"],
+          } as PaneStateSnapshot
+        }
+      />,
+      client,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Project One")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("Project Two")).toBeNull();
+    expect(screen.queryAllByRole("button", { name: /Codex/i })).toHaveLength(0);
+  });
+
+  it("requires confirmation before disabling a provider", async () => {
+    installScrollIntoViewMock();
+    installDialogMock();
+    const user = userEvent.setup();
+    const client = createAppClient();
+
+    renderWithClient(
+      <App
+        initialPaneState={
+          {
+            enabledProviders: ["claude", "codex", "gemini", "cursor", "copilot"],
+            projectProviders: ["claude", "codex", "gemini", "cursor", "copilot"],
+            searchProviders: ["claude", "codex", "gemini", "cursor", "copilot"],
+          } as PaneStateSnapshot
+        }
+      />,
+      client,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Project One")).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: "Open settings" }));
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Providers" })).toBeInTheDocument();
+    });
+
+    const codexCheckbox = screen.getByRole("checkbox", { name: "Codex" });
+    expect(codexCheckbox).toBeChecked();
+
+    await user.click(codexCheckbox);
+    expect(screen.getByText("Disable Codex?")).toBeInTheDocument();
+    expect(
+      screen.getByText(/will delete all indexed sessions and all bookmarks for that provider/i),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(codexCheckbox).toBeChecked();
+
+    await user.click(codexCheckbox);
+    await user.click(screen.getByRole("button", { name: "Disable Provider" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("checkbox", { name: "Codex" })).not.toBeChecked();
+    });
+    await waitFor(() => {
+      const indexerConfigCalls = client.invoke.mock.calls.filter(
+        ([channel]) => channel === "indexer:setConfig",
+      );
+      expect(
+        indexerConfigCalls.some(([, payload]) => {
+          const state = payload as { enabledProviders?: string[] };
+          return (
+            Array.isArray(state.enabledProviders) &&
+            !state.enabledProviders.includes("codex") &&
+            state.enabledProviders.includes("claude")
+          );
+        }),
+      ).toBe(true);
+    });
+  });
+
+  it("Escape closes the confirmation dialog before leaving settings", async () => {
+    installScrollIntoViewMock();
+    installDialogMock();
+    const user = userEvent.setup();
+    const client = createAppClient();
+
+    renderWithClient(<App />, client);
+
+    await waitFor(() => {
+      expect(screen.getByText("Project One")).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: "Open settings" }));
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Database Maintenance" })).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("checkbox", { name: "Codex" }));
+    expect(screen.getByText("Disable Codex?")).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    await waitFor(() => {
+      expect(screen.queryByText("Disable Codex?")).not.toBeInTheDocument();
+    });
+    expect(screen.getByRole("heading", { name: "Database Maintenance" })).toBeInTheDocument();
+  });
+
+  it("requires confirmation before enabling missing session cleanup", async () => {
+    installScrollIntoViewMock();
+    installDialogMock();
+    const user = userEvent.setup();
+    const client = createAppClient();
+
+    renderWithClient(<App />, client);
+
+    await waitFor(() => {
+      expect(screen.getByText("Project One")).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: "Open settings" }));
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Database Maintenance" })).toBeInTheDocument();
+    });
+
+    const cleanupCheckbox = screen.getByRole("checkbox", {
+      name: "Remove indexed sessions when source files disappear during incremental refresh",
+    });
+    expect(cleanupCheckbox).not.toBeChecked();
+
+    await user.click(cleanupCheckbox);
+    expect(screen.getByText("Enable Missing Session Cleanup?")).toBeInTheDocument();
+    expect(
+      screen.getByText(/incremental refreshes will delete indexed sessions whose raw transcript/i),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(cleanupCheckbox).not.toBeChecked();
+
+    await user.click(cleanupCheckbox);
+    await user.click(screen.getByRole("button", { name: "Enable Cleanup" }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("checkbox", {
+          name: "Remove indexed sessions when source files disappear during incremental refresh",
+        }),
+      ).toBeChecked();
+    });
+    await waitFor(() => {
+      const indexerConfigCalls = client.invoke.mock.calls.filter(
+        ([channel]) => channel === "indexer:setConfig",
+      );
+      expect(
+        indexerConfigCalls.some(([, payload]) => {
+          const state = payload as {
+            removeMissingSessionsDuringIncrementalIndexing?: boolean;
+          };
+          return state.removeMissingSessionsDuringIncrementalIndexing === true;
+        }),
+      ).toBe(true);
+    });
+  });
+
+  it("disables refresh and settings reindex controls while background indexing is active", async () => {
     const client = createAppClient({
       "indexer:getStatus": () => ({
         running: true,
@@ -133,7 +351,45 @@ describe("App shell", () => {
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Indexing in progress" })).toBeDisabled();
     });
-    expect(screen.getByRole("button", { name: "Force reindex" })).toBeDisabled();
+    await userEvent.setup().click(screen.getByRole("button", { name: "Open settings" }));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Force reindex" })).toBeDisabled();
+    });
+  });
+
+  it("requires confirmation before force reindex from settings", async () => {
+    installScrollIntoViewMock();
+    installDialogMock();
+    const user = userEvent.setup();
+    const client = createAppClient();
+
+    renderWithClient(<App />, client);
+
+    await waitFor(() => {
+      expect(screen.getByText("Project One")).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: "Open settings" }));
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Database Maintenance" })).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: "Force reindex" }));
+    expect(screen.getByText("Force Reindex")).toBeInTheDocument();
+    expect(screen.getByText(/they can disappear after this reindex/i)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+    await user.click(screen.getByRole("button", { name: "Force reindex" }));
+    await user.click(screen.getByRole("button", { name: "Reindex" }));
+
+    await waitFor(() => {
+      const refreshCalls = client.invoke.mock.calls.filter(
+        ([channel, payload]) =>
+          channel === "indexer:refresh" && (payload as { force?: boolean }).force === true,
+      );
+      expect(refreshCalls.length).toBeGreaterThan(0);
+    });
   });
 
   it("restores the last selected auto-refresh mode with Cmd/Ctrl+Shift+R", async () => {
