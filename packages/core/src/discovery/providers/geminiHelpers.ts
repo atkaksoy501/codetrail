@@ -58,7 +58,14 @@ export function buildGeminiProjectResolution(
     }
   }
 
-  return { hashToPath };
+  return {
+    resolveProjectPath: (projectHash) => hashToPath.get(projectHash) ?? null,
+    rememberProjectPath: (projectHash, projectPath) => {
+      if (projectHash) {
+        hashToPath.set(projectHash, projectPath);
+      }
+    },
+  };
 }
 
 export function geminiContainerDir(filePath: string): string {

@@ -1,11 +1,10 @@
-import type { IpcResponse, Provider } from "@codetrail/core/browser";
+import type { Provider } from "@codetrail/core/browser";
 import { type Ref, useEffect, useRef } from "react";
 
+import type { ProjectSummary } from "../../app/types";
 import { SEARCH_PLACEHOLDERS } from "../../lib/searchPlaceholders";
 import { compactPath, formatDate, prettyProvider } from "../../lib/viewUtils";
 import { ToolbarIcon } from "../ToolbarIcon";
-
-type ProjectSummary = IpcResponse<"projects:list">["projects"][number];
 
 export function ProjectPane({
   sortedProjects,

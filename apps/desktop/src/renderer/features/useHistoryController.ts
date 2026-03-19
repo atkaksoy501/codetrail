@@ -288,38 +288,14 @@ export function useHistoryController({
   const selectedProjectId = rawSelectedProjectId || sortedProjects[0]?.id || "";
   const selectedSessionId = rawSelectedSessionId;
 
-  const paneStateForSync = useMemo(
+  const paneAppearanceState = useMemo(
     () => ({
-      // Keep the persisted snapshot derived from the controller's canonical selection state so
-      // restoration does not drift from what the UI is actually rendering.
-      enabledProviders,
-      removeMissingSessionsDuringIncrementalIndexing,
-      projectPaneWidth,
-      sessionPaneWidth,
-      projectPaneCollapsed,
-      sessionPaneCollapsed,
-      projectProviders,
-      historyCategories,
-      expandedByDefaultCategories,
-      searchProviders,
-      preferredAutoRefreshStrategy,
       theme: appearance.theme,
       monoFontFamily: appearance.monoFontFamily,
       regularFontFamily: appearance.regularFontFamily,
       monoFontSize: appearance.monoFontSize,
       regularFontSize: appearance.regularFontSize,
       useMonospaceForAllMessages: appearance.useMonospaceForAllMessages,
-      selectedProjectId,
-      selectedSessionId,
-      historyMode,
-      projectSortDirection,
-      sessionSortDirection,
-      messageSortDirection,
-      bookmarkSortDirection,
-      projectAllSortDirection,
-      sessionPage,
-      sessionScrollTop,
-      systemMessageRegexRules,
     }),
     [
       appearance.monoFontFamily,
@@ -328,29 +304,87 @@ export function useHistoryController({
       appearance.regularFontSize,
       appearance.theme,
       appearance.useMonospaceForAllMessages,
-      bookmarkSortDirection,
-      expandedByDefaultCategories,
-      enabledProviders,
-      historyCategories,
-      historyMode,
-      messageSortDirection,
-      removeMissingSessionsDuringIncrementalIndexing,
-      projectAllSortDirection,
+    ],
+  );
+
+  const paneLayoutState = useMemo(
+    () => ({
+      projectPaneWidth,
+      sessionPaneWidth,
+      projectPaneCollapsed,
+      sessionPaneCollapsed,
+      sessionScrollTop,
+    }),
+    [
       projectPaneCollapsed,
       projectPaneWidth,
-      projectProviders,
-      projectSortDirection,
-      searchProviders,
-      preferredAutoRefreshStrategy,
-      selectedProjectId,
-      selectedSessionId,
-      sessionPage,
       sessionPaneCollapsed,
       sessionPaneWidth,
       sessionScrollTop,
-      sessionSortDirection,
+    ],
+  );
+
+  const paneFilterState = useMemo(
+    () => ({
+      enabledProviders,
+      removeMissingSessionsDuringIncrementalIndexing,
+      projectProviders,
+      historyCategories,
+      expandedByDefaultCategories,
+      searchProviders,
+      preferredAutoRefreshStrategy,
+      systemMessageRegexRules,
+    }),
+    [
+      enabledProviders,
+      expandedByDefaultCategories,
+      historyCategories,
+      preferredAutoRefreshStrategy,
+      projectProviders,
+      removeMissingSessionsDuringIncrementalIndexing,
+      searchProviders,
       systemMessageRegexRules,
     ],
+  );
+
+  const paneSelectionState = useMemo(
+    () => ({
+      selectedProjectId,
+      selectedSessionId,
+      historyMode,
+      sessionPage,
+    }),
+    [historyMode, selectedProjectId, selectedSessionId, sessionPage],
+  );
+
+  const paneSortState = useMemo(
+    () => ({
+      projectSortDirection,
+      sessionSortDirection,
+      messageSortDirection,
+      bookmarkSortDirection,
+      projectAllSortDirection,
+    }),
+    [
+      bookmarkSortDirection,
+      messageSortDirection,
+      projectAllSortDirection,
+      projectSortDirection,
+      sessionSortDirection,
+    ],
+  );
+
+  const paneStateForSync = useMemo(
+    () => ({
+      // Keep the persisted snapshot derived from the controller's canonical selection state so
+      // restoration does not drift from what the UI is actually rendering.
+      ...paneFilterState,
+      ...paneLayoutState,
+      ...paneAppearanceState,
+      ...paneSelectionState,
+      ...paneSortState,
+    }),
+    [paneAppearanceState, paneFilterState, paneLayoutState, paneSelectionState, paneSortState],
   );
 
   const setSelectedProjectIdForPaneStateSync = useCallback((value: SetStateAction<string>) => {

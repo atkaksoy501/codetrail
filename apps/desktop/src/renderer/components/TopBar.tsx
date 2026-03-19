@@ -1,7 +1,8 @@
-import { type Dispatch, Fragment, type SetStateAction, useEffect, useRef, useState } from "react";
+import { type Dispatch, Fragment, type SetStateAction, useCallback, useRef, useState } from "react";
 
 import { THEME_GROUPS, type ThemeMode, getThemeLabel } from "../../shared/uiPreferences";
 import { REFRESH_STRATEGY_OPTIONS, type RefreshStrategy } from "../app/autoRefresh";
+import { useClickOutside } from "../hooks/useClickOutside";
 import { ToolbarIcon } from "./ToolbarIcon";
 
 function RefreshStrategyDropdown({
@@ -20,17 +21,10 @@ function RefreshStrategyDropdown({
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const selectedLabel = REFRESH_STRATEGY_OPTIONS.find((o) => o.value === value)?.label ?? "Off";
-
-  useEffect(() => {
-    if (!open) return;
-    const handleClickOutside = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [open]);
+  const closeDropdown = useCallback(() => {
+    setOpen(false);
+  }, []);
+  useClickOutside(containerRef, open, closeDropdown);
 
   return (
     <div className="tb-dropdown" ref={containerRef}>
@@ -89,21 +83,10 @@ function ThemeDropdown({
 }) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    if (!open) {
-      return;
-    }
-
-    const handleClickOutside = (event: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
-        setOpen(false);
-      }
-    };
-
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [open]);
+  const closeDropdown = useCallback(() => {
+    setOpen(false);
+  }, []);
+  useClickOutside(containerRef, open, closeDropdown);
 
   return (
     <div className="tb-dropdown" ref={containerRef}>

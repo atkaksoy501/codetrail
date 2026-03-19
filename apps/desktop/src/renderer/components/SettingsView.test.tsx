@@ -75,38 +75,45 @@ function createBaseProps() {
     diagnostics,
     diagnosticsLoading: false,
     diagnosticsError: null,
-    theme: "dark" as const,
-    zoomPercent: 100,
-    monoFontFamily: "droid_sans_mono" as const,
-    regularFontFamily: "current" as const,
-    monoFontSize: "12px" as const,
-    regularFontSize: "13.5px" as const,
-    useMonospaceForAllMessages: false,
-    onThemeChange: vi.fn(),
-    onZoomPercentChange: vi.fn(),
-    onMonoFontFamilyChange: vi.fn(),
-    onRegularFontFamilyChange: vi.fn(),
-    onMonoFontSizeChange: vi.fn(),
-    onRegularFontSizeChange: vi.fn(),
-    onUseMonospaceForAllMessagesChange: vi.fn(),
-    enabledProviders: ["claude", "codex", "gemini", "cursor", "copilot"] as Provider[],
-    removeMissingSessionsDuringIncrementalIndexing: false,
-    canForceReindex: true,
-    onToggleProviderEnabled: vi.fn(),
-    onForceReindex: vi.fn(),
-    onRemoveMissingSessionsDuringIncrementalIndexingChange: vi.fn(),
-    expandedByDefaultCategories: ["assistant"] as MessageCategory[],
-    onToggleExpandedByDefault: vi.fn(),
-    systemMessageRegexRules: {
-      claude: ["^<command-name>"],
-      codex: ["^<environment_context>"],
-      gemini: [],
-      cursor: [],
-      copilot: [],
+    appearance: {
+      theme: "dark" as const,
+      zoomPercent: 100,
+      monoFontFamily: "droid_sans_mono" as const,
+      regularFontFamily: "current" as const,
+      monoFontSize: "12px" as const,
+      regularFontSize: "13.5px" as const,
+      useMonospaceForAllMessages: false,
+      onThemeChange: vi.fn(),
+      onZoomPercentChange: vi.fn(),
+      onMonoFontFamilyChange: vi.fn(),
+      onRegularFontFamilyChange: vi.fn(),
+      onMonoFontSizeChange: vi.fn(),
+      onRegularFontSizeChange: vi.fn(),
+      onUseMonospaceForAllMessagesChange: vi.fn(),
     },
-    onAddSystemMessageRegexRule: vi.fn(),
-    onUpdateSystemMessageRegexRule: vi.fn(),
-    onRemoveSystemMessageRegexRule: vi.fn(),
+    indexing: {
+      enabledProviders: ["claude", "codex", "gemini", "cursor", "copilot"] as Provider[],
+      removeMissingSessionsDuringIncrementalIndexing: false,
+      canForceReindex: true,
+      onToggleProviderEnabled: vi.fn(),
+      onForceReindex: vi.fn(),
+      onRemoveMissingSessionsDuringIncrementalIndexingChange: vi.fn(),
+    },
+    messageRules: {
+      expandedByDefaultCategories: ["assistant"] as MessageCategory[],
+      onToggleExpandedByDefault: vi.fn(),
+      systemMessageRegexRules: {
+        claude: ["^<command-name>"],
+        codex: ["^<environment_context>"],
+        gemini: [],
+        cursor: [],
+        copilot: [],
+      },
+      onAddSystemMessageRegexRule: vi.fn(),
+      onUpdateSystemMessageRegexRule: vi.fn(),
+      onRemoveSystemMessageRegexRule: vi.fn(),
+    },
+    onActionError: vi.fn(),
   };
 }
 
@@ -176,26 +183,26 @@ describe("SettingsView", () => {
     await user.click(copyButtons[0] as HTMLElement);
     await user.click(openButtons[0] as HTMLElement);
 
-    expect(baseProps.onThemeChange).toHaveBeenCalledWith("midnight");
-    expect(baseProps.onZoomPercentChange).toHaveBeenCalledWith(104);
-    expect(baseProps.onMonoFontFamilyChange).toHaveBeenCalledWith("current");
-    expect(baseProps.onMonoFontSizeChange).toHaveBeenCalledWith("13px");
-    expect(baseProps.onRegularFontFamilyChange).toHaveBeenCalledWith("inter");
-    expect(baseProps.onRegularFontSizeChange).toHaveBeenCalledWith("14px");
-    expect(baseProps.onUseMonospaceForAllMessagesChange).toHaveBeenCalledWith(true);
-    expect(baseProps.onToggleProviderEnabled).toHaveBeenCalledWith("claude");
-    expect(baseProps.onForceReindex).toHaveBeenCalledTimes(1);
-    expect(baseProps.onRemoveMissingSessionsDuringIncrementalIndexingChange).toHaveBeenCalledWith(
-      true,
-    );
-    expect(baseProps.onToggleExpandedByDefault).toHaveBeenCalledWith("user");
-    expect(baseProps.onAddSystemMessageRegexRule).toHaveBeenCalledWith("claude");
-    expect(baseProps.onUpdateSystemMessageRegexRule).toHaveBeenCalledWith(
+    expect(baseProps.appearance.onThemeChange).toHaveBeenCalledWith("midnight");
+    expect(baseProps.appearance.onZoomPercentChange).toHaveBeenCalledWith(104);
+    expect(baseProps.appearance.onMonoFontFamilyChange).toHaveBeenCalledWith("current");
+    expect(baseProps.appearance.onMonoFontSizeChange).toHaveBeenCalledWith("13px");
+    expect(baseProps.appearance.onRegularFontFamilyChange).toHaveBeenCalledWith("inter");
+    expect(baseProps.appearance.onRegularFontSizeChange).toHaveBeenCalledWith("14px");
+    expect(baseProps.appearance.onUseMonospaceForAllMessagesChange).toHaveBeenCalledWith(true);
+    expect(baseProps.indexing.onToggleProviderEnabled).toHaveBeenCalledWith("claude");
+    expect(baseProps.indexing.onForceReindex).toHaveBeenCalledTimes(1);
+    expect(
+      baseProps.indexing.onRemoveMissingSessionsDuringIncrementalIndexingChange,
+    ).toHaveBeenCalledWith(true);
+    expect(baseProps.messageRules.onToggleExpandedByDefault).toHaveBeenCalledWith("user");
+    expect(baseProps.messageRules.onAddSystemMessageRegexRule).toHaveBeenCalledWith("claude");
+    expect(baseProps.messageRules.onUpdateSystemMessageRegexRule).toHaveBeenCalledWith(
       "claude",
       0,
       "^<command-name>$",
     );
-    expect(baseProps.onRemoveSystemMessageRegexRule).toHaveBeenCalledWith("claude", 0);
+    expect(baseProps.messageRules.onRemoveSystemMessageRegexRule).toHaveBeenCalledWith("claude", 0);
     expect(copyTextToClipboard).toHaveBeenCalled();
     expect(openPath).toHaveBeenCalled();
   });

@@ -48,10 +48,18 @@ export type DiscoveryFileSystem = {
 
 export type DiscoveryDependencies = {
   fs?: DiscoveryFileSystem;
+  onDiscoveryIssue?: (issue: DiscoveryIssue) => void;
 };
 
 export type ResolvedDiscoveryDependencies = {
   fs: DiscoveryFileSystem;
+  onDiscoveryIssue: (issue: DiscoveryIssue) => void;
+};
+
+export type DiscoveryIssue = {
+  operation: "readdir" | "readFile" | "stat" | "lstat";
+  path: string;
+  error: unknown;
 };
 
 export const NODE_DISCOVERY_FILE_SYSTEM: DiscoveryFileSystem = {
@@ -71,7 +79,15 @@ export function resolveDiscoveryDependencies(
 ): ResolvedDiscoveryDependencies {
   return {
     fs: dependencies.fs ?? NODE_DISCOVERY_FILE_SYSTEM,
+    onDiscoveryIssue: dependencies.onDiscoveryIssue ?? (() => {}),
   };
+}
+
+function reportDiscoveryIssue(
+  dependencies: ResolvedDiscoveryDependencies,
+  issue: DiscoveryIssue,
+): void {
+  dependencies.onDiscoveryIssue(issue);
 }
 
 export function safeReadDir(
@@ -80,7 +96,8 @@ export function safeReadDir(
 ): DiscoveryDirent[] {
   try {
     return dependencies.fs.readdirSync(path, { withFileTypes: true });
-  } catch {
+  } catch (error) {
+    reportDiscoveryIssue(dependencies, { operation: "readdir", path, error });
     return [];
   }
 }
@@ -91,7 +108,8 @@ export function safeReadUtf8File(
 ): string | null {
   try {
     return dependencies.fs.readFileSync(path, "utf8");
-  } catch {
+  } catch (error) {
+    reportDiscoveryIssue(dependencies, { operation: "readFile", path, error });
     return null;
   }
 }
@@ -102,7 +120,8 @@ export function safeStat(
 ): DiscoveryStat | null {
   try {
     return dependencies.fs.statSync(path);
-  } catch {
+  } catch (error) {
+    reportDiscoveryIssue(dependencies, { operation: "stat", path, error });
     return null;
   }
 }
@@ -113,7 +132,8 @@ export function safeIsDirectory(
 ): boolean {
   try {
     return dependencies.fs.existsSync(path) && dependencies.fs.lstatSync(path).isDirectory();
-  } catch {
+  } catch (error) {
+    reportDiscoveryIssue(dependencies, { operation: "lstat", path, error });
     return false;
   }
 }
@@ -128,7 +148,8 @@ export function parseJsonFile<T>(
 
   try {
     return JSON.parse(dependencies.fs.readFileSync(filePath, "utf8")) as T;
-  } catch {
+  } catch (error) {
+    reportDiscoveryIssue(dependencies, { operation: "readFile", path: filePath, error });
     return null;
   }
 }

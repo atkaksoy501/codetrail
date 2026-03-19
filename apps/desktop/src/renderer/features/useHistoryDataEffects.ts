@@ -1,4 +1,4 @@
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 
 import type { MessageCategory, Provider, SearchMode } from "@codetrail/core/browser";
@@ -20,6 +20,7 @@ import type {
   SessionSummary,
   SortDirection,
 } from "../app/types";
+import { shouldIgnoreAsyncEffectError } from "../lib/asyncEffectUtils";
 import type { CodetrailClient } from "../lib/codetrailClient";
 import { decideSessionSelectionAfterLoad } from "../lib/sessionSelection";
 import type { RefreshContext } from "./useHistoryController";
@@ -215,6 +216,77 @@ export function useHistoryDataEffects({
     setBookmarksResponse,
   ]);
 
+  const refreshInvalidationKey = useMemo(
+    () =>
+      [
+        effectiveBookmarkQuery,
+        effectiveSessionQuery,
+        historyCategories.join(","),
+        messageSortDirection,
+        projectAllSortDirection,
+        searchMode,
+      ].join("\u0000"),
+    [
+      effectiveBookmarkQuery,
+      effectiveSessionQuery,
+      historyCategories,
+      messageSortDirection,
+      projectAllSortDirection,
+      searchMode,
+    ],
+  );
+  const previousRefreshInvalidationKeyRef = useRef(refreshInvalidationKey);
+
+  const sessionDetailRequest = useMemo(
+    () => ({
+      historyMode,
+      selectedSessionId,
+      sessionPage,
+      historyCategories,
+      effectiveSessionQuery,
+      searchMode,
+      messageSortDirection,
+      pendingRevealTarget,
+      refreshCounter,
+    }),
+    [
+      effectiveSessionQuery,
+      historyCategories,
+      historyMode,
+      messageSortDirection,
+      pendingRevealTarget,
+      refreshCounter,
+      searchMode,
+      selectedSessionId,
+      sessionPage,
+    ],
+  );
+
+  const projectCombinedDetailRequest = useMemo(
+    () => ({
+      historyMode,
+      selectedProjectId,
+      sessionPage,
+      historyCategories,
+      effectiveSessionQuery,
+      searchMode,
+      projectAllSortDirection,
+      pendingRevealTarget,
+      refreshCounter,
+    }),
+    [
+      effectiveSessionQuery,
+      historyCategories,
+      historyMode,
+      pendingRevealTarget,
+      projectAllSortDirection,
+      refreshCounter,
+      searchMode,
+      selectedProjectId,
+      sessionPage,
+    ],
+  );
+
   useEffect(() => {
     let cancelled = false;
     void loadProjects().catch((error: unknown) => {
@@ -372,15 +444,6 @@ export function useHistoryDataEffects({
     setHistorySelection,
   ]);
 
-  const refreshInvalidationKey = JSON.stringify([
-    effectiveBookmarkQuery,
-    effectiveSessionQuery,
-    historyCategories,
-    messageSortDirection,
-    projectAllSortDirection,
-    searchMode,
-  ]);
-
   // Invalidate stale refresh context when user-driven state changes (sort direction, category
   // filters, search query/mode) would cause data effects to re-fire. These deps are disjoint from
   // refreshCounter, so this effect only fires for user actions, never for refresh ticks. React runs
@@ -388,24 +451,29 @@ export function useHistoryDataEffects({
   // Note: bookmarkSortDirection is not included because it only affects in-memory sorting in
   // useHistoryDerivedState, never triggering a server fetch or consuming refreshContextRef.
   useEffect(() => {
-    void refreshInvalidationKey;
+    if (previousRefreshInvalidationKeyRef.current === refreshInvalidationKey) {
+      return;
+    }
+    previousRefreshInvalidationKeyRef.current = refreshInvalidationKey;
     refreshContextRef.current = null;
   }, [refreshContextRef, refreshInvalidationKey]);
 
   useEffect(() => {
-    void refreshCounter;
-    if (historyMode !== "session" || !selectedSessionId) {
+    if (sessionDetailRequest.historyMode !== "session" || !sessionDetailRequest.selectedSessionId) {
       setSessionDetail(null);
       return;
     }
 
     let cancelled = false;
-    const isRevealing = pendingRevealTarget !== null;
-    const isAllHistoryCategoriesSelected = historyCategories.length === CATEGORIES.length;
-    const effectiveCategories = isAllHistoryCategoriesSelected ? undefined : historyCategories;
+    const isRevealing = sessionDetailRequest.pendingRevealTarget !== null;
+    const isAllHistoryCategoriesSelected =
+      sessionDetailRequest.historyCategories.length === CATEGORIES.length;
+    const effectiveCategories = isAllHistoryCategoriesSelected
+      ? undefined
+      : sessionDetailRequest.historyCategories;
     // When revealing a specific message from bookmarks/search, temporarily ignore the free-text
     // query so pagination can land on the target even if it would otherwise be filtered out.
-    const effectiveQuery = isRevealing ? "" : effectiveSessionQuery;
+    const effectiveQuery = isRevealing ? "" : sessionDetailRequest.effectiveSessionQuery;
 
     // Capture refresh context at effect start for race protection.
     const refreshCtx = refreshContextRef.current;
@@ -413,15 +481,15 @@ export function useHistoryDataEffects({
 
     void codetrail
       .invoke("sessions:getDetail", {
-        sessionId: selectedSessionId,
-        page: sessionPage,
+        sessionId: sessionDetailRequest.selectedSessionId,
+        page: sessionDetailRequest.sessionPage,
         pageSize: PAGE_SIZE,
         categories: effectiveCategories,
         query: effectiveQuery,
-        searchMode,
-        sortDirection: messageSortDirection,
-        focusMessageId: pendingRevealTarget?.messageId || undefined,
-        focusSourceId: pendingRevealTarget?.sourceId || undefined,
+        searchMode: sessionDetailRequest.searchMode,
+        sortDirection: sessionDetailRequest.messageSortDirection,
+        focusMessageId: sessionDetailRequest.pendingRevealTarget?.messageId || undefined,
+        focusSourceId: sessionDetailRequest.pendingRevealTarget?.sourceId || undefined,
       })
       .then((response) => {
         if (cancelled) {
@@ -432,27 +500,27 @@ export function useHistoryDataEffects({
           return;
         }
         setSessionDetail(response);
-        if (pendingRevealTarget !== null) {
+        if (sessionDetailRequest.pendingRevealTarget !== null) {
           setPendingRevealTarget(null);
         }
         if (isRefresh && refreshCtx.autoScroll) {
           // Auto-scroll: navigate to the page with newest messages.
           // ASC → newest on last page; DESC → newest on page 0.
           const latestPage =
-            messageSortDirection === "desc"
+            sessionDetailRequest.messageSortDirection === "desc"
               ? 0
               : Math.max(0, Math.ceil(response.totalCount / PAGE_SIZE) - 1);
-          if (sessionPage !== latestPage) {
+          if (sessionDetailRequest.sessionPage !== latestPage) {
             setSessionPage(latestPage);
             return;
           }
         }
-        if (response.page !== sessionPage) {
+        if (response.page !== sessionDetailRequest.sessionPage) {
           setSessionPage(response.page);
         }
       })
       .catch((error: unknown) => {
-        if (!cancelled) {
+        if (!shouldIgnoreAsyncEffectError(cancelled, error)) {
           logError("Failed loading session detail", error);
         }
       });
@@ -462,49 +530,46 @@ export function useHistoryDataEffects({
     };
   }, [
     codetrail,
-    effectiveSessionQuery,
-    historyCategories,
-    historyMode,
     logError,
-    messageSortDirection,
-    pendingRevealTarget,
     refreshContextRef,
-    refreshCounter,
-    searchMode,
-    selectedSessionId,
-    sessionPage,
+    sessionDetailRequest,
     setPendingRevealTarget,
     setSessionDetail,
     setSessionPage,
   ]);
 
   useEffect(() => {
-    void refreshCounter;
-    if (historyMode !== "project_all" || !selectedProjectId) {
+    if (
+      projectCombinedDetailRequest.historyMode !== "project_all" ||
+      !projectCombinedDetailRequest.selectedProjectId
+    ) {
       setProjectCombinedDetail(null);
       return;
     }
 
     let cancelled = false;
-    const isRevealing = pendingRevealTarget !== null;
-    const isAllHistoryCategoriesSelected = historyCategories.length === CATEGORIES.length;
-    const effectiveCategories = isAllHistoryCategoriesSelected ? undefined : historyCategories;
-    const effectiveQuery = isRevealing ? "" : effectiveSessionQuery;
+    const isRevealing = projectCombinedDetailRequest.pendingRevealTarget !== null;
+    const isAllHistoryCategoriesSelected =
+      projectCombinedDetailRequest.historyCategories.length === CATEGORIES.length;
+    const effectiveCategories = isAllHistoryCategoriesSelected
+      ? undefined
+      : projectCombinedDetailRequest.historyCategories;
+    const effectiveQuery = isRevealing ? "" : projectCombinedDetailRequest.effectiveSessionQuery;
 
     const refreshCtx = refreshContextRef.current;
     const isRefresh = refreshCtx !== null && !isRevealing;
 
     void codetrail
       .invoke("projects:getCombinedDetail", {
-        projectId: selectedProjectId,
-        page: sessionPage,
+        projectId: projectCombinedDetailRequest.selectedProjectId,
+        page: projectCombinedDetailRequest.sessionPage,
         pageSize: PAGE_SIZE,
         categories: effectiveCategories,
         query: effectiveQuery,
-        searchMode,
-        sortDirection: projectAllSortDirection,
-        focusMessageId: pendingRevealTarget?.messageId || undefined,
-        focusSourceId: pendingRevealTarget?.sourceId || undefined,
+        searchMode: projectCombinedDetailRequest.searchMode,
+        sortDirection: projectCombinedDetailRequest.projectAllSortDirection,
+        focusMessageId: projectCombinedDetailRequest.pendingRevealTarget?.messageId || undefined,
+        focusSourceId: projectCombinedDetailRequest.pendingRevealTarget?.sourceId || undefined,
       })
       .then((response) => {
         if (cancelled) {
@@ -514,25 +579,25 @@ export function useHistoryDataEffects({
           return;
         }
         setProjectCombinedDetail(response);
-        if (pendingRevealTarget !== null) {
+        if (projectCombinedDetailRequest.pendingRevealTarget !== null) {
           setPendingRevealTarget(null);
         }
         if (isRefresh && refreshCtx.autoScroll) {
           const latestPage =
-            projectAllSortDirection === "desc"
+            projectCombinedDetailRequest.projectAllSortDirection === "desc"
               ? 0
               : Math.max(0, Math.ceil(response.totalCount / PAGE_SIZE) - 1);
-          if (sessionPage !== latestPage) {
+          if (projectCombinedDetailRequest.sessionPage !== latestPage) {
             setSessionPage(latestPage);
             return;
           }
         }
-        if (response.page !== sessionPage) {
+        if (response.page !== projectCombinedDetailRequest.sessionPage) {
           setSessionPage(response.page);
         }
       })
       .catch((error: unknown) => {
-        if (!cancelled) {
+        if (!shouldIgnoreAsyncEffectError(cancelled, error)) {
           logError("Failed loading project combined detail", error);
         }
       });
@@ -542,17 +607,9 @@ export function useHistoryDataEffects({
     };
   }, [
     codetrail,
-    effectiveSessionQuery,
-    historyCategories,
-    historyMode,
     logError,
-    pendingRevealTarget,
-    projectAllSortDirection,
+    projectCombinedDetailRequest,
     refreshContextRef,
-    refreshCounter,
-    searchMode,
-    selectedProjectId,
-    sessionPage,
     setPendingRevealTarget,
     setProjectCombinedDetail,
     setSessionPage,

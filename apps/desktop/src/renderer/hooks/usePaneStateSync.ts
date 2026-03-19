@@ -18,7 +18,8 @@ import type {
 import type { NonOffRefreshStrategy } from "../app/autoRefresh";
 import { EMPTY_SYSTEM_MESSAGE_REGEX_RULES } from "../app/constants";
 import { createHistorySelection } from "../app/historySelection";
-import type { HistorySelection } from "../app/types";
+import type { HistorySelection, HistorySelectionMode, SortDirection } from "../app/types";
+import { shouldIgnoreAsyncEffectError } from "../lib/asyncEffectUtils";
 import { useCodetrailClient } from "../lib/codetrailClient";
 import { clamp } from "../lib/viewUtils";
 
@@ -28,8 +29,6 @@ type RestoredScrollTarget = {
   scrollTop: number;
 };
 
-type HistoryMode = "session" | "bookmarks" | "project_all";
-type SortDirection = "asc" | "desc";
 type PaneStatePersistRequest = IpcRequest<"ui:setPaneState">;
 type IndexingConfigPersistRequest = IpcRequest<"indexer:setConfig">;
 
@@ -65,7 +64,7 @@ export function usePaneStateSync(args: {
   setHistorySelection?: Dispatch<SetStateAction<HistorySelection>>;
   setSelectedProjectId: Dispatch<SetStateAction<string>>;
   setSelectedSessionId: Dispatch<SetStateAction<string>>;
-  setHistoryMode: Dispatch<SetStateAction<HistoryMode>>;
+  setHistoryMode: Dispatch<SetStateAction<HistorySelectionMode>>;
   setProjectSortDirection: Dispatch<SetStateAction<SortDirection>>;
   setSessionSortDirection: Dispatch<SetStateAction<SortDirection>>;
   setMessageSortDirection: Dispatch<SetStateAction<SortDirection>>;
@@ -229,7 +228,7 @@ export function usePaneStateSync(args: {
         finishHydration();
       })
       .catch((error: unknown) => {
-        if (!cancelled) {
+        if (!shouldIgnoreAsyncEffectError(cancelled, error)) {
           logError("Failed loading UI state", error);
         }
         finishHydration();

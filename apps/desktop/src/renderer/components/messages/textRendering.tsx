@@ -3,6 +3,7 @@ import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import { buildSearchHighlightRegex } from "@codetrail/core/browser";
+import { getCodetrailClient } from "../../lib/codetrailClient";
 import { tryParseJsonRecord } from "./toolParsing";
 
 const EMPTY_KEYWORDS = new Set<string>();
@@ -771,7 +772,10 @@ function stripLineColumnSuffix(pathValue: string): string {
 
 async function openLocalPath(path: string): Promise<void> {
   try {
-    await window.codetrail.invoke("path:openInFileManager", { path });
+    const result = await getCodetrailClient().invoke("path:openInFileManager", { path });
+    if (!result.ok) {
+      console.error("[codetrail] failed opening local markdown link", path, result.error);
+    }
   } catch (error) {
     console.error("[codetrail] failed opening local markdown link", path, error);
   }

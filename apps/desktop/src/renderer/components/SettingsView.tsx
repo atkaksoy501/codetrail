@@ -1,7 +1,6 @@
 import { useState } from "react";
 
 import {
-  type IpcResponse,
   type MessageCategory,
   PROVIDER_LIST,
   type Provider,
@@ -20,75 +19,16 @@ import {
   UI_MONO_FONT_VALUES,
   UI_REGULAR_FONT_SIZE_VALUES,
   UI_REGULAR_FONT_VALUES,
+  UI_THEME_VALUES,
 } from "../../shared/uiPreferences";
+import type { SettingsInfoResponse, WatchStatsResponse } from "../app/types";
 import { copyTextToClipboard } from "../lib/clipboard";
 import { openPath } from "../lib/pathActions";
-import { prettyCategory } from "../lib/viewUtils";
+import { prettyCategory, toErrorMessage } from "../lib/viewUtils";
 import { ToolbarIcon } from "./ToolbarIcon";
 import { ZoomPercentInput } from "./ZoomPercentInput";
-type SettingsInfo = IpcResponse<"app:getSettingsInfo">;
-type WatchStats = IpcResponse<"watcher:getStats">;
 
-const MONO_FONT_OPTIONS: Array<{ value: MonoFontFamily; label: string }> = [
-  ...UI_MONO_FONT_VALUES.map((value) => ({
-    value,
-    label: value === "current" ? "JetBrains Mono" : "Droid Sans Mono",
-  })),
-];
-
-const REGULAR_FONT_OPTIONS: Array<{ value: RegularFontFamily; label: string }> = [
-  ...UI_REGULAR_FONT_VALUES.map((value) => ({
-    value,
-    label: value === "current" ? "Plus Jakarta Sans" : "Inter",
-  })),
-];
-
-const MONO_FONT_SIZE_OPTIONS: Array<{ value: MonoFontSize; label: string }> =
-  UI_MONO_FONT_SIZE_VALUES.map((value) => ({ value, label: value }));
-
-const REGULAR_FONT_SIZE_OPTIONS: Array<{ value: RegularFontSize; label: string }> =
-  UI_REGULAR_FONT_SIZE_VALUES.map((value) => ({ value, label: value }));
-
-export function SettingsView({
-  info,
-  loading,
-  error,
-  diagnostics,
-  diagnosticsLoading,
-  diagnosticsError,
-  theme,
-  zoomPercent,
-  monoFontFamily,
-  regularFontFamily,
-  monoFontSize,
-  regularFontSize,
-  useMonospaceForAllMessages,
-  onThemeChange,
-  onZoomPercentChange,
-  onMonoFontFamilyChange,
-  onRegularFontFamilyChange,
-  onMonoFontSizeChange,
-  onRegularFontSizeChange,
-  onUseMonospaceForAllMessagesChange,
-  enabledProviders,
-  removeMissingSessionsDuringIncrementalIndexing,
-  canForceReindex,
-  onToggleProviderEnabled,
-  onForceReindex,
-  onRemoveMissingSessionsDuringIncrementalIndexingChange,
-  expandedByDefaultCategories,
-  onToggleExpandedByDefault,
-  systemMessageRegexRules,
-  onAddSystemMessageRegexRule,
-  onUpdateSystemMessageRegexRule,
-  onRemoveSystemMessageRegexRule,
-}: {
-  info: SettingsInfo | null;
-  loading: boolean;
-  error: string | null;
-  diagnostics: WatchStats | null;
-  diagnosticsLoading: boolean;
-  diagnosticsError: string | null;
+type SettingsAppearanceProps = {
   theme: ThemeMode;
   zoomPercent: number;
   monoFontFamily: MonoFontFamily;
@@ -103,18 +43,67 @@ export function SettingsView({
   onMonoFontSizeChange: (fontSize: MonoFontSize) => void;
   onRegularFontSizeChange: (fontSize: RegularFontSize) => void;
   onUseMonospaceForAllMessagesChange: (enabled: boolean) => void;
+};
+
+type SettingsIndexingProps = {
   enabledProviders: Provider[];
   removeMissingSessionsDuringIncrementalIndexing: boolean;
   canForceReindex: boolean;
   onToggleProviderEnabled: (provider: Provider) => void;
   onForceReindex: () => void;
   onRemoveMissingSessionsDuringIncrementalIndexingChange: (enabled: boolean) => void;
+};
+
+type SettingsMessageRulesProps = {
   expandedByDefaultCategories: MessageCategory[];
   onToggleExpandedByDefault: (category: MessageCategory) => void;
   systemMessageRegexRules: SystemMessageRegexRules;
   onAddSystemMessageRegexRule: (provider: Provider) => void;
   onUpdateSystemMessageRegexRule: (provider: Provider, index: number, pattern: string) => void;
   onRemoveSystemMessageRegexRule: (provider: Provider, index: number) => void;
+};
+
+const MONO_FONT_OPTIONS: Array<{ value: MonoFontFamily; label: string }> = UI_MONO_FONT_VALUES.map(
+  (value) => ({
+    value,
+    label: value === "current" ? "JetBrains Mono" : "Droid Sans Mono",
+  }),
+);
+
+const REGULAR_FONT_OPTIONS: Array<{ value: RegularFontFamily; label: string }> =
+  UI_REGULAR_FONT_VALUES.map((value) => ({
+    value,
+    label: value === "current" ? "Plus Jakarta Sans" : "Inter",
+  }));
+
+const MONO_FONT_SIZE_OPTIONS: Array<{ value: MonoFontSize; label: string }> =
+  UI_MONO_FONT_SIZE_VALUES.map((value) => ({ value, label: value }));
+
+const REGULAR_FONT_SIZE_OPTIONS: Array<{ value: RegularFontSize; label: string }> =
+  UI_REGULAR_FONT_SIZE_VALUES.map((value) => ({ value, label: value }));
+
+export function SettingsView({
+  info,
+  loading,
+  error,
+  diagnostics,
+  diagnosticsLoading,
+  diagnosticsError,
+  appearance,
+  indexing,
+  messageRules,
+  onActionError,
+}: {
+  info: SettingsInfoResponse | null;
+  loading: boolean;
+  error: string | null;
+  diagnostics: WatchStatsResponse | null;
+  diagnosticsLoading: boolean;
+  diagnosticsError: string | null;
+  appearance: SettingsAppearanceProps;
+  indexing: SettingsIndexingProps;
+  messageRules: SettingsMessageRulesProps;
+  onActionError?: (context: string, error: unknown) => void;
 }) {
   const [activeTab, setActiveTab] = useState<"settings" | "diagnostics">("settings");
   const storageRows = info
@@ -186,8 +175,16 @@ export function SettingsView({
                     <select
                       className="settings-select"
                       aria-label="Theme"
-                      value={theme}
-                      onChange={(event) => onThemeChange(event.target.value as ThemeMode)}
+                      value={appearance.theme}
+                      onChange={(event) =>
+                        appearance.onThemeChange(
+                          selectValueOrFallback(
+                            event.target.value,
+                            UI_THEME_VALUES,
+                            appearance.theme,
+                          ),
+                        )
+                      }
                     >
                       {THEME_GROUPS.map((group) => (
                         <optgroup key={group.value} label={group.label}>
@@ -204,8 +201,8 @@ export function SettingsView({
                   <div className="settings-field">
                     <span className="settings-field-label">Zoom</span>
                     <ZoomPercentInput
-                      value={zoomPercent}
-                      onCommit={onZoomPercentChange}
+                      value={appearance.zoomPercent}
+                      onCommit={appearance.onZoomPercentChange}
                       ariaLabel="Zoom"
                       title="Zoom level (60%-175%)"
                       wrapperClassName="settings-zoom-control"
@@ -232,9 +229,15 @@ export function SettingsView({
                     <span className="settings-field-label">Monospaced font</span>
                     <select
                       className="settings-select"
-                      value={monoFontFamily}
+                      value={appearance.monoFontFamily}
                       onChange={(event) =>
-                        onMonoFontFamilyChange(event.target.value as MonoFontFamily)
+                        appearance.onMonoFontFamilyChange(
+                          selectValueOrFallback(
+                            event.target.value,
+                            UI_MONO_FONT_VALUES,
+                            appearance.monoFontFamily,
+                          ),
+                        )
                       }
                     >
                       {MONO_FONT_OPTIONS.map((option) => (
@@ -249,8 +252,16 @@ export function SettingsView({
                     <span className="settings-field-label">Monospaced size</span>
                     <select
                       className="settings-select"
-                      value={monoFontSize}
-                      onChange={(event) => onMonoFontSizeChange(event.target.value as MonoFontSize)}
+                      value={appearance.monoFontSize}
+                      onChange={(event) =>
+                        appearance.onMonoFontSizeChange(
+                          selectValueOrFallback(
+                            event.target.value,
+                            UI_MONO_FONT_SIZE_VALUES,
+                            appearance.monoFontSize,
+                          ),
+                        )
+                      }
                     >
                       {MONO_FONT_SIZE_OPTIONS.map((option) => (
                         <option key={option.value} value={option.value}>
@@ -264,9 +275,15 @@ export function SettingsView({
                     <span className="settings-field-label">Regular font</span>
                     <select
                       className="settings-select"
-                      value={regularFontFamily}
+                      value={appearance.regularFontFamily}
                       onChange={(event) =>
-                        onRegularFontFamilyChange(event.target.value as RegularFontFamily)
+                        appearance.onRegularFontFamilyChange(
+                          selectValueOrFallback(
+                            event.target.value,
+                            UI_REGULAR_FONT_VALUES,
+                            appearance.regularFontFamily,
+                          ),
+                        )
                       }
                     >
                       {REGULAR_FONT_OPTIONS.map((option) => (
@@ -281,9 +298,15 @@ export function SettingsView({
                     <span className="settings-field-label">Regular size</span>
                     <select
                       className="settings-select"
-                      value={regularFontSize}
+                      value={appearance.regularFontSize}
                       onChange={(event) =>
-                        onRegularFontSizeChange(event.target.value as RegularFontSize)
+                        appearance.onRegularFontSizeChange(
+                          selectValueOrFallback(
+                            event.target.value,
+                            UI_REGULAR_FONT_SIZE_VALUES,
+                            appearance.regularFontSize,
+                          ),
+                        )
                       }
                     >
                       {REGULAR_FONT_SIZE_OPTIONS.map((option) => (
@@ -297,8 +320,10 @@ export function SettingsView({
                   <label className="settings-checkbox-row">
                     <input
                       type="checkbox"
-                      checked={useMonospaceForAllMessages}
-                      onChange={(event) => onUseMonospaceForAllMessagesChange(event.target.checked)}
+                      checked={appearance.useMonospaceForAllMessages}
+                      onChange={(event) =>
+                        appearance.onUseMonospaceForAllMessagesChange(event.target.checked)
+                      }
                     />
                     <span>Use monospaced fonts for all messages</span>
                   </label>
@@ -319,13 +344,13 @@ export function SettingsView({
               <div className="settings-section-body">
                 <div className="settings-category-row">
                   {UI_MESSAGE_CATEGORY_VALUES.map((category) => {
-                    const active = expandedByDefaultCategories.includes(category);
+                    const active = messageRules.expandedByDefaultCategories.includes(category);
                     return (
                       <button
                         key={category}
                         type="button"
                         className={`settings-chip${active ? " active" : ""}`}
-                        onClick={() => onToggleExpandedByDefault(category)}
+                        onClick={() => messageRules.onToggleExpandedByDefault(category)}
                         aria-pressed={active}
                         title={`Toggle default expansion for ${prettyCategory(category)}`}
                       >
@@ -360,7 +385,7 @@ export function SettingsView({
                 <div className="settings-provider-summary">
                   <div className="settings-provider-summary-count">
                     <span className="settings-provider-summary-value">
-                      {enabledProviders.length}
+                      {indexing.enabledProviders.length}
                     </span>
                     <span className="settings-provider-summary-label">
                       of {PROVIDER_LIST.length} active
@@ -373,7 +398,7 @@ export function SettingsView({
                 </div>
                 <div className="settings-provider-grid">
                   {PROVIDER_LIST.map(({ id: provider, label }) => {
-                    const enabled = enabledProviders.includes(provider);
+                    const enabled = indexing.enabledProviders.includes(provider);
                     return (
                       <label
                         key={provider}
@@ -403,7 +428,7 @@ export function SettingsView({
                             type="checkbox"
                             aria-label={label}
                             checked={enabled}
-                            onChange={() => onToggleProviderEnabled(provider)}
+                            onChange={() => indexing.onToggleProviderEnabled(provider)}
                           />
                           <span>{enabled ? "Active" : "Inactive"}</span>
                         </span>
@@ -439,11 +464,11 @@ export function SettingsView({
                   <button
                     type="button"
                     className="tb-btn destructive settings-maintenance-action"
-                    onClick={onForceReindex}
-                    disabled={!canForceReindex}
+                    onClick={indexing.onForceReindex}
+                    disabled={!indexing.canForceReindex}
                     aria-label="Force reindex"
                     title={
-                      canForceReindex
+                      indexing.canForceReindex
                         ? "Force full reindex"
                         : "Disable auto-refresh and wait for indexing to finish before reindexing"
                     }
@@ -455,9 +480,11 @@ export function SettingsView({
                 <label className="settings-checkbox-row">
                   <input
                     type="checkbox"
-                    checked={removeMissingSessionsDuringIncrementalIndexing}
+                    checked={indexing.removeMissingSessionsDuringIncrementalIndexing}
                     onChange={(event) =>
-                      onRemoveMissingSessionsDuringIncrementalIndexingChange(event.target.checked)
+                      indexing.onRemoveMissingSessionsDuringIncrementalIndexingChange(
+                        event.target.checked,
+                      )
                     }
                   />
                   <span>
@@ -482,7 +509,7 @@ export function SettingsView({
               </div>
               <div className="settings-section-body">
                 {PROVIDER_LIST.map(({ id: provider, label }) => {
-                  const patterns = systemMessageRegexRules[provider] ?? [];
+                  const patterns = messageRules.systemMessageRegexRules[provider] ?? [];
                   return (
                     <div key={provider} className="settings-rule-group">
                       <div className="settings-rule-group-header">
@@ -492,7 +519,7 @@ export function SettingsView({
                         <button
                           type="button"
                           className="settings-rule-button settings-rule-add-button"
-                          onClick={() => onAddSystemMessageRegexRule(provider)}
+                          onClick={() => messageRules.onAddSystemMessageRegexRule(provider)}
                           aria-label={`Add ${provider} regex rule`}
                           title={`Add ${provider} regex rule`}
                         >
@@ -517,7 +544,7 @@ export function SettingsView({
                                   type="text"
                                   value={pattern}
                                   onChange={(event) =>
-                                    onUpdateSystemMessageRegexRule(
+                                    messageRules.onUpdateSystemMessageRegexRule(
                                       provider,
                                       index,
                                       event.target.value,
@@ -529,7 +556,9 @@ export function SettingsView({
                                 <button
                                   type="button"
                                   className="settings-rule-button settings-rule-remove-button"
-                                  onClick={() => onRemoveSystemMessageRegexRule(provider, index)}
+                                  onClick={() =>
+                                    messageRules.onRemoveSystemMessageRegexRule(provider, index)
+                                  }
                                   aria-label={`Remove ${provider} regex rule ${index + 1}`}
                                   title={`Remove ${provider} regex rule ${index + 1}`}
                                 >
@@ -574,7 +603,12 @@ export function SettingsView({
                   <div className="settings-section-body">
                     <div className="settings-grid">
                       {storageRows.map((row) => (
-                        <SettingsInfoRow key={row.label} label={row.label} value={row.value} />
+                        <SettingsInfoRow
+                          key={row.label}
+                          label={row.label}
+                          value={row.value}
+                          {...(onActionError ? { onActionError } : {})}
+                        />
                       ))}
                     </div>
                   </div>
@@ -600,6 +634,7 @@ export function SettingsView({
                           label={row.label}
                           value={row.value}
                           provider={row.provider}
+                          {...(onActionError ? { onActionError } : {})}
                         />
                       ))}
                     </div>
@@ -624,10 +659,12 @@ function SettingsInfoRow({
   label,
   value,
   provider,
+  onActionError,
 }: {
   label: string;
   value: string;
   provider?: Provider;
+  onActionError?: ((context: string, error: unknown) => void) | undefined;
 }) {
   return (
     <div className={`settings-row${provider ? " settings-row-discovery" : ""}`}>
@@ -644,11 +681,23 @@ function SettingsInfoRow({
           type="button"
           className="settings-action-button"
           onClick={() => {
-            void copyTextToClipboard(value).then((copied) => {
-              if (!copied) {
-                console.error(`[codetrail] failed copying settings value for '${label}'`);
-              }
-            });
+            void copyTextToClipboard(value)
+              .then((copied) => {
+                if (!copied) {
+                  reportSettingsActionError(
+                    onActionError,
+                    `Failed copying settings value for '${label}'`,
+                    "Clipboard write returned false",
+                  );
+                }
+              })
+              .catch((error: unknown) => {
+                reportSettingsActionError(
+                  onActionError,
+                  `Failed copying settings value for '${label}'`,
+                  error,
+                );
+              });
           }}
           aria-label={`Copy ${label}`}
           title={`Copy ${label}`}
@@ -659,13 +708,23 @@ function SettingsInfoRow({
           type="button"
           className="settings-action-button"
           onClick={() => {
-            void openPath(value).then((result) => {
-              if (!result.ok) {
-                console.error(
-                  `[codetrail] failed opening settings path '${label}': ${result.error}`,
+            void openPath(value)
+              .then((result) => {
+                if (!result.ok) {
+                  reportSettingsActionError(
+                    onActionError,
+                    `Failed opening settings path '${label}'`,
+                    result.error ?? `Failed to open ${value}`,
+                  );
+                }
+              })
+              .catch((error: unknown) => {
+                reportSettingsActionError(
+                  onActionError,
+                  `Failed opening settings path '${label}'`,
+                  error,
                 );
-              }
-            });
+              });
           }}
           aria-label={`Open ${label}`}
           title={`Open ${label}`}
@@ -682,12 +741,32 @@ function SettingsInfoRow({
   );
 }
 
+function selectValueOrFallback<T extends string>(
+  value: string,
+  allowedValues: readonly T[],
+  fallback: T,
+): T {
+  return allowedValues.includes(value as T) ? (value as T) : fallback;
+}
+
+function reportSettingsActionError(
+  onActionError: ((context: string, error: unknown) => void) | undefined,
+  context: string,
+  error: unknown,
+): void {
+  if (onActionError) {
+    onActionError(context, error);
+    return;
+  }
+  console.error(`[codetrail] ${context}: ${toErrorMessage(error)}`);
+}
+
 function DiagnosticsTab({
   diagnostics,
   loading,
   error,
 }: {
-  diagnostics: WatchStats | null;
+  diagnostics: WatchStatsResponse | null;
   loading: boolean;
   error: string | null;
 }) {
@@ -954,7 +1033,7 @@ function formatTimestamp(value: string): string {
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
 }
 
-function formatSourceLabel(source: NonNullable<WatchStats["lastRun"]>["source"]): string {
+function formatSourceLabel(source: NonNullable<WatchStatsResponse["lastRun"]>["source"]): string {
   return source.replaceAll("_", " ");
 }
 

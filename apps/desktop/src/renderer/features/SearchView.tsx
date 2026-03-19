@@ -4,6 +4,7 @@ import type { Provider } from "@codetrail/core/browser";
 
 import { CATEGORIES } from "../app/constants";
 import type { ProjectSummary } from "../app/types";
+import { AdvancedSearchToggleButton } from "../components/AdvancedSearchToggleButton";
 import { ToolbarIcon } from "../components/ToolbarIcon";
 import { HighlightedText } from "../components/messages/MessagePresentation";
 import { SEARCH_PLACEHOLDERS } from "../lib/searchPlaceholders";
@@ -50,33 +51,13 @@ export function SearchView({
                 title={search.searchResponse.queryError ?? undefined}
               />
             </div>
-            <button
-              type="button"
-              className={`search-mode-icon-btn${advancedSearchEnabled ? " active" : ""}`}
-              onClick={() => {
+            <AdvancedSearchToggleButton
+              enabled={advancedSearchEnabled}
+              onToggle={() => {
                 setAdvancedSearchEnabled((value) => !value);
                 search.setSearchPage(0);
               }}
-              aria-pressed={advancedSearchEnabled}
-              aria-label={
-                advancedSearchEnabled
-                  ? "Disable advanced search syntax"
-                  : "Enable advanced search syntax"
-              }
-              title={advancedSearchEnabled ? "Advanced syntax enabled" : "Advanced syntax disabled"}
-            >
-              <svg
-                className="search-mode-glyph"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                aria-hidden
-              >
-                <title>Advanced search syntax</title>
-                <path d="M8 8l-4 4l4 4M16 8l4 4l-4 4M13 6l-2 12" />
-              </svg>
-            </button>
+            />
           </div>
           {search.searchResponse.queryError ? (
             <p className="search-error" title={search.searchResponse.queryError}>

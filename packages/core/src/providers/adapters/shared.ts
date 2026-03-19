@@ -1,4 +1,5 @@
 import type {
+  ProviderJsonObject,
   ProviderReadSourceResult,
   ProviderSourceMetadata,
   ProviderTimestampNormalizationResult,
@@ -26,7 +27,7 @@ export function readJsonlStreamSource(
       .filter((entry) => entry !== null) as unknown[];
 
     return {
-      payload: parsedLines,
+      payload: parsedLines as ProviderReadSourceResult["payload"],
     };
   } catch {
     return null;
@@ -38,7 +39,7 @@ export function readMaterializedJsonSource(
   readFileText: ReadFileText,
 ): ProviderReadSourceResult | null {
   try {
-    const parsed = JSON.parse(readFileText(filePath)) as Record<string, unknown>;
+    const parsed = JSON.parse(readFileText(filePath)) as ProviderJsonObject;
     return {
       payload: parsed,
     };

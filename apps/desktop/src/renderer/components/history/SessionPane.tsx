@@ -1,11 +1,9 @@
-import type { IpcResponse } from "@codetrail/core/browser";
 import { type Ref, useCallback, useEffect, useState } from "react";
 
+import type { SessionSummary } from "../../app/types";
 import { deriveSessionTitle, formatDate, sessionActivityOf } from "../../lib/viewUtils";
 import { ToolbarIcon } from "../ToolbarIcon";
 import { scheduleSelectedSessionScroll } from "./sessionAutoScroll";
-
-type SessionSummary = IpcResponse<"sessions:list">["sessions"][number];
 
 export function SessionPane({
   sortedSessions,

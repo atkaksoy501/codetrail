@@ -319,6 +319,55 @@ export function App({
     await handleRefresh(true);
   }, [handleRefresh]);
   const indexing = refreshing || indexingInBackground;
+  const handleToggleExpandedByDefault = useCallback(
+    (category: MessageCategory) => {
+      history.setExpandedByDefaultCategories((value) =>
+        toggleValue<MessageCategory>(value, category),
+      );
+    },
+    [history],
+  );
+  const handleAddSystemMessageRegexRule = useCallback(
+    (provider: Provider) => {
+      history.setSystemMessageRegexRules((value) => ({
+        ...value,
+        [provider]: [...value[provider], ""],
+      }));
+    },
+    [history],
+  );
+  const handleUpdateSystemMessageRegexRule = useCallback(
+    (provider: Provider, index: number, pattern: string) => {
+      history.setSystemMessageRegexRules((value) => {
+        const current = value[provider] ?? [];
+        if (index < 0 || index >= current.length) {
+          return value;
+        }
+        const next = [...current];
+        next[index] = pattern;
+        return {
+          ...value,
+          [provider]: next,
+        };
+      });
+    },
+    [history],
+  );
+  const handleRemoveSystemMessageRegexRule = useCallback(
+    (provider: Provider, index: number) => {
+      history.setSystemMessageRegexRules((value) => {
+        const current = value[provider] ?? [];
+        if (index < 0 || index >= current.length) {
+          return value;
+        }
+        return {
+          ...value,
+          [provider]: current.filter((_, candidateIndex) => candidateIndex !== index),
+        };
+      });
+    },
+    [history],
+  );
   const updateRefreshStrategy = useCallback(
     (nextValue: RefreshStrategy | ((value: RefreshStrategy) => RefreshStrategy)) => {
       setRefreshStrategy((current) => {
@@ -540,69 +589,41 @@ export function App({
               diagnostics={watchStats}
               diagnosticsLoading={watchStatsLoading}
               diagnosticsError={watchStatsError}
-              theme={appearance.theme}
-              zoomPercent={appearance.zoomPercent}
-              monoFontFamily={appearance.monoFontFamily}
-              regularFontFamily={appearance.regularFontFamily}
-              monoFontSize={appearance.monoFontSize}
-              regularFontSize={appearance.regularFontSize}
-              useMonospaceForAllMessages={appearance.useMonospaceForAllMessages}
-              onThemeChange={appearance.setTheme}
-              onZoomPercentChange={appearance.setZoomPercent}
-              onMonoFontFamilyChange={appearance.setMonoFontFamily}
-              onRegularFontFamilyChange={appearance.setRegularFontFamily}
-              onMonoFontSizeChange={appearance.setMonoFontSize}
-              onRegularFontSizeChange={appearance.setRegularFontSize}
-              onUseMonospaceForAllMessagesChange={appearance.setUseMonospaceForAllMessages}
-              enabledProviders={enabledProviders}
-              removeMissingSessionsDuringIncrementalIndexing={
-                history.removeMissingSessionsDuringIncrementalIndexing
-              }
-              canForceReindex={!indexing && refreshStrategy === "off"}
-              onToggleProviderEnabled={handleProviderToggle}
-              onForceReindex={() => setShowReindexConfirm(true)}
-              onRemoveMissingSessionsDuringIncrementalIndexingChange={
-                handleMissingSessionCleanupToggle
-              }
-              expandedByDefaultCategories={history.expandedByDefaultCategories}
-              onToggleExpandedByDefault={(category) =>
-                history.setExpandedByDefaultCategories((value) =>
-                  toggleValue<MessageCategory>(value, category),
-                )
-              }
-              systemMessageRegexRules={history.systemMessageRegexRules}
-              onAddSystemMessageRegexRule={(provider) =>
-                history.setSystemMessageRegexRules((value) => ({
-                  ...value,
-                  [provider]: [...value[provider], ""],
-                }))
-              }
-              onUpdateSystemMessageRegexRule={(provider, index, pattern) =>
-                history.setSystemMessageRegexRules((value) => {
-                  const current = value[provider] ?? [];
-                  if (index < 0 || index >= current.length) {
-                    return value;
-                  }
-                  const next = [...current];
-                  next[index] = pattern;
-                  return {
-                    ...value,
-                    [provider]: next,
-                  };
-                })
-              }
-              onRemoveSystemMessageRegexRule={(provider, index) =>
-                history.setSystemMessageRegexRules((value) => {
-                  const current = value[provider] ?? [];
-                  if (index < 0 || index >= current.length) {
-                    return value;
-                  }
-                  return {
-                    ...value,
-                    [provider]: current.filter((_, candidateIndex) => candidateIndex !== index),
-                  };
-                })
-              }
+              appearance={{
+                theme: appearance.theme,
+                zoomPercent: appearance.zoomPercent,
+                monoFontFamily: appearance.monoFontFamily,
+                regularFontFamily: appearance.regularFontFamily,
+                monoFontSize: appearance.monoFontSize,
+                regularFontSize: appearance.regularFontSize,
+                useMonospaceForAllMessages: appearance.useMonospaceForAllMessages,
+                onThemeChange: appearance.setTheme,
+                onZoomPercentChange: appearance.setZoomPercent,
+                onMonoFontFamilyChange: appearance.setMonoFontFamily,
+                onRegularFontFamilyChange: appearance.setRegularFontFamily,
+                onMonoFontSizeChange: appearance.setMonoFontSize,
+                onRegularFontSizeChange: appearance.setRegularFontSize,
+                onUseMonospaceForAllMessagesChange: appearance.setUseMonospaceForAllMessages,
+              }}
+              indexing={{
+                enabledProviders,
+                removeMissingSessionsDuringIncrementalIndexing:
+                  history.removeMissingSessionsDuringIncrementalIndexing,
+                canForceReindex: !indexing && refreshStrategy === "off",
+                onToggleProviderEnabled: handleProviderToggle,
+                onForceReindex: () => setShowReindexConfirm(true),
+                onRemoveMissingSessionsDuringIncrementalIndexingChange:
+                  handleMissingSessionCleanupToggle,
+              }}
+              messageRules={{
+                expandedByDefaultCategories: history.expandedByDefaultCategories,
+                onToggleExpandedByDefault: handleToggleExpandedByDefault,
+                systemMessageRegexRules: history.systemMessageRegexRules,
+                onAddSystemMessageRegexRule: handleAddSystemMessageRegexRule,
+                onUpdateSystemMessageRegexRule: handleUpdateSystemMessageRegexRule,
+                onRemoveSystemMessageRegexRule: handleRemoveSystemMessageRegexRule,
+              }}
+              onActionError={logError}
             />
           </section>
         )}

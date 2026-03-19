@@ -1,8 +1,30 @@
 import type { MessageCategory } from "@codetrail/core/browser";
 import { type RefObject, useEffect, useRef } from "react";
 
-type MainView = "history" | "search" | "settings" | "help";
+import type { MainView } from "../app/types";
+
 type HistoryPane = "project" | "session" | "message";
+type ShortcutArgs = Parameters<typeof useKeyboardShortcuts>[0];
+type ShortcutContext = ShortcutArgs & {
+  event: KeyboardEvent;
+  shortcutTarget: HTMLElement | null;
+  focusedPane: HistoryPane | null;
+  command: boolean;
+  shift: boolean;
+  key: string;
+  code: string;
+  isHistoryArrowNavigation: boolean;
+};
+
+const HISTORY_CATEGORY_SHORTCUTS = [
+  { code: "Digit1", category: "user" },
+  { code: "Digit2", category: "assistant" },
+  { code: "Digit3", category: "tool_edit" },
+  { code: "Digit4", category: "tool_use" },
+  { code: "Digit5", category: "tool_result" },
+  { code: "Digit6", category: "thinking" },
+  { code: "Digit7", category: "system" },
+] as const satisfies ReadonlyArray<{ code: string; category: MessageCategory }>;
 
 export function useKeyboardShortcuts(args: {
   mainView: MainView;
@@ -44,45 +66,14 @@ export function useKeyboardShortcuts(args: {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      const {
-        mainView,
-        hasFocusedHistoryMessage,
-        projectListRef,
-        sessionListRef,
-        messageListRef,
-        setMainView,
-        clearFocusedHistoryMessage,
-        focusGlobalSearch,
-        focusSessionSearch,
-        toggleFocusMode,
-        toggleScopedMessagesExpanded,
-        toggleHistoryCategory,
-        toggleHistoryCategoryExpanded,
-        toggleProjectPaneCollapsed,
-        toggleSessionPaneCollapsed,
-        focusPreviousHistoryMessage,
-        focusNextHistoryMessage,
-        selectPreviousSession,
-        selectNextSession,
-        selectPreviousProject,
-        selectNextProject,
-        pageHistoryMessagesUp,
-        pageHistoryMessagesDown,
-        goToPreviousHistoryPage,
-        goToNextHistoryPage,
-        goToPreviousSearchPage,
-        goToNextSearchPage,
-        applyZoomAction,
-        triggerIncrementalRefresh,
-        togglePeriodicRefresh,
-      } = latestArgs.current;
+      const args = latestArgs.current;
       const shortcutTarget = resolveShortcutTarget(event.target);
       const focusedPane =
-        mainView === "history"
+        args.mainView === "history"
           ? getFocusedHistoryPane(shortcutTarget, {
-              project: projectListRef.current,
-              session: sessionListRef.current,
-              message: messageListRef.current,
+              project: args.projectListRef.current,
+              session: args.sessionListRef.current,
+              message: args.messageListRef.current,
             })
           : null;
       const command = event.metaKey || event.ctrlKey;
@@ -90,329 +81,47 @@ export function useKeyboardShortcuts(args: {
       const key = event.key.toLowerCase();
       const code = event.code;
       const isHistoryArrowNavigation =
-        mainView === "history" && !shift && !isEditableTarget(shortcutTarget);
+        args.mainView === "history" && !shift && !isEditableTarget(shortcutTarget);
+      const context: ShortcutContext = {
+        ...args,
+        event,
+        shortcutTarget,
+        focusedPane,
+        command,
+        shift,
+        key,
+        code,
+        isHistoryArrowNavigation,
+      };
       if (event.defaultPrevented) {
         return;
       }
-      if (event.key === "?" && !isEditableTarget(event.target)) {
-        event.preventDefault();
-        setMainView("help");
-      } else if (event.key === "Escape") {
-        if (mainView === "search" || mainView === "settings" || mainView === "help") {
-          event.preventDefault();
-          setMainView("history");
-        } else if (mainView === "history" && hasFocusedHistoryMessage) {
-          event.preventDefault();
-          clearFocusedHistoryMessage();
-        }
-      } else if (command && shift && key === "f") {
-        event.preventDefault();
-        focusGlobalSearch();
-      } else if (command && key === "f") {
-        event.preventDefault();
-        focusSessionSearch();
-      } else if (command && (event.key === "+" || event.key === "=")) {
-        event.preventDefault();
-        void applyZoomAction("in");
-      } else if (command && (event.key === "-" || event.key === "_")) {
-        event.preventDefault();
-        void applyZoomAction("out");
-      } else if (command && event.key === "0") {
-        event.preventDefault();
-        void applyZoomAction("reset");
-      } else if (
-        mainView === "history" &&
-        !command &&
-        !event.altKey &&
-        !shift &&
-        focusedPane === "project" &&
-        event.key === "ArrowUp"
-      ) {
-        event.preventDefault();
-        selectPreviousProject();
-      } else if (
-        mainView === "history" &&
-        !command &&
-        !event.altKey &&
-        !shift &&
-        focusedPane === "project" &&
-        event.key === "ArrowDown"
-      ) {
-        event.preventDefault();
-        selectNextProject();
-      } else if (
-        mainView === "history" &&
-        !command &&
-        !event.altKey &&
-        !shift &&
-        focusedPane === "session" &&
-        event.key === "ArrowUp"
-      ) {
-        event.preventDefault();
-        selectPreviousSession();
-      } else if (
-        mainView === "history" &&
-        !command &&
-        !event.altKey &&
-        !shift &&
-        focusedPane === "session" &&
-        event.key === "ArrowDown"
-      ) {
-        event.preventDefault();
-        selectNextSession();
-      } else if (
-        mainView === "history" &&
-        event.key === "Tab" &&
-        !isEditableTarget(shortcutTarget)
-      ) {
-        const panes = [
-          projectListRef.current,
-          sessionListRef.current,
-          messageListRef.current,
-        ].filter(isVisiblePaneTarget);
-        if (panes.length === 0) {
+      const handledExpandedCategory = handleHistoryCategoryShortcut({
+        event,
+        mainView: args.mainView,
+        command,
+        requireAlt: true,
+        code,
+        onToggleCategory: args.toggleHistoryCategoryExpanded,
+      });
+      if (handledExpandedCategory) {
+        return;
+      }
+      const handledCategory = handleHistoryCategoryShortcut({
+        event,
+        mainView: args.mainView,
+        command,
+        requireAlt: false,
+        code,
+        onToggleCategory: args.toggleHistoryCategory,
+      });
+      if (handledCategory) {
+        return;
+      }
+      for (const handler of SHORTCUT_HANDLERS) {
+        if (handler(context)) {
           return;
         }
-        event.preventDefault();
-        const currentPaneContainer = shortcutTarget?.closest(".history-focus-pane");
-        const currentIndex = currentPaneContainer
-          ? panes.findIndex((pane) => pane.closest(".history-focus-pane") === currentPaneContainer)
-          : -1;
-        const nextIndex =
-          currentIndex === -1
-            ? shift
-              ? panes.length - 1
-              : 0
-            : (currentIndex + (shift ? -1 : 1) + panes.length) % panes.length;
-        panes[nextIndex]?.focus({ preventScroll: true });
-      } else if (
-        isHistoryArrowNavigation &&
-        event.metaKey &&
-        !event.altKey &&
-        !event.ctrlKey &&
-        event.key === "ArrowUp"
-      ) {
-        event.preventDefault();
-        focusPreviousHistoryMessage();
-      } else if (
-        isHistoryArrowNavigation &&
-        event.metaKey &&
-        !event.altKey &&
-        !event.ctrlKey &&
-        event.key === "ArrowDown"
-      ) {
-        event.preventDefault();
-        focusNextHistoryMessage();
-      } else if (
-        isHistoryArrowNavigation &&
-        event.altKey &&
-        !event.metaKey &&
-        !event.ctrlKey &&
-        event.key === "ArrowUp"
-      ) {
-        event.preventDefault();
-        selectPreviousSession();
-      } else if (
-        isHistoryArrowNavigation &&
-        event.altKey &&
-        !event.metaKey &&
-        !event.ctrlKey &&
-        event.key === "ArrowDown"
-      ) {
-        event.preventDefault();
-        selectNextSession();
-      } else if (
-        isHistoryArrowNavigation &&
-        event.ctrlKey &&
-        !event.metaKey &&
-        !event.altKey &&
-        event.key === "ArrowUp"
-      ) {
-        event.preventDefault();
-        selectPreviousProject();
-      } else if (
-        isHistoryArrowNavigation &&
-        event.ctrlKey &&
-        !event.metaKey &&
-        !event.altKey &&
-        event.key === "ArrowDown"
-      ) {
-        event.preventDefault();
-        selectNextProject();
-      } else if (
-        mainView === "history" &&
-        event.ctrlKey &&
-        !event.metaKey &&
-        !event.altKey &&
-        !shift &&
-        !isEditableTarget(event.target) &&
-        key === "u"
-      ) {
-        event.preventDefault();
-        pageHistoryMessagesUp();
-      } else if (
-        mainView === "history" &&
-        event.ctrlKey &&
-        !event.metaKey &&
-        !event.altKey &&
-        !shift &&
-        !isEditableTarget(event.target) &&
-        key === "d"
-      ) {
-        event.preventDefault();
-        pageHistoryMessagesDown();
-      } else if (
-        mainView === "history" &&
-        event.metaKey &&
-        !event.ctrlKey &&
-        !event.altKey &&
-        shift &&
-        !isEditableTarget(event.target) &&
-        event.key === "ArrowUp"
-      ) {
-        event.preventDefault();
-        pageHistoryMessagesUp();
-      } else if (
-        mainView === "history" &&
-        event.metaKey &&
-        !event.ctrlKey &&
-        !event.altKey &&
-        shift &&
-        !isEditableTarget(event.target) &&
-        event.key === "ArrowDown"
-      ) {
-        event.preventDefault();
-        pageHistoryMessagesDown();
-      } else if (
-        command &&
-        !shift &&
-        !event.altKey &&
-        event.key === "ArrowLeft" &&
-        !isEditableTarget(event.target)
-      ) {
-        if (mainView === "history") {
-          event.preventDefault();
-          goToPreviousHistoryPage();
-        } else if (mainView === "search") {
-          event.preventDefault();
-          goToPreviousSearchPage();
-        }
-      } else if (
-        command &&
-        !shift &&
-        !event.altKey &&
-        event.key === "ArrowRight" &&
-        !isEditableTarget(event.target)
-      ) {
-        if (mainView === "history") {
-          event.preventDefault();
-          goToNextHistoryPage();
-        } else if (mainView === "search") {
-          event.preventDefault();
-          goToNextSearchPage();
-        }
-      } else if (mainView === "history" && command && shift && key === "m") {
-        event.preventDefault();
-        toggleFocusMode();
-      } else if (command && !shift && key === "r") {
-        event.preventDefault();
-        triggerIncrementalRefresh();
-      } else if (command && shift && key === "r") {
-        event.preventDefault();
-        togglePeriodicRefresh();
-      } else if (mainView === "history" && command && key === "e") {
-        event.preventDefault();
-        toggleScopedMessagesExpanded();
-      } else if (mainView === "history" && command && shift && key === "b") {
-        event.preventDefault();
-        toggleSessionPaneCollapsed();
-      } else if (mainView === "history" && command && key === "b") {
-        event.preventDefault();
-        toggleProjectPaneCollapsed();
-      } else if (mainView === "history" && command && event.altKey && code === "Digit1") {
-        event.preventDefault();
-        toggleHistoryCategoryExpanded("user");
-      } else if (mainView === "history" && command && event.altKey && code === "Digit2") {
-        event.preventDefault();
-        toggleHistoryCategoryExpanded("assistant");
-      } else if (mainView === "history" && command && event.altKey && code === "Digit3") {
-        event.preventDefault();
-        toggleHistoryCategoryExpanded("tool_edit");
-      } else if (mainView === "history" && command && event.altKey && code === "Digit4") {
-        event.preventDefault();
-        toggleHistoryCategoryExpanded("tool_use");
-      } else if (mainView === "history" && command && event.altKey && code === "Digit5") {
-        event.preventDefault();
-        toggleHistoryCategoryExpanded("tool_result");
-      } else if (mainView === "history" && command && event.altKey && code === "Digit6") {
-        event.preventDefault();
-        toggleHistoryCategoryExpanded("thinking");
-      } else if (mainView === "history" && command && event.altKey && code === "Digit7") {
-        event.preventDefault();
-        toggleHistoryCategoryExpanded("system");
-      } else if (
-        mainView === "history" &&
-        command &&
-        !shift &&
-        !event.altKey &&
-        code === "Digit1"
-      ) {
-        event.preventDefault();
-        toggleHistoryCategory("user");
-      } else if (
-        mainView === "history" &&
-        command &&
-        !shift &&
-        !event.altKey &&
-        code === "Digit2"
-      ) {
-        event.preventDefault();
-        toggleHistoryCategory("assistant");
-      } else if (
-        mainView === "history" &&
-        command &&
-        !shift &&
-        !event.altKey &&
-        code === "Digit3"
-      ) {
-        event.preventDefault();
-        toggleHistoryCategory("tool_edit");
-      } else if (
-        mainView === "history" &&
-        command &&
-        !shift &&
-        !event.altKey &&
-        code === "Digit4"
-      ) {
-        event.preventDefault();
-        toggleHistoryCategory("tool_use");
-      } else if (
-        mainView === "history" &&
-        command &&
-        !shift &&
-        !event.altKey &&
-        code === "Digit5"
-      ) {
-        event.preventDefault();
-        toggleHistoryCategory("tool_result");
-      } else if (
-        mainView === "history" &&
-        command &&
-        !shift &&
-        !event.altKey &&
-        code === "Digit6"
-      ) {
-        event.preventDefault();
-        toggleHistoryCategory("thinking");
-      } else if (
-        mainView === "history" &&
-        command &&
-        !shift &&
-        !event.altKey &&
-        code === "Digit7"
-      ) {
-        event.preventDefault();
-        toggleHistoryCategory("system");
       }
     };
 
@@ -421,6 +130,334 @@ export function useKeyboardShortcuts(args: {
       window.removeEventListener("keydown", onKeyDown);
     };
   }, []);
+}
+
+type ShortcutHandler = (context: ShortcutContext) => boolean;
+
+const SHORTCUT_HANDLERS: readonly ShortcutHandler[] = [
+  handleHelpShortcut,
+  handleEscapeShortcut,
+  handleSearchShortcut,
+  handleZoomShortcut,
+  handleFocusedPaneArrowShortcut,
+  handleTabFocusShortcut,
+  handleHistoryNavigationShortcut,
+  handlePageNavigationShortcut,
+  handleHistoryCommandShortcut,
+];
+
+function handleHelpShortcut(context: ShortcutContext): boolean {
+  if (context.event.key !== "?" || isEditableTarget(context.event.target)) {
+    return false;
+  }
+  context.event.preventDefault();
+  context.setMainView("help");
+  return true;
+}
+
+function handleEscapeShortcut(context: ShortcutContext): boolean {
+  if (context.event.key !== "Escape") {
+    return false;
+  }
+  if (
+    context.mainView === "search" ||
+    context.mainView === "settings" ||
+    context.mainView === "help"
+  ) {
+    context.event.preventDefault();
+    context.setMainView("history");
+    return true;
+  }
+  if (context.mainView === "history" && context.hasFocusedHistoryMessage) {
+    context.event.preventDefault();
+    context.clearFocusedHistoryMessage();
+    return true;
+  }
+  return false;
+}
+
+function handleSearchShortcut(context: ShortcutContext): boolean {
+  if (!context.command || context.key !== "f") {
+    return false;
+  }
+  context.event.preventDefault();
+  if (context.shift) {
+    context.focusGlobalSearch();
+  } else {
+    context.focusSessionSearch();
+  }
+  return true;
+}
+
+function handleZoomShortcut(context: ShortcutContext): boolean {
+  if (!context.command) {
+    return false;
+  }
+  if (context.event.key === "+" || context.event.key === "=") {
+    context.event.preventDefault();
+    void context.applyZoomAction("in");
+    return true;
+  }
+  if (context.event.key === "-" || context.event.key === "_") {
+    context.event.preventDefault();
+    void context.applyZoomAction("out");
+    return true;
+  }
+  if (context.event.key === "0") {
+    context.event.preventDefault();
+    void context.applyZoomAction("reset");
+    return true;
+  }
+  return false;
+}
+
+function handleFocusedPaneArrowShortcut(context: ShortcutContext): boolean {
+  if (context.mainView !== "history" || context.command || context.event.altKey || context.shift) {
+    return false;
+  }
+  if (context.focusedPane === "project" && context.event.key === "ArrowUp") {
+    context.event.preventDefault();
+    context.selectPreviousProject();
+    return true;
+  }
+  if (context.focusedPane === "project" && context.event.key === "ArrowDown") {
+    context.event.preventDefault();
+    context.selectNextProject();
+    return true;
+  }
+  if (context.focusedPane === "session" && context.event.key === "ArrowUp") {
+    context.event.preventDefault();
+    context.selectPreviousSession();
+    return true;
+  }
+  if (context.focusedPane === "session" && context.event.key === "ArrowDown") {
+    context.event.preventDefault();
+    context.selectNextSession();
+    return true;
+  }
+  return false;
+}
+
+function handleTabFocusShortcut(context: ShortcutContext): boolean {
+  if (
+    context.mainView !== "history" ||
+    context.event.key !== "Tab" ||
+    isEditableTarget(context.shortcutTarget)
+  ) {
+    return false;
+  }
+  const panes = [
+    context.projectListRef.current,
+    context.sessionListRef.current,
+    context.messageListRef.current,
+  ].filter(isVisiblePaneTarget);
+  if (panes.length === 0) {
+    return false;
+  }
+
+  context.event.preventDefault();
+  const currentPaneContainer = context.shortcutTarget?.closest(".history-focus-pane");
+  const currentIndex = currentPaneContainer
+    ? panes.findIndex((pane) => pane.closest(".history-focus-pane") === currentPaneContainer)
+    : -1;
+  const nextIndex =
+    currentIndex === -1
+      ? context.shift
+        ? panes.length - 1
+        : 0
+      : (currentIndex + (context.shift ? -1 : 1) + panes.length) % panes.length;
+  panes[nextIndex]?.focus({ preventScroll: true });
+  return true;
+}
+
+function handleHistoryNavigationShortcut(context: ShortcutContext): boolean {
+  if (context.mainView !== "history" || isEditableTarget(context.event.target)) {
+    return false;
+  }
+  if (
+    context.event.ctrlKey &&
+    !context.event.metaKey &&
+    !context.event.altKey &&
+    !context.shift &&
+    context.key === "u"
+  ) {
+    context.event.preventDefault();
+    context.pageHistoryMessagesUp();
+    return true;
+  }
+  if (
+    context.event.ctrlKey &&
+    !context.event.metaKey &&
+    !context.event.altKey &&
+    !context.shift &&
+    context.key === "d"
+  ) {
+    context.event.preventDefault();
+    context.pageHistoryMessagesDown();
+    return true;
+  }
+  if (
+    context.event.metaKey &&
+    !context.event.ctrlKey &&
+    !context.event.altKey &&
+    context.shift &&
+    context.event.key === "ArrowUp"
+  ) {
+    context.event.preventDefault();
+    context.pageHistoryMessagesUp();
+    return true;
+  }
+  if (
+    context.event.metaKey &&
+    !context.event.ctrlKey &&
+    !context.event.altKey &&
+    context.shift &&
+    context.event.key === "ArrowDown"
+  ) {
+    context.event.preventDefault();
+    context.pageHistoryMessagesDown();
+    return true;
+  }
+  if (!context.isHistoryArrowNavigation) {
+    return false;
+  }
+  if (context.event.metaKey && !context.event.altKey && !context.event.ctrlKey) {
+    if (context.event.key === "ArrowUp") {
+      context.event.preventDefault();
+      context.focusPreviousHistoryMessage();
+      return true;
+    }
+    if (context.event.key === "ArrowDown") {
+      context.event.preventDefault();
+      context.focusNextHistoryMessage();
+      return true;
+    }
+  }
+  if (context.event.altKey && !context.event.metaKey && !context.event.ctrlKey) {
+    if (context.event.key === "ArrowUp") {
+      context.event.preventDefault();
+      context.selectPreviousSession();
+      return true;
+    }
+    if (context.event.key === "ArrowDown") {
+      context.event.preventDefault();
+      context.selectNextSession();
+      return true;
+    }
+  }
+  if (context.event.ctrlKey && !context.event.metaKey && !context.event.altKey) {
+    if (context.event.key === "ArrowUp") {
+      context.event.preventDefault();
+      context.selectPreviousProject();
+      return true;
+    }
+    if (context.event.key === "ArrowDown") {
+      context.event.preventDefault();
+      context.selectNextProject();
+      return true;
+    }
+  }
+  return false;
+}
+
+function handlePageNavigationShortcut(context: ShortcutContext): boolean {
+  if (
+    !context.command ||
+    context.shift ||
+    context.event.altKey ||
+    isEditableTarget(context.event.target)
+  ) {
+    return false;
+  }
+  if (context.event.key === "ArrowLeft") {
+    if (context.mainView === "history") {
+      context.event.preventDefault();
+      context.goToPreviousHistoryPage();
+      return true;
+    }
+    if (context.mainView === "search") {
+      context.event.preventDefault();
+      context.goToPreviousSearchPage();
+      return true;
+    }
+    return false;
+  }
+  if (context.event.key === "ArrowRight") {
+    if (context.mainView === "history") {
+      context.event.preventDefault();
+      context.goToNextHistoryPage();
+      return true;
+    }
+    if (context.mainView === "search") {
+      context.event.preventDefault();
+      context.goToNextSearchPage();
+      return true;
+    }
+    return false;
+  }
+  return false;
+}
+
+function handleHistoryCommandShortcut(context: ShortcutContext): boolean {
+  if (!context.command) {
+    return false;
+  }
+  if (context.mainView === "history" && context.shift && context.key === "m") {
+    context.event.preventDefault();
+    context.toggleFocusMode();
+    return true;
+  }
+  if (!context.shift && context.key === "r") {
+    context.event.preventDefault();
+    context.triggerIncrementalRefresh();
+    return true;
+  }
+  if (context.shift && context.key === "r") {
+    context.event.preventDefault();
+    context.togglePeriodicRefresh();
+    return true;
+  }
+  if (context.mainView === "history" && context.key === "e") {
+    context.event.preventDefault();
+    context.toggleScopedMessagesExpanded();
+    return true;
+  }
+  if (context.mainView === "history" && context.shift && context.key === "b") {
+    context.event.preventDefault();
+    context.toggleSessionPaneCollapsed();
+    return true;
+  }
+  if (context.mainView === "history" && context.key === "b") {
+    context.event.preventDefault();
+    context.toggleProjectPaneCollapsed();
+    return true;
+  }
+  return false;
+}
+
+function handleHistoryCategoryShortcut(args: {
+  event: KeyboardEvent;
+  mainView: MainView;
+  command: boolean;
+  requireAlt: boolean;
+  code: string;
+  onToggleCategory: (category: MessageCategory) => void;
+}): boolean {
+  if (args.mainView !== "history" || !args.command) {
+    return false;
+  }
+  if (args.requireAlt !== args.event.altKey || args.event.shiftKey) {
+    return false;
+  }
+
+  const match = HISTORY_CATEGORY_SHORTCUTS.find((shortcut) => shortcut.code === args.code);
+  if (!match) {
+    return false;
+  }
+
+  args.event.preventDefault();
+  args.onToggleCategory(match.category);
+  return true;
 }
 
 function isEditableTarget(target: EventTarget | null): boolean {

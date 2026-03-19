@@ -16,6 +16,7 @@ import "@fontsource/plus-jakarta-sans/700.css";
 
 import type { ThemeMode } from "../shared/uiPreferences";
 import "./styles.css";
+import { getCodetrailClient } from "./lib/codetrailClient";
 import { applyTheme } from "./lib/theme";
 
 function requireRootElement(): HTMLElement {
@@ -82,13 +83,14 @@ window.addEventListener("unhandledrejection", (event) => {
 
 async function bootRenderer(): Promise<void> {
   try {
+    const codetrail = getCodetrailClient();
     const initialPaneStatePromise: Promise<
       (IpcResponse<"ui:getPaneState"> & IpcResponse<"indexer:getConfig">) | null
     > =
-      typeof window.codetrail?.invoke === "function"
+      typeof codetrail.invoke === "function"
         ? Promise.all([
-            window.codetrail.invoke("ui:getPaneState", {}),
-            window.codetrail.invoke("indexer:getConfig", {}),
+            codetrail.invoke("ui:getPaneState", {}),
+            codetrail.invoke("indexer:getConfig", {}),
           ])
             .then(([paneState, indexerConfig]) => ({
               ...paneState,

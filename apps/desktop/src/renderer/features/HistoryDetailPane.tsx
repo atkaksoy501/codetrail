@@ -3,6 +3,8 @@ import type { Dispatch, SetStateAction } from "react";
 import type { MessageCategory } from "@codetrail/core/browser";
 
 import { CATEGORIES } from "../app/constants";
+import type { BulkExpandScope } from "../app/types";
+import { AdvancedSearchToggleButton } from "../components/AdvancedSearchToggleButton";
 import { ToolbarIcon } from "../components/ToolbarIcon";
 import { ZoomPercentInput } from "../components/ZoomPercentInput";
 import { MessageCard } from "../components/messages/MessagePresentation";
@@ -24,6 +26,13 @@ function getHistoryCategoryTooltip(history: HistoryController, category: Message
   const label = history.prettyCategory(category);
   return `Toggle ${label} messages on or off (${history.historyCategoriesShortcutMap[category]})
 (${history.historyCategoryExpandShortcutMap[category]} to expand or collapse ${label} messages)`;
+}
+
+function parseBulkExpandScope(value: string): BulkExpandScope {
+  if (value === "all") {
+    return "all";
+  }
+  return CATEGORIES.find((category) => category === value) ?? "all";
 }
 
 export function HistoryDetailPane({
@@ -96,10 +105,7 @@ export function HistoryDetailPane({
                 className="expand-scope-select"
                 value={history.bulkExpandScope}
                 onChange={(event) => {
-                  const nextScope = event.target.value;
-                  history.setBulkExpandScope(
-                    nextScope === "all" ? "all" : (nextScope as MessageCategory),
-                  );
+                  history.setBulkExpandScope(parseBulkExpandScope(event.target.value));
                 }}
                 aria-label="Select expand and collapse scope"
                 title="Choose which message type expand/collapse applies to"
@@ -208,33 +214,13 @@ export function HistoryDetailPane({
               title={history.historyQueryError ?? undefined}
             />
           </div>
-          <button
-            type="button"
-            className={`search-mode-icon-btn${advancedSearchEnabled ? " active" : ""}`}
-            onClick={() => {
+          <AdvancedSearchToggleButton
+            enabled={advancedSearchEnabled}
+            onToggle={() => {
               setAdvancedSearchEnabled((value) => !value);
               history.setSessionPage(0);
             }}
-            aria-pressed={advancedSearchEnabled}
-            aria-label={
-              advancedSearchEnabled
-                ? "Disable advanced search syntax"
-                : "Enable advanced search syntax"
-            }
-            title={advancedSearchEnabled ? "Advanced syntax enabled" : "Advanced syntax disabled"}
-          >
-            <svg
-              className="search-mode-glyph"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              aria-hidden
-            >
-              <title>Advanced search syntax</title>
-              <path d="M8 8l-4 4l4 4M16 8l4 4l-4 4M13 6l-2 12" />
-            </svg>
-          </button>
+          />
         </div>
         {history.historyQueryError ? (
           <p className="search-error" title={history.historyQueryError}>

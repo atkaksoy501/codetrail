@@ -10,7 +10,11 @@ import type {
 
 export type ReadFileText = (filePath: string) => string;
 
-export type ProviderSource = unknown[] | Record<string, unknown>;
+export type ProviderJsonPrimitive = string | number | boolean | null;
+export type ProviderJsonValue = ProviderJsonPrimitive | ProviderJsonObject | ProviderJsonArray;
+export type ProviderJsonObject = { [key: string]: ProviderJsonValue };
+export type ProviderJsonArray = ProviderJsonValue[];
+export type ProviderSource = ProviderJsonArray | ProviderJsonObject;
 
 export type ProviderReadSourceResult = {
   payload: ProviderSource;

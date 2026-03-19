@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { closeSync, openSync, readFileSync, readSync } from "node:fs";
+import { z } from "zod";
 
 import {
   type MessageCategory,
@@ -23,6 +24,7 @@ import {
 import { type ParserDiagnostic, parseSession, parseSessionEvent } from "../parsing";
 import { asArray, asRecord, readString } from "../parsing/helpers";
 import {
+  type ProviderReadSourceResult,
   type ProviderSourceMetadata,
   type ProviderSourceMetadataAccumulator,
   type ReadFileText,
@@ -191,13 +193,69 @@ export type IndexingNotice = {
 };
 
 type IndexingStatements = {
-  upsertProject: { run: (...args: unknown[]) => unknown };
-  upsertSession: { run: (...args: unknown[]) => unknown };
-  insertMessage: { run: (...args: unknown[]) => unknown };
-  insertMessageFts: { run: (...args: unknown[]) => unknown };
-  insertToolCall: { run: (...args: unknown[]) => unknown };
-  upsertIndexedFile: { run: (...args: unknown[]) => unknown };
-  upsertCheckpoint: { run: (...args: unknown[]) => unknown };
+  upsertProject: PreparedStatement<[string, Provider, string, string, string, string]>;
+  upsertSession: PreparedStatement<
+    [
+      string,
+      string,
+      Provider,
+      string,
+      string,
+      string,
+      string,
+      string,
+      number | null,
+      string | null,
+      string | null,
+      number,
+      number,
+      number,
+    ]
+  >;
+  insertMessage: PreparedStatement<
+    [
+      string,
+      string,
+      string,
+      Provider,
+      MessageCategory,
+      string,
+      string,
+      number | null,
+      number | null,
+      number | null,
+      "native" | "derived" | null,
+      "high" | "low" | null,
+    ]
+  >;
+  insertMessageFts: PreparedStatement<[string, string, Provider, MessageCategory, string]>;
+  insertToolCall: PreparedStatement<
+    [string, string, string, string, string | null, string | null, string | null]
+  >;
+  upsertIndexedFile: PreparedStatement<[string, Provider, string, string, number, number, string]>;
+  upsertCheckpoint: PreparedStatement<
+    [
+      string,
+      Provider,
+      string,
+      string,
+      number,
+      number,
+      number,
+      number,
+      number,
+      number,
+      string,
+      string,
+      string,
+      string,
+      string,
+    ]
+  >;
+};
+
+type PreparedStatement<TArgs extends unknown[]> = {
+  run: (...args: TArgs) => unknown;
 };
 
 class IndexingFileProcessingError extends Error {
@@ -219,6 +277,26 @@ const MAX_JSONL_LINE_BYTES = 8 * 1024 * 1024;
 const MAX_INDEXED_MESSAGE_CONTENT_BYTES = 256 * 1024;
 const MAX_INDEXED_FTS_CONTENT_BYTES = 32 * 1024;
 const MAX_TOOL_CALL_JSON_BYTES = 64 * 1024;
+const DEFAULT_SESSION_AGGREGATE_STATE = {
+  messageCount: 0,
+  tokenInputTotal: 0,
+  tokenOutputTotal: 0,
+  startedAtMs: null,
+  endedAtMs: null,
+  title: "",
+  titleRank: null,
+} satisfies SessionAggregateState;
+const checkpointAggregateSchema = z
+  .object({
+    messageCount: z.number().catch(0),
+    tokenInputTotal: z.number().catch(0),
+    tokenOutputTotal: z.number().catch(0),
+    startedAtMs: z.number().nullable().catch(null),
+    endedAtMs: z.number().nullable().catch(null),
+    title: z.string().catch(""),
+    titleRank: z.number().nullable().catch(null),
+  })
+  .passthrough();
 
 // Incremental indexing treats the filesystem as source of truth and the SQLite database as a
 // cacheable projection of normalized session history.
@@ -419,7 +497,7 @@ export function indexChangedFiles(
   }
 }
 
-function createIndexingStatements(db: SqliteDatabase) {
+function createIndexingStatements(db: SqliteDatabase): IndexingStatements {
   return {
     upsertProject: db.prepare(
       `INSERT INTO projects (id, provider, name, path, created_at, updated_at)
@@ -667,7 +745,7 @@ function indexMaterializedSessionFile(args: {
   onNotice: (notice: IndexingNotice) => void;
 }): ParserDiagnostic[] {
   const adapter = getProviderAdapter(args.discovered.provider);
-  let source: { payload: unknown[] | Record<string, unknown> };
+  let source: ProviderReadSourceResult;
   try {
     const loaded = adapter.readSource(args.discovered.filePath, args.readFileText);
     if (!loaded) {
@@ -811,132 +889,27 @@ function indexStreamedJsonlSessionFile(args: {
 
   try {
     const persist = args.db.transaction(() => {
-      if (!shouldResume) {
-        deleteSessionDataForFilePath(args.db, args.discovered.filePath);
-        deleteSessionData(args.db, args.sessionDbId);
-      }
-      args.db
-        .prepare("DELETE FROM index_checkpoints WHERE file_path = ?")
-        .run(args.discovered.filePath);
-      args.statements.upsertProject.run(
+      prepareStreamedSessionPersistence(
+        args,
+        shouldResume,
         projectId,
-        args.discovered.provider,
-        args.discovered.projectName,
-        args.discovered.projectPath,
-        args.nowIso,
-        args.nowIso,
+        sourceMetaAccumulator,
+        processingState,
       );
-      upsertSessionSummary(args.statements, {
+
+      const streamed = streamAndPersistJsonlEvents({
+        adapter,
+        discovered: args.discovered,
+        parserDiagnostics,
+        processingState,
         sessionDbId: args.sessionDbId,
-        projectId,
-        provider: args.discovered.provider,
-        filePath: args.discovered.filePath,
-        title: processingState.aggregate.title,
-        modelNames:
-          sourceMetaAccumulator.models.size > 0
-            ? [...sourceMetaAccumulator.models].sort().join(",")
-            : "",
-        aggregate: finalizeSessionAggregate(processingState.aggregate),
-        messageCount: processingState.aggregate.messageCount,
-        tokenInputTotal: processingState.aggregate.tokenInputTotal,
-        tokenOutputTotal: processingState.aggregate.tokenOutputTotal,
-        fileMtimeMs: args.discovered.fileMtimeMs,
-        gitBranch: sourceMetaAccumulator.gitBranch ?? args.discovered.metadata.gitBranch,
-        cwd: sourceMetaAccumulator.cwd ?? args.discovered.metadata.cwd,
+        sourceMetaAccumulator,
+        statements: args.statements,
+        resumeCheckpoint: args.resumeCheckpoint,
+        onNotice: args.onNotice,
       });
 
-      let sequence = args.resumeCheckpoint?.nextMessageSequence ?? 0;
-      let emittedEvents = 0;
-      let streamResult: StreamJsonlResult | null = null;
-      try {
-        streamResult = streamJsonlEvents(args.discovered.filePath, {
-          startOffsetBytes: args.resumeCheckpoint?.lastOffsetBytes ?? 0,
-          startLineNumber: args.resumeCheckpoint?.lastLineNumber ?? 0,
-          startEventIndex: args.resumeCheckpoint?.lastEventIndex ?? 0,
-          onEvent: (event, eventIndex) => {
-            emittedEvents += 1;
-            adapter.updateSourceMetadataFromEvent(event, sourceMetaAccumulator);
-            let parsedEvent: ReturnType<typeof parseSessionEvent>;
-            try {
-              parsedEvent = parseSessionEvent({
-                provider: args.discovered.provider,
-                sessionId: args.discovered.sourceSessionId,
-                eventIndex,
-                event,
-                diagnostics: parserDiagnostics,
-                sequence,
-              });
-            } catch (error) {
-              throw new IndexingFileProcessingError({
-                provider: args.discovered.provider,
-                sessionId: args.discovered.sourceSessionId,
-                filePath: args.discovered.filePath,
-                stage: "parse",
-                error,
-              });
-            }
-            sequence = parsedEvent.nextSequence;
-            const eventMessages = parsedEvent.messages.slice();
-            for (let index = 0; index < eventMessages.length; index += 1) {
-              const message = eventMessages[index];
-              if (!message) {
-                continue;
-              }
-              const normalizedMessage = normalizeIndexedMessage(processingState, message);
-              try {
-                insertIndexedMessage(args.statements, args.sessionDbId, normalizedMessage, {
-                  provider: args.discovered.provider,
-                  sessionId: args.discovered.sourceSessionId,
-                  filePath: args.discovered.filePath,
-                  onNotice: args.onNotice,
-                });
-              } catch (error) {
-                throw new IndexingFileProcessingError({
-                  provider: args.discovered.provider,
-                  sessionId: args.discovered.sourceSessionId,
-                  filePath: args.discovered.filePath,
-                  stage: "persist",
-                  error,
-                });
-              }
-            }
-          },
-          onInvalidLine: (lineNumber, error) => {
-            const noticeMessage = error instanceof Error ? error.message : String(error);
-            parserDiagnostics.push({
-              severity: "warning",
-              code: "parser.invalid_jsonl_line",
-              provider: args.discovered.provider,
-              sessionId: args.discovered.sourceSessionId,
-              eventIndex: lineNumber - 1,
-              message: noticeMessage,
-            });
-            args.onNotice({
-              provider: args.discovered.provider,
-              sessionId: args.discovered.sourceSessionId,
-              filePath: args.discovered.filePath,
-              stage: "parse",
-              severity: "warning",
-              code: "parser.invalid_jsonl_line",
-              message: noticeMessage,
-              details: { lineNumber },
-            });
-          },
-        });
-      } catch (error) {
-        if (error instanceof IndexingFileProcessingError) {
-          throw error;
-        }
-        throw new IndexingFileProcessingError({
-          provider: args.discovered.provider,
-          sessionId: args.discovered.sourceSessionId,
-          filePath: args.discovered.filePath,
-          stage: "read",
-          error,
-        });
-      }
-
-      if (emittedEvents === 0 && !shouldResume) {
+      if (streamed.emittedEvents === 0 && !shouldResume) {
         parserDiagnostics.push({
           severity: "warning",
           code: "parser.no_events_found",
@@ -976,39 +949,17 @@ function indexStreamedJsonlSessionFile(args: {
         args.discovered.fileMtimeMs,
         args.nowIso,
       );
-      const hashes = computeFileHashes(args.discovered.filePath, args.discovered.fileSize);
-      const checkpoint = buildStreamCheckpointState({
+      persistStreamCheckpoint({
         discovered: args.discovered,
+        nowIso: args.nowIso,
+        resumeCheckpoint: args.resumeCheckpoint,
+        sequence: streamed.sequence,
         sessionDbId: args.sessionDbId,
-        sequence,
         processingState,
         sourceMetaAccumulator,
-        streamResult:
-          streamResult ??
-          ({
-            nextOffsetBytes: args.resumeCheckpoint?.lastOffsetBytes ?? 0,
-            nextLineNumber: args.resumeCheckpoint?.lastLineNumber ?? 0,
-            nextEventIndex: args.resumeCheckpoint?.lastEventIndex ?? 0,
-          } satisfies StreamJsonlResult),
-        hashes,
+        statements: args.statements,
+        streamResult: streamed.streamResult,
       });
-      args.statements.upsertCheckpoint.run(
-        checkpoint.filePath,
-        checkpoint.provider,
-        checkpoint.sessionDbId,
-        checkpoint.sessionIdentity,
-        checkpoint.fileSize,
-        checkpoint.fileMtimeMs,
-        checkpoint.lastOffsetBytes,
-        checkpoint.lastLineNumber,
-        checkpoint.lastEventIndex,
-        checkpoint.nextMessageSequence,
-        JSON.stringify(checkpoint.processingState),
-        JSON.stringify(checkpoint.sourceMetadata),
-        checkpoint.headHash,
-        checkpoint.tailHash,
-        args.nowIso,
-      );
     });
     persist();
   } catch (error) {
@@ -1025,6 +976,240 @@ function indexStreamedJsonlSessionFile(args: {
   }
 
   return parserDiagnostics;
+}
+
+function prepareStreamedSessionPersistence(
+  args: Pick<
+    Parameters<typeof indexStreamedJsonlSessionFile>[0],
+    "db" | "discovered" | "sessionDbId" | "nowIso" | "statements"
+  >,
+  shouldResume: boolean,
+  projectId: string,
+  sourceMetaAccumulator: ProviderSourceMetadataAccumulator,
+  processingState: MessageProcessingState,
+): void {
+  if (!shouldResume) {
+    deleteSessionDataForFilePath(args.db, args.discovered.filePath);
+    deleteSessionData(args.db, args.sessionDbId);
+  }
+  args.db
+    .prepare("DELETE FROM index_checkpoints WHERE file_path = ?")
+    .run(args.discovered.filePath);
+  args.statements.upsertProject.run(
+    projectId,
+    args.discovered.provider,
+    args.discovered.projectName,
+    args.discovered.projectPath,
+    args.nowIso,
+    args.nowIso,
+  );
+  upsertSessionSummary(args.statements, {
+    sessionDbId: args.sessionDbId,
+    projectId,
+    provider: args.discovered.provider,
+    filePath: args.discovered.filePath,
+    title: processingState.aggregate.title,
+    modelNames:
+      sourceMetaAccumulator.models.size > 0
+        ? [...sourceMetaAccumulator.models].sort().join(",")
+        : "",
+    aggregate: finalizeSessionAggregate(processingState.aggregate),
+    messageCount: processingState.aggregate.messageCount,
+    tokenInputTotal: processingState.aggregate.tokenInputTotal,
+    tokenOutputTotal: processingState.aggregate.tokenOutputTotal,
+    fileMtimeMs: args.discovered.fileMtimeMs,
+    gitBranch: sourceMetaAccumulator.gitBranch ?? args.discovered.metadata.gitBranch,
+    cwd: sourceMetaAccumulator.cwd ?? args.discovered.metadata.cwd,
+  });
+}
+
+function streamAndPersistJsonlEvents(args: {
+  adapter: ReturnType<typeof getProviderAdapter>;
+  discovered: ReturnType<typeof discoverSessionFiles>[number];
+  parserDiagnostics: ParserDiagnostic[];
+  processingState: MessageProcessingState;
+  sessionDbId: string;
+  sourceMetaAccumulator: ProviderSourceMetadataAccumulator;
+  statements: IndexingStatements;
+  resumeCheckpoint: ResumeCheckpoint | null;
+  onNotice: (notice: IndexingNotice) => void;
+}): { sequence: number; emittedEvents: number; streamResult: StreamJsonlResult } {
+  let sequence = args.resumeCheckpoint?.nextMessageSequence ?? 0;
+  let emittedEvents = 0;
+  try {
+    const streamResult = streamJsonlEvents(args.discovered.filePath, {
+      startOffsetBytes: args.resumeCheckpoint?.lastOffsetBytes ?? 0,
+      startLineNumber: args.resumeCheckpoint?.lastLineNumber ?? 0,
+      startEventIndex: args.resumeCheckpoint?.lastEventIndex ?? 0,
+      onEvent: (event, eventIndex) => {
+        emittedEvents += 1;
+        args.adapter.updateSourceMetadataFromEvent(event, args.sourceMetaAccumulator);
+        sequence = parseAndPersistStreamEvent({
+          discovered: args.discovered,
+          event,
+          eventIndex,
+          parserDiagnostics: args.parserDiagnostics,
+          processingState: args.processingState,
+          sequence,
+          sessionDbId: args.sessionDbId,
+          statements: args.statements,
+          onNotice: args.onNotice,
+        });
+      },
+      onInvalidLine: (lineNumber, error) => {
+        recordInvalidJsonlLine(
+          args.parserDiagnostics,
+          args.discovered,
+          lineNumber,
+          error,
+          args.onNotice,
+        );
+      },
+    });
+    return { sequence, emittedEvents, streamResult };
+  } catch (error) {
+    if (error instanceof IndexingFileProcessingError) {
+      throw error;
+    }
+    throw new IndexingFileProcessingError({
+      provider: args.discovered.provider,
+      sessionId: args.discovered.sourceSessionId,
+      filePath: args.discovered.filePath,
+      stage: "read",
+      error,
+    });
+  }
+}
+
+function parseAndPersistStreamEvent(args: {
+  discovered: ReturnType<typeof discoverSessionFiles>[number];
+  event: unknown;
+  eventIndex: number;
+  parserDiagnostics: ParserDiagnostic[];
+  processingState: MessageProcessingState;
+  sequence: number;
+  sessionDbId: string;
+  statements: IndexingStatements;
+  onNotice: (notice: IndexingNotice) => void;
+}): number {
+  let parsedEvent: ReturnType<typeof parseSessionEvent>;
+  try {
+    parsedEvent = parseSessionEvent({
+      provider: args.discovered.provider,
+      sessionId: args.discovered.sourceSessionId,
+      eventIndex: args.eventIndex,
+      event: args.event,
+      diagnostics: args.parserDiagnostics,
+      sequence: args.sequence,
+    });
+  } catch (error) {
+    throw new IndexingFileProcessingError({
+      provider: args.discovered.provider,
+      sessionId: args.discovered.sourceSessionId,
+      filePath: args.discovered.filePath,
+      stage: "parse",
+      error,
+    });
+  }
+
+  for (const message of parsedEvent.messages) {
+    if (!message) {
+      continue;
+    }
+    const normalizedMessage = normalizeIndexedMessage(args.processingState, message);
+    try {
+      insertIndexedMessage(args.statements, args.sessionDbId, normalizedMessage, {
+        provider: args.discovered.provider,
+        sessionId: args.discovered.sourceSessionId,
+        filePath: args.discovered.filePath,
+        onNotice: args.onNotice,
+      });
+    } catch (error) {
+      throw new IndexingFileProcessingError({
+        provider: args.discovered.provider,
+        sessionId: args.discovered.sourceSessionId,
+        filePath: args.discovered.filePath,
+        stage: "persist",
+        error,
+      });
+    }
+  }
+
+  return parsedEvent.nextSequence;
+}
+
+function recordInvalidJsonlLine(
+  parserDiagnostics: ParserDiagnostic[],
+  discovered: ReturnType<typeof discoverSessionFiles>[number],
+  lineNumber: number,
+  error: unknown,
+  onNotice: (notice: IndexingNotice) => void,
+): void {
+  const noticeMessage = error instanceof Error ? error.message : String(error);
+  parserDiagnostics.push({
+    severity: "warning",
+    code: "parser.invalid_jsonl_line",
+    provider: discovered.provider,
+    sessionId: discovered.sourceSessionId,
+    eventIndex: lineNumber - 1,
+    message: noticeMessage,
+  });
+  onNotice({
+    provider: discovered.provider,
+    sessionId: discovered.sourceSessionId,
+    filePath: discovered.filePath,
+    stage: "parse",
+    severity: "warning",
+    code: "parser.invalid_jsonl_line",
+    message: noticeMessage,
+    details: { lineNumber },
+  });
+}
+
+function persistStreamCheckpoint(args: {
+  discovered: ReturnType<typeof discoverSessionFiles>[number];
+  nowIso: string;
+  resumeCheckpoint: ResumeCheckpoint | null;
+  sequence: number;
+  sessionDbId: string;
+  processingState: MessageProcessingState;
+  sourceMetaAccumulator: ProviderSourceMetadataAccumulator;
+  statements: IndexingStatements;
+  streamResult: StreamJsonlResult | null;
+}): void {
+  const hashes = computeFileHashes(args.discovered.filePath, args.discovered.fileSize);
+  const checkpoint = buildStreamCheckpointState({
+    discovered: args.discovered,
+    sessionDbId: args.sessionDbId,
+    sequence: args.sequence,
+    processingState: args.processingState,
+    sourceMetaAccumulator: args.sourceMetaAccumulator,
+    streamResult:
+      args.streamResult ??
+      ({
+        nextOffsetBytes: args.resumeCheckpoint?.lastOffsetBytes ?? 0,
+        nextLineNumber: args.resumeCheckpoint?.lastLineNumber ?? 0,
+        nextEventIndex: args.resumeCheckpoint?.lastEventIndex ?? 0,
+      } satisfies StreamJsonlResult),
+    hashes,
+  });
+  args.statements.upsertCheckpoint.run(
+    checkpoint.filePath,
+    checkpoint.provider,
+    checkpoint.sessionDbId,
+    checkpoint.sessionIdentity,
+    checkpoint.fileSize,
+    checkpoint.fileMtimeMs,
+    checkpoint.lastOffsetBytes,
+    checkpoint.lastLineNumber,
+    checkpoint.lastEventIndex,
+    checkpoint.nextMessageSequence,
+    JSON.stringify(checkpoint.processingState),
+    JSON.stringify(checkpoint.sourceMetadata),
+    checkpoint.headHash,
+    checkpoint.tailHash,
+    args.nowIso,
+  );
 }
 
 function createMessageProcessingState(
@@ -1044,15 +1229,7 @@ function createMessageProcessingState(
       Number.NEGATIVE_INFINITY,
     assistantThinkingRunRoot: checkpoint?.assistantThinkingRunRoot ?? null,
     assistantThinkingRunBaseline: checkpoint?.assistantThinkingRunBaseline ?? null,
-    aggregate: checkpoint?.aggregate ?? {
-      messageCount: 0,
-      tokenInputTotal: 0,
-      tokenOutputTotal: 0,
-      startedAtMs: null,
-      endedAtMs: null,
-      title: "",
-      titleRank: null,
-    },
+    aggregate: checkpoint?.aggregate ?? { ...DEFAULT_SESSION_AGGREGATE_STATE },
   };
 }
 
@@ -1103,26 +1280,10 @@ function deriveOperationDuration(
     return message;
   }
 
-  const baseline = selectDerivedBaselineForStream(state, message);
-  let nextMessage = message;
-  if (baseline && isHighConfidenceDerivedPair(baseline.category, message.category)) {
-    const currentMs = Date.parse(message.createdAt);
-    const previousMs = Date.parse(baseline.createdAt);
-    const durationMs = currentMs - previousMs;
-    if (
-      Number.isFinite(currentMs) &&
-      Number.isFinite(previousMs) &&
-      durationMs > 0 &&
-      durationMs <= MAX_DERIVED_DURATION_MS
-    ) {
-      nextMessage = {
-        ...message,
-        operationDurationMs: durationMs,
-        operationDurationSource: "derived",
-        operationDurationConfidence: "high",
-      };
-    }
-  }
+  const nextMessage = withDerivedOperationDuration(
+    message,
+    selectDerivedBaselineForStream(state, message),
+  );
 
   updateAssistantThinkingRunState(state, nextMessage);
   return nextMessage;
@@ -1383,18 +1544,38 @@ function sliceUtf8ByBytes(value: string, byteLimit: number, mode: "head" | "tail
   }
 
   if (mode === "head") {
-    let end = Math.min(value.length, byteLimit);
-    while (end > 0 && Buffer.byteLength(value.slice(0, end), "utf8") > byteLimit) {
-      end -= 1;
-    }
-    return value.slice(0, end);
+    return value.slice(0, findUtf8PrefixEnd(value, byteLimit));
   }
 
-  let start = Math.max(0, value.length - byteLimit);
-  while (start < value.length && Buffer.byteLength(value.slice(start), "utf8") > byteLimit) {
-    start += 1;
+  return value.slice(findUtf8TailStart(value, byteLimit));
+}
+
+function findUtf8PrefixEnd(value: string, byteLimit: number): number {
+  let low = 0;
+  let high = value.length;
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2);
+    if (Buffer.byteLength(value.slice(0, mid), "utf8") <= byteLimit) {
+      low = mid;
+    } else {
+      high = mid - 1;
+    }
   }
-  return value.slice(start);
+  return low;
+}
+
+function findUtf8TailStart(value: string, byteLimit: number): number {
+  let low = 0;
+  let high = value.length;
+  while (low < high) {
+    const mid = Math.floor((low + high) / 2);
+    if (Buffer.byteLength(value.slice(mid), "utf8") <= byteLimit) {
+      high = mid;
+    } else {
+      low = mid + 1;
+    }
+  }
+  return low;
 }
 
 function streamJsonlEvents(
@@ -1823,16 +2004,8 @@ function parseCheckpointMessage(value: unknown): IndexedMessage | null {
 }
 
 function parseAggregateState(value: unknown): SessionAggregateState {
-  const record = asRecord(value);
-  return {
-    messageCount: typeof record?.messageCount === "number" ? record.messageCount : 0,
-    tokenInputTotal: typeof record?.tokenInputTotal === "number" ? record.tokenInputTotal : 0,
-    tokenOutputTotal: typeof record?.tokenOutputTotal === "number" ? record.tokenOutputTotal : 0,
-    startedAtMs: typeof record?.startedAtMs === "number" ? record.startedAtMs : null,
-    endedAtMs: typeof record?.endedAtMs === "number" ? record.endedAtMs : null,
-    title: readString(record?.title) ?? "",
-    titleRank: typeof record?.titleRank === "number" ? record.titleRank : null,
-  };
+  const parsed = checkpointAggregateSchema.safeParse(value);
+  return parsed.success ? parsed.data : { ...DEFAULT_SESSION_AGGREGATE_STATE };
 }
 
 function listIndexCheckpoints(db: SqliteDatabase): IndexCheckpointRow[] {
@@ -1956,40 +2129,9 @@ function deleteSessionDataForFilePath(db: SqliteDatabase, filePath: string): voi
 }
 
 function deriveOperationDurations(messages: IndexedMessage[]): IndexedMessage[] {
-  return messages.map((message, index) => {
-    if (message.operationDurationMs !== null) {
-      return message;
-    }
-
-    const previous = selectDerivedBaseline(messages, index, message.category);
-    if (!previous) {
-      return message;
-    }
-
-    if (!isHighConfidenceDerivedPair(previous.category, message.category)) {
-      return message;
-    }
-
-    const currentMs = Date.parse(message.createdAt);
-    const previousMs = Date.parse(previous.createdAt);
-    if (!Number.isFinite(currentMs) || !Number.isFinite(previousMs)) {
-      return message;
-    }
-
-    const durationMs = currentMs - previousMs;
-    if (durationMs <= 0 || durationMs > MAX_DERIVED_DURATION_MS) {
-      return message;
-    }
-
-    // Derived durations are only filled when the adjacent message pair is a high-confidence
-    // request/response boundary; otherwise leaving null is safer than inventing precision.
-    return {
-      ...message,
-      operationDurationMs: durationMs,
-      operationDurationSource: "derived",
-      operationDurationConfidence: "high",
-    };
-  });
+  return messages.map((message, index) =>
+    withDerivedOperationDuration(message, selectDerivedBaseline(messages, index, message.category)),
+  );
 }
 
 function normalizeMessageTimestamps(
@@ -2141,21 +2283,37 @@ function reclassifySystemMessages(messages: IndexedMessage[], rules: RegExp[]): 
     return messages;
   }
 
-  return messages.map((message) => {
-    if (message.category === "system") {
-      return message;
-    }
+  return messages.map((message) => reclassifySystemMessage(message, rules));
+}
 
-    const isSystemMatch = rules.some((rule) => rule.test(message.content));
-    if (!isSystemMatch) {
-      return message;
-    }
+function withDerivedOperationDuration(
+  message: IndexedMessage,
+  baseline: IndexedMessage | null,
+): IndexedMessage {
+  if (message.operationDurationMs !== null || !baseline) {
+    return message;
+  }
+  if (!isHighConfidenceDerivedPair(baseline.category, message.category)) {
+    return message;
+  }
 
-    return {
-      ...message,
-      category: "system",
-    };
-  });
+  const currentMs = Date.parse(message.createdAt);
+  const previousMs = Date.parse(baseline.createdAt);
+  if (!Number.isFinite(currentMs) || !Number.isFinite(previousMs)) {
+    return message;
+  }
+
+  const durationMs = currentMs - previousMs;
+  if (durationMs <= 0 || durationMs > MAX_DERIVED_DURATION_MS) {
+    return message;
+  }
+
+  return {
+    ...message,
+    operationDurationMs: durationMs,
+    operationDurationSource: "derived",
+    operationDurationConfidence: "high",
+  };
 }
 
 function buildSessionAggregate(

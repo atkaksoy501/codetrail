@@ -22,14 +22,14 @@ export function registerIpcHandlers(
   ipcMain: Pick<IpcMain, "handle">,
   handlers: IpcHandlerMap,
 ): void {
-  for (const channel of ipcChannels) {
+  const registerChannel = <C extends IpcChannel>(channel: C) => {
     ipcMain.handle(channel, async (event, payload) => {
       const request = ipcContractSchemas[channel].request.safeParse(payload ?? {});
       if (!request.success) {
         throw new IpcValidationError(`Invalid payload for ${channel}: ${request.error.message}`);
       }
 
-      const responsePayload = await handlers[channel](request.data as never, event);
+      const responsePayload = await handlers[channel](request.data, event);
       const response = ipcContractSchemas[channel].response.safeParse(responsePayload);
 
       if (!response.success) {
@@ -38,5 +38,9 @@ export function registerIpcHandlers(
 
       return response.data;
     });
+  };
+
+  for (const channel of ipcChannels) {
+    registerChannel(channel);
   }
 }

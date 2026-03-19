@@ -44,5 +44,6 @@ export type ResolvedDiscoveryConfig = {
 };
 
 export type GeminiProjectResolution = {
-  hashToPath: Map<string, string>;
+  resolveProjectPath: (projectHash: string) => string | null;
+  rememberProjectPath: (projectHash: string, projectPath: string) => void;
 };

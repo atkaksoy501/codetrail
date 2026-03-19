@@ -38,7 +38,7 @@ function toDiscoveredGeminiFile(
   const sessionIdentity = providerSessionIdentity("gemini", sourceSessionId, filePath);
   const projectHash = readString(content.projectHash) ?? "";
   const containerDir = geminiContainerDir(filePath);
-  let resolvedProjectPath = resolution.hashToPath.get(projectHash) ?? null;
+  let resolvedProjectPath = resolution.resolveProjectPath(projectHash);
 
   if (!resolvedProjectPath) {
     const projectRootPath = join(containerDir, ".project_root");
@@ -46,9 +46,7 @@ function toDiscoveredGeminiFile(
       const fallbackPath = (safeReadUtf8File(projectRootPath, dependencies) ?? "").trim();
       if (fallbackPath.length > 0) {
         resolvedProjectPath = fallbackPath;
-        if (projectHash) {
-          resolution.hashToPath.set(projectHash, fallbackPath);
-        }
+        resolution.rememberProjectPath(projectHash, fallbackPath);
       }
     }
   }
