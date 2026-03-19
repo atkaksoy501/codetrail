@@ -269,7 +269,7 @@ describe("App refresh scroll preservation", () => {
           ],
         }),
     });
-    const { container } = renderWithClient(<App />, client);
+    renderWithClient(<App />, client);
 
     await enterSessionView(user);
     await waitFor(() => {
@@ -648,7 +648,7 @@ describe("App refresh scroll preservation", () => {
         };
       },
     });
-    const { container } = renderWithClient(<App />, client);
+    renderWithClient(<App />, client);
 
     // project_all mode loads on initial render (default view).
     await waitFor(() => {

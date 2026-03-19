@@ -992,22 +992,12 @@ function buildMessageFilters(args: {
   categories?: string[];
   queryPlan: SearchQueryPlan;
 }): { whereClause: string; params: string[] } {
-  const conditions = ["m.session_id = ?"];
-  const params = [args.sessionId];
-
-  if (args.categories !== undefined) {
-    const categories = normalizeMessageCategories(args.categories);
-    if (categories.length > 0) {
-      conditions.push(`m.category IN (${categories.map(() => "?").join(",")})`);
-      params.push(...categories);
-    } else {
-      conditions.push("1 = 0");
-    }
-  }
-
-  appendMessageQueryConditions(conditions, params, args.queryPlan, "m");
-
-  return { whereClause: conditions.join(" AND "), params };
+  return buildScopedMessageFilters({
+    scopeClause: "m.session_id = ?",
+    scopeValue: args.sessionId,
+    categories: args.categories,
+    queryPlan: args.queryPlan,
+  });
 }
 
 function buildProjectMessageFilters(args: {
@@ -1015,22 +1005,46 @@ function buildProjectMessageFilters(args: {
   categories?: string[];
   queryPlan: SearchQueryPlan;
 }): { whereClause: string; params: string[] } {
-  const conditions = ["s.project_id = ?"];
-  const params = [args.projectId];
+  return buildScopedMessageFilters({
+    scopeClause: "s.project_id = ?",
+    scopeValue: args.projectId,
+    categories: args.categories,
+    queryPlan: args.queryPlan,
+  });
+}
 
-  if (args.categories !== undefined) {
-    const categories = normalizeMessageCategories(args.categories);
-    if (categories.length > 0) {
-      conditions.push(`m.category IN (${categories.map(() => "?").join(",")})`);
-      params.push(...categories);
-    } else {
-      conditions.push("1 = 0");
-    }
-  }
+function buildScopedMessageFilters(args: {
+  scopeClause: string;
+  scopeValue: string;
+  categories: string[] | undefined;
+  queryPlan: SearchQueryPlan;
+}): { whereClause: string; params: string[] } {
+  const conditions = [args.scopeClause];
+  const params = [args.scopeValue];
 
+  appendNormalizedCategoryFilter(conditions, params, args.categories);
   appendMessageQueryConditions(conditions, params, args.queryPlan, "m");
 
   return { whereClause: conditions.join(" AND "), params };
+}
+
+function appendNormalizedCategoryFilter(
+  conditions: string[],
+  params: string[],
+  categoriesInput: string[] | undefined,
+): void {
+  if (categoriesInput === undefined) {
+    return;
+  }
+
+  const categories = normalizeMessageCategories(categoriesInput);
+  if (categories.length === 0) {
+    conditions.push("1 = 0");
+    return;
+  }
+
+  conditions.push(`m.category IN (${categories.map(() => "?").join(",")})`);
+  params.push(...categories);
 }
 
 function appendMessageQueryConditions(

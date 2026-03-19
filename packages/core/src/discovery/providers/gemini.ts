@@ -16,7 +16,6 @@ import { buildGeminiProjectResolution, geminiContainerDir } from "./geminiHelper
 
 function toDiscoveredGeminiFile(
   filePath: string,
-  config: ResolvedDiscoveryConfig,
   dependencies: ResolvedDiscoveryDependencies,
   resolution: ReturnType<typeof buildGeminiProjectResolution>,
 ): DiscoveredSessionFile | null {
@@ -80,14 +79,25 @@ export function discoverGeminiFiles(
   config: ResolvedDiscoveryConfig,
   dependencies: ResolvedDiscoveryDependencies,
 ): DiscoveredSessionFile[] {
-  const geminiRoot = getDiscoveryPath(config, "gemini", "geminiRoot");
-  if (!geminiRoot || !dependencies.fs.existsSync(geminiRoot)) {
-    return [];
-  }
   const resolution = buildGeminiProjectResolution(config, dependencies);
-  return walkFiles(geminiRoot, dependencies)
-    .map((filePath) => toDiscoveredGeminiFile(filePath, config, dependencies, resolution))
-    .filter((file): file is DiscoveredSessionFile => file !== null);
+  const discovered: DiscoveredSessionFile[] = [];
+
+  for (const root of [
+    getDiscoveryPath(config, "gemini", "geminiRoot"),
+    getDiscoveryPath(config, "gemini", "geminiHistoryRoot"),
+  ]) {
+    if (!root || !dependencies.fs.existsSync(root)) {
+      continue;
+    }
+
+    discovered.push(
+      ...walkFiles(root, dependencies)
+        .map((filePath) => toDiscoveredGeminiFile(filePath, dependencies, resolution))
+        .filter((file): file is DiscoveredSessionFile => file !== null),
+    );
+  }
+
+  return discovered;
 }
 
 export function discoverSingleGeminiFile(
@@ -95,14 +105,16 @@ export function discoverSingleGeminiFile(
   config: ResolvedDiscoveryConfig,
   dependencies: ResolvedDiscoveryDependencies,
 ): DiscoveredSessionFile | null {
-  const geminiRoot = getDiscoveryPath(config, "gemini", "geminiRoot");
-  if (!geminiRoot || !filePath.startsWith(`${geminiRoot}/`)) {
+  const geminiRoots = [
+    getDiscoveryPath(config, "gemini", "geminiRoot"),
+    getDiscoveryPath(config, "gemini", "geminiHistoryRoot"),
+  ].filter((root): root is string => typeof root === "string" && root.length > 0);
+  if (!geminiRoots.some((root) => filePath.startsWith(`${root}/`))) {
     return null;
   }
 
   return toDiscoveredGeminiFile(
     filePath,
-    config,
     dependencies,
     buildGeminiProjectResolution(config, dependencies),
   );

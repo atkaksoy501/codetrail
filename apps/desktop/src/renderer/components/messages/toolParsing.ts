@@ -380,7 +380,6 @@ function convertApplyPatchToUnifiedDiff(patchText: string | null): string | null
   const lines = patchText.split(/\r?\n/);
   const output: string[] = [];
   let headerDiffIndex = -1;
-  let headerOldIndex = -1;
   let headerNewIndex = -1;
   let oldPath = "";
   let newPath = "";
@@ -396,7 +395,6 @@ function convertApplyPatchToUnifiedDiff(patchText: string | null): string | null
     newPath = mode === "delete" ? "/dev/null" : `b/${normalized}`;
     headerDiffIndex = output.length;
     output.push(`diff --git ${oldPath} ${newPath}`);
-    headerOldIndex = output.length;
     output.push(`--- ${oldPath}`);
     headerNewIndex = output.length;
     output.push(`+++ ${newPath}`);

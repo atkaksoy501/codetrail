@@ -1,5 +1,5 @@
 import { useCallback, useEffect } from "react";
-import type { Dispatch, MutableRefObject, RefObject, SetStateAction } from "react";
+import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 
 import type { MessageCategory, Provider, SearchMode } from "@codetrail/core/browser";
 
@@ -125,7 +125,7 @@ export function useHistoryDataEffects({
     projectsLoadTokenRef.current = requestToken;
     setProjectsLoaded(false);
     const response = await codetrail.invoke("projects:list", {
-      providers: projectProviders.length > 0 ? projectProviders : undefined,
+      providers: projectProviders,
       query: projectQuery,
     });
     if (requestToken !== projectsLoadTokenRef.current) {

@@ -60,7 +60,7 @@ describe("discoverSessionFiles", () => {
     mkdirSync(join(geminiRoot, "dux", "chats"), { recursive: true });
     mkdirSync(join(geminiRoot, "hash-only", "chats"), { recursive: true });
     mkdirSync(join(geminiRoot, "logs-only"), { recursive: true });
-    mkdirSync(join(geminiHistoryRoot, "dux"), { recursive: true });
+    mkdirSync(join(geminiHistoryRoot, "dux", "sessions"), { recursive: true });
     writeFileSync(join(geminiRoot, "dux", ".project_root"), "/workspace/dux");
     writeFileSync(join(geminiHistoryRoot, "dux", ".project_root"), "/workspace/dux");
 
@@ -87,6 +87,23 @@ describe("discoverSessionFiles", () => {
         messages: [{ id: "m1", type: "user", content: "hello", timestamp: "2026-02-27T00:00:00Z" }],
       }),
     );
+    writeFileSync(
+      join(geminiHistoryRoot, "dux", "sessions", "session-3.json"),
+      JSON.stringify({
+        sessionId: "gem-3",
+        projectHash: knownHash,
+        startTime: "2026-02-27T00:00:20Z",
+        lastUpdated: "2026-02-27T00:00:30Z",
+        messages: [
+          {
+            id: "m1",
+            type: "user",
+            content: "history hello",
+            timestamp: "2026-02-27T00:00:20Z",
+          },
+        ],
+      }),
+    );
     writeFileSync(join(geminiRoot, "logs-only", "logs.json"), JSON.stringify([]));
 
     const discoveredWithSubagents = discoverSessionFiles({
@@ -100,7 +117,7 @@ describe("discoverSessionFiles", () => {
       includeClaudeSubagents: true,
     });
 
-    expect(discoveredWithSubagents).toHaveLength(5);
+    expect(discoveredWithSubagents).toHaveLength(6);
     expect(
       discoveredWithSubagents.some(
         (file) => file.provider === "claude" && file.metadata.isSubagent,
@@ -117,6 +134,7 @@ describe("discoverSessionFiles", () => {
     expect(unresolvedGemini?.projectPath).toBe("");
     expect(unresolvedGemini?.projectName).toBe("hash-only");
     expect(unresolvedGemini?.metadata.unresolvedProject).toBe(true);
+    expect(discoveredWithSubagents.some((file) => file.sourceSessionId === "gem-3")).toBe(true);
 
     const discoveredWithoutSubagents = discoverSessionFiles({
       claudeRoot,

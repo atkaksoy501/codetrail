@@ -128,6 +128,33 @@ describe("discoverSingleFile", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
+  it("correctly identifies a Gemini history session file", () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-single-gemini-history-"));
+    const config = makeConfig(dir);
+    const geminiHistoryRoot = config.geminiHistoryRoot ?? join(dir, ".gemini", "history");
+    const geminiProjectDir = join(geminiHistoryRoot, "dux");
+    const geminiSessionPath = join(geminiProjectDir, "sessions", "session-1.json");
+    mkdirSync(join(geminiProjectDir, "sessions"), { recursive: true });
+    writeFileSync(join(geminiProjectDir, ".project_root"), "/workspace/dux");
+    writeFileSync(
+      geminiSessionPath,
+      JSON.stringify({
+        sessionId: "gemini-history-1",
+        projectHash: "ddd29e90e8e0e53b3e06996841fdaf7a26e33cdca62e0678fb37e500d58d2bf8",
+      }),
+    );
+
+    const result = discoverSingleFile(geminiSessionPath, config);
+
+    const discovered = expectDefined(result, "Expected Gemini session result");
+    expect(discovered.provider).toBe("gemini");
+    expect(discovered.sourceSessionId).toBe("gemini-history-1");
+    expect(discovered.projectPath).toBe("/workspace/dux");
+    expect(discovered.projectName).toBe("dux");
+
+    rmSync(dir, { recursive: true, force: true });
+  });
+
   it("correctly identifies a Cursor session file", () => {
     const dir = mkdtempSync(join(tmpdir(), "codetrail-single-cursor-"));
     const config = makeConfig(dir);

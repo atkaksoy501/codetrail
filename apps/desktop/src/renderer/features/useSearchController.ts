@@ -67,7 +67,7 @@ export function useSearchController({
       query: searchQuery,
       searchMode,
       categories: historyCategories.length === CATEGORIES.length ? undefined : historyCategories,
-      providers: searchProviders.length > 0 ? searchProviders : undefined,
+      providers: searchProviders,
       projectIds: searchProjectId ? [searchProjectId] : undefined,
       projectQuery: searchProjectQuery,
       limit: SEARCH_PAGE_SIZE,

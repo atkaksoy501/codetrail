@@ -194,32 +194,24 @@ function buildFilters(
   const conditions: string[] = [];
   const params: Array<string | number> = [];
 
-  if (includeCategories && input.categories && input.categories.length > 0) {
-    const categories = normalizeMessageCategories(input.categories);
-    if (categories.length > 0) {
-      conditions.push(`m.category IN (${categories.map(() => "?").join(",")})`);
-      params.push(...categories);
-    }
+  if (includeCategories && input.categories !== undefined) {
+    appendInFilter(conditions, params, "m.category", normalizeMessageCategories(input.categories));
   }
 
-  const projectIds =
-    input.projectIds && input.projectIds.length > 0
-      ? input.projectIds.filter((value) => value.length > 0)
-      : [];
-  if (projectIds.length > 0) {
+  const projectIds = input.projectIds?.filter((value) => value.length > 0);
+  if (projectIds !== undefined && projectIds.length > 0) {
     // projectIds supports batched search across a preselected subset, while projectId is the
     // simpler single-project path used by most callers.
-    conditions.push(`s.project_id IN (${projectIds.map(() => "?").join(",")})`);
-    params.push(...projectIds);
+    appendInFilter(conditions, params, "s.project_id", projectIds);
+  } else if (input.projectIds !== undefined) {
+    conditions.push("1 = 0");
   } else if (input.projectId && input.projectId.length > 0) {
     conditions.push("s.project_id = ?");
     params.push(input.projectId);
   }
 
-  const providers = normalizeProviders(input.providers ?? []);
-  if (providers.length > 0) {
-    conditions.push(`s.provider IN (${providers.map(() => "?").join(",")})`);
-    params.push(...providers);
+  if (input.providers !== undefined) {
+    appendInFilter(conditions, params, "s.provider", normalizeProviders(input.providers));
   }
 
   const projectPatterns = buildWildcardFilterPatterns(input.projectQuery ?? "");
@@ -243,16 +235,25 @@ function normalizeProviders(values: string[]): Provider[] {
 }
 
 function normalizeProvider(value: string): Provider {
-  if (value === "cursor") {
-    return "cursor";
-  }
-  if (value === "codex") {
-    return "codex";
-  }
-  if (value === "gemini") {
-    return "gemini";
+  if (PROVIDER_VALUES.includes(value as Provider)) {
+    return value as Provider;
   }
   return "claude";
+}
+
+function appendInFilter<T extends string | number>(
+  conditions: string[],
+  params: Array<string | number>,
+  column: string,
+  values: readonly T[],
+): void {
+  if (values.length === 0) {
+    conditions.push("1 = 0");
+    return;
+  }
+
+  conditions.push(`${column} IN (${values.map(() => "?").join(",")})`);
+  params.push(...values);
 }
 
 function sqlWhereClause(conditions: string[]): string {

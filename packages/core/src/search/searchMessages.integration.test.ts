@@ -133,6 +133,40 @@ function setupIndexedDb(): { dbPath: string; cleanup: () => void } {
     ].join("\n")}\n`,
   );
 
+  const copilotWorkspaceDir = join(dir, ".copilot-workspace", "workspace-search");
+  mkdirSync(join(copilotWorkspaceDir, "chatSessions"), { recursive: true });
+  writeFileSync(
+    join(copilotWorkspaceDir, "workspace.json"),
+    JSON.stringify({
+      folder: `file://${join(dir, "workspace", "copilot-project")}`,
+    }),
+  );
+  writeFileSync(
+    join(copilotWorkspaceDir, "chatSessions", "copilot-session-1.json"),
+    JSON.stringify({
+      version: 3,
+      sessionId: "copilot-session-1",
+      creationDate: "2026-02-27T13:00:00Z",
+      lastMessageDate: "2026-02-27T13:00:05Z",
+      requests: [
+        {
+          requestId: "cp-1",
+          timestamp: 1740661200000,
+          modelId: "gpt-4o-mini",
+          message: {
+            text: "Please fix this copilot bug",
+          },
+          response: [
+            {
+              kind: "markdownContent",
+              value: "Copilot bug fix applied.",
+            },
+          ],
+        },
+      ],
+    }),
+  );
+
   runIncrementalIndexing({
     dbPath,
     discoveryConfig: {
@@ -199,10 +233,20 @@ describe("searchMessages", () => {
     const claudeOnly = searchMessages(db, { query: "bug", providers: ["claude"] });
     const codexOnly = searchMessages(db, { query: "bug", providers: ["codex"] });
     const cursorOnly = searchMessages(db, { query: "cursor", providers: ["cursor"] });
+    const copilotOnly = searchMessages(db, { query: "copilot", providers: ["copilot"] });
     expect(claudeOnly.totalCount).toBeGreaterThanOrEqual(1);
     expect(codexOnly.totalCount).toBe(0);
     expect(cursorOnly.totalCount).toBeGreaterThanOrEqual(1);
+    expect(copilotOnly.totalCount).toBeGreaterThanOrEqual(1);
     expect(cursorOnly.results.every((result) => result.provider === "cursor")).toBe(true);
+    expect(copilotOnly.results.every((result) => result.provider === "copilot")).toBe(true);
+
+    const noProviders = searchMessages(db, { query: "bug", providers: [] });
+    const noCategories = searchMessages(db, { query: "bug", categories: [] });
+    expect(noProviders.totalCount).toBe(0);
+    expect(noProviders.results).toEqual([]);
+    expect(noCategories.totalCount).toBe(0);
+    expect(noCategories.results).toEqual([]);
 
     const projectMatch = searchMessages(db, { query: "bug", projectQuery: "project" });
     const projectWildcard = searchMessages(db, { query: "bug", projectQuery: "project*" });

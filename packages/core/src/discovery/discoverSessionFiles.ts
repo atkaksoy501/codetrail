@@ -10,7 +10,6 @@ import {
 import { PROVIDER_ADAPTER_LIST } from "../providers";
 import {
   type DiscoveryDependencies,
-  type DiscoveryFileSystem,
   getDiscoveryPath,
   resolveDiscoveryDependencies,
 } from "./shared";

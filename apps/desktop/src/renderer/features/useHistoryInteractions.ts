@@ -15,7 +15,6 @@ import type { MessageCategory, Provider } from "@codetrail/core/browser";
 import { BOOKMARKS_NAV_ID, PAGE_SIZE, PROJECT_ALL_NAV_ID, PROVIDERS } from "../app/constants";
 import { createHistorySelection, setHistorySelectionProjectId } from "../app/historySelection";
 import type {
-  BulkExpandScope,
   HistoryMessage,
   HistorySearchNavigation,
   HistorySelection,

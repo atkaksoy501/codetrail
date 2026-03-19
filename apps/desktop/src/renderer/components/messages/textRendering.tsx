@@ -2,7 +2,7 @@ import { Children, type ReactNode, cloneElement, isValidElement } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 
-import { buildSearchHighlightRegex } from "../../lib/searchQuery";
+import { buildSearchHighlightRegex } from "@codetrail/core/browser";
 import { tryParseJsonRecord } from "./toolParsing";
 
 const EMPTY_KEYWORDS = new Set<string>();
@@ -113,6 +113,8 @@ const LANGUAGE_KEYWORDS: Record<string, Set<string>> = {
   zsh: SHELL_KEYWORDS,
   shell: SHELL_KEYWORDS,
 };
+const HIGHLIGHT_REGEX_CACHE_LIMIT = 64;
+const highlightRegexCache = new Map<string, RegExp | null>();
 
 export function renderRichText(
   value: string,
@@ -1325,7 +1327,7 @@ export function buildHighlightedTextNodes(
   keyPrefix: string,
   highlightPatterns: string[] = [],
 ): ReactNode[] {
-  const matcher = buildSearchHighlightRegex(query, highlightPatterns);
+  const matcher = getCachedHighlightRegex(query, highlightPatterns);
   if (!matcher) {
     return [<span key={`${keyPrefix}:all`}>{value}</span>];
   }
@@ -1344,6 +1346,34 @@ export function buildHighlightedTextNodes(
     cursor += part.length;
   }
   return nodes;
+}
+
+function getCachedHighlightRegex(query: string, highlightPatterns: string[]): RegExp | null {
+  const cacheKey = `${query}\u0000${highlightPatterns.join("\u0001")}`;
+  if (highlightRegexCache.has(cacheKey)) {
+    return highlightRegexCache.get(cacheKey) ?? null;
+  }
+
+  const matcher =
+    highlightPatterns.length > 0
+      ? buildSearchHighlightRegex({
+          normalizedQuery: query.trim(),
+          mode: "simple",
+          ftsTokens: [],
+          ftsQuery: null,
+          highlightPatterns,
+          hasTerms: highlightPatterns.length > 0,
+          error: null,
+        })
+      : buildSearchHighlightRegex(query);
+  highlightRegexCache.set(cacheKey, matcher);
+  if (highlightRegexCache.size > HIGHLIGHT_REGEX_CACHE_LIMIT) {
+    const oldestKey = highlightRegexCache.keys().next().value;
+    if (oldestKey) {
+      highlightRegexCache.delete(oldestKey);
+    }
+  }
+  return matcher;
 }
 
 export function renderMarkedSnippet(value: string): ReactNode {

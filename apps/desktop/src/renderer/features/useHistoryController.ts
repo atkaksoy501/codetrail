@@ -1,10 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type {
-  Dispatch,
-  KeyboardEvent as ReactKeyboardEvent,
-  UIEvent as ReactUIEvent,
-  SetStateAction,
-} from "react";
+import type { Dispatch, SetStateAction } from "react";
 
 import type {
   MessageCategory,
@@ -15,12 +10,9 @@ import type {
 
 import { DEFAULT_PREFERRED_REFRESH_STRATEGY, type NonOffRefreshStrategy } from "../app/autoRefresh";
 import {
-  BOOKMARKS_NAV_ID,
   DEFAULT_MESSAGE_CATEGORIES,
   EMPTY_BOOKMARKS_RESPONSE,
   EMPTY_SYSTEM_MESSAGE_REGEX_RULES,
-  PAGE_SIZE,
-  PROJECT_ALL_NAV_ID,
 } from "../app/constants";
 import {
   createHistorySelection,
@@ -31,7 +23,6 @@ import {
 import type {
   BookmarkListResponse,
   BulkExpandScope,
-  HistoryMessage,
   HistorySearchNavigation,
   HistorySelection,
   PaneStateSnapshot,
@@ -40,7 +31,6 @@ import type {
   ProjectCombinedDetail,
   ProjectSummary,
   SessionDetail,
-  SessionPaneNavigationItem,
   SessionSummary,
   SortDirection,
 } from "../app/types";
@@ -48,26 +38,12 @@ import { useDebouncedValue } from "../hooks/useDebouncedValue";
 import { usePaneStateSync } from "../hooks/usePaneStateSync";
 import { useReconcileProviderSelection } from "../hooks/useReconcileProviderSelection";
 import { useResizablePanes } from "../hooks/useResizablePanes";
-import { copyTextToClipboard } from "../lib/clipboard";
 import { useCodetrailClient } from "../lib/codetrailClient";
-import {
-  type Direction,
-  getAdjacentItemId,
-  getEdgeItemId,
-  getFirstVisibleMessageId,
-} from "../lib/historyNavigation";
-import {
-  clamp,
-  compareRecent,
-  deriveSessionTitle,
-  prettyProvider,
-  sessionActivityOf,
-  toggleValue,
-} from "../lib/viewUtils";
+import { getEdgeItemId } from "../lib/historyNavigation";
+import { clamp, compareRecent, sessionActivityOf } from "../lib/viewUtils";
 import {
   type AppearanceState,
   focusHistoryList,
-  formatDuration,
   scrollFocusedHistoryMessageIntoView,
 } from "./historyControllerShared";
 import { useHistoryDataEffects } from "./useHistoryDataEffects";
