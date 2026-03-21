@@ -105,6 +105,31 @@ type IndexCheckpointRow = {
   tail_hash: string;
 };
 
+type DeletedSessionRow = {
+  file_path: string;
+  provider: Provider;
+  project_path: string;
+  session_identity: string;
+  session_id: string;
+  deleted_at_ms: number;
+  file_size: number;
+  file_mtime_ms: number;
+  last_offset_bytes: number | null;
+  last_line_number: number | null;
+  last_event_index: number | null;
+  next_message_sequence: number | null;
+  processing_state_json: string | null;
+  source_metadata_json: string | null;
+  head_hash: string | null;
+  tail_hash: string | null;
+};
+
+type DeletedProjectRow = {
+  provider: Provider;
+  project_path: string;
+  deleted_at_ms: number;
+};
+
 type SessionFileRow = {
   id: string;
   file_path: string;
@@ -167,6 +192,13 @@ type ResumeCheckpoint = {
   processingState: SerializableMessageProcessingState;
   sourceMetadata: SerializedSourceMetadataAccumulator;
 };
+
+type ExistingDeletedSessionDecision =
+  | { action: "proceed" }
+  | { action: "skip_deleted_project" }
+  | { action: "skip_same_identity"; warning: IndexingNotice | null }
+  | { action: "ingest_new"; warning: IndexingNotice | null }
+  | { action: "resume_from_deleted"; resumeCheckpoint: ResumeCheckpoint };
 type StreamJsonlResult = {
   nextOffsetBytes: number;
   nextLineNumber: number;
@@ -314,6 +346,8 @@ export function runIncrementalIndexing(
     const schema = resolvedDependencies.ensureDatabaseSchema(db);
 
     if (config.forceReindex) {
+      // Force reindex intentionally drops delete tombstones too so this pass fully trusts disk and
+      // rebuilds the indexed cache from scratch.
       resolvedDependencies.clearIndexedData(db);
     }
 
@@ -326,6 +360,12 @@ export function runIncrementalIndexing(
     const existingSessionRows = listSessionFiles(db);
     const existingSessionByFilePath = new Map(
       existingSessionRows.map((row) => [row.file_path, row.id]),
+    );
+    const deletedSessionRows = listDeletedSessions(db);
+    const deletedSessionByFilePath = new Map(deletedSessionRows.map((row) => [row.file_path, row]));
+    const deletedProjectRows = listDeletedProjects(db);
+    const deletedProjectByKey = new Map(
+      deletedProjectRows.map((row) => [deletedProjectKey(row.provider, row.project_path), row]),
     );
 
     let indexedFiles = 0;
@@ -367,6 +407,7 @@ export function runIncrementalIndexing(
       indexed: existingByFilePath.get(filePath),
       checkpoint: existingCheckpointByFilePath.get(filePath),
       sessionId: existingSessionByFilePath.get(filePath),
+      deletedSession: deletedSessionByFilePath.get(filePath),
     });
 
     const result = processDiscoveredFiles({
@@ -379,6 +420,7 @@ export function runIncrementalIndexing(
       statements,
       resolvedDependencies,
       diagnostics,
+      deletedProjectByKey,
     });
     indexedFiles += result.indexedFiles;
     skippedFiles += result.skippedFiles;
@@ -430,6 +472,31 @@ export function indexChangedFiles(
        FROM index_checkpoints WHERE file_path = ?`,
     );
     const getSessionByFile = db.prepare("SELECT id, file_path FROM sessions WHERE file_path = ?");
+    const getDeletedSession = db.prepare(
+      `SELECT
+         file_path,
+         provider,
+         project_path,
+         session_identity,
+         session_id,
+         deleted_at_ms,
+         file_size,
+         file_mtime_ms,
+         last_offset_bytes,
+         last_line_number,
+         last_event_index,
+         next_message_sequence,
+         processing_state_json,
+         source_metadata_json,
+         head_hash,
+         tail_hash
+       FROM deleted_sessions
+       WHERE file_path = ?`,
+    );
+    const deletedProjectRows = listDeletedProjects(db);
+    const deletedProjectByKey = new Map(
+      deletedProjectRows.map((row) => [deletedProjectKey(row.provider, row.project_path), row]),
+    );
 
     let indexedFiles = 0;
     let skippedFiles = 0;
@@ -468,6 +535,7 @@ export function indexChangedFiles(
       indexed: getIndexedFile.get(filePath) as IndexedFileRow | undefined,
       checkpoint: getCheckpoint.get(filePath) as IndexCheckpointRow | undefined,
       sessionId: (getSessionByFile.get(filePath) as SessionFileRow | undefined)?.id,
+      deletedSession: getDeletedSession.get(filePath) as DeletedSessionRow | undefined,
     });
 
     const result = processDiscoveredFiles({
@@ -480,6 +548,7 @@ export function indexChangedFiles(
       statements,
       resolvedDependencies,
       diagnostics,
+      deletedProjectByKey,
     });
     indexedFiles += result.indexedFiles;
     skippedFiles += result.skippedFiles;
@@ -629,6 +698,7 @@ type ExistingFileLookup = (filePath: string) => {
   indexed: IndexedFileRow | undefined;
   checkpoint: IndexCheckpointRow | undefined;
   sessionId: string | undefined;
+  deletedSession: DeletedSessionRow | undefined;
 };
 
 function processDiscoveredFiles(args: {
@@ -641,6 +711,7 @@ function processDiscoveredFiles(args: {
   statements: IndexingStatements;
   resolvedDependencies: ResolvedIndexingDependencies;
   diagnostics: { warnings: number; errors: number };
+  deletedProjectByKey: Map<string, DeletedProjectRow>;
 }): { indexedFiles: number; skippedFiles: number } {
   let indexedFiles = 0;
   let skippedFiles = 0;
@@ -648,6 +719,9 @@ function processDiscoveredFiles(args: {
   for (const discovered of args.discoveredFiles) {
     const existing = args.lookupExisting(discovered.filePath);
     const sessionDbId = makeSessionId(discovered.provider, discovered.sessionIdentity);
+    const deletedProject = args.deletedProjectByKey.get(
+      deletedProjectKey(discovered.provider, discovered.projectPath),
+    );
     const unchanged =
       args.forceSkipUnchanged &&
       !!existing.indexed &&
@@ -667,10 +741,43 @@ function processDiscoveredFiles(args: {
       expectedSessionDbId: sessionDbId,
       existingSessionId: existing.sessionId,
     });
-    const resumeCheckpoint =
+    let resumeCheckpoint =
       canResumeFromCheckpoint && existing.checkpoint
         ? deserializeResumeCheckpoint(existing.checkpoint)
         : null;
+
+    const deletedSessionDecision = resolveDeletedSessionDecision({
+      discovered,
+      deletedProject,
+      deletedSession: existing.deletedSession,
+      activeCanResume: canResumeFromCheckpoint,
+      activeIndexed: existing.indexed,
+    });
+    if (deletedSessionDecision.action === "skip_deleted_project") {
+      skippedFiles += 1;
+      continue;
+    }
+    if (deletedSessionDecision.action === "proceed") {
+      // Keep the normal active indexing path.
+    }
+    if ("warning" in deletedSessionDecision && deletedSessionDecision.warning) {
+      args.resolvedDependencies.onNotice(deletedSessionDecision.warning);
+    }
+    if (deletedSessionDecision.action === "skip_same_identity") {
+      skippedFiles += 1;
+      continue;
+    }
+    if (deletedSessionDecision.action === "ingest_new") {
+      removeDeletedSessionTombstone(args.db, discovered.filePath);
+      deleteSessionDataForFilePath(args.db, discovered.filePath);
+      deleteSessionData(args.db, sessionDbId);
+      args.db.prepare("DELETE FROM indexed_files WHERE file_path = ?").run(discovered.filePath);
+      args.db.prepare("DELETE FROM index_checkpoints WHERE file_path = ?").run(discovered.filePath);
+      resumeCheckpoint = null;
+    }
+    if (deletedSessionDecision.action === "resume_from_deleted") {
+      resumeCheckpoint = deletedSessionDecision.resumeCheckpoint;
+    }
 
     try {
       const adapter = getProviderAdapter(discovered.provider);
@@ -723,6 +830,91 @@ function resolveIndexingDependencies(
     now: dependencies.now ?? (() => new Date()),
     onFileIssue: dependencies.onFileIssue ?? defaultOnFileIssue,
     onNotice: dependencies.onNotice ?? defaultOnNotice,
+  };
+}
+
+function deletedProjectKey(provider: Provider, projectPath: string): string {
+  return `${provider}:${projectPath}`;
+}
+
+function resolveDeletedSessionDecision(args: {
+  discovered: ReturnType<typeof discoverSessionFiles>[number];
+  deletedProject: DeletedProjectRow | undefined;
+  deletedSession: DeletedSessionRow | undefined;
+  activeCanResume: boolean;
+  activeIndexed: IndexedFileRow | undefined;
+}): ExistingDeletedSessionDecision {
+  if (!args.deletedSession) {
+    if (
+      args.deletedProject &&
+      args.discovered.fileMtimeMs <= args.deletedProject.deleted_at_ms &&
+      !args.activeIndexed
+    ) {
+      return { action: "skip_deleted_project" };
+    }
+    return { action: "proceed" };
+  }
+
+  if (args.deletedSession.session_identity !== args.discovered.sessionIdentity) {
+    return {
+      action: "ingest_new",
+      warning: {
+        provider: args.discovered.provider,
+        sessionId: args.discovered.sourceSessionId,
+        filePath: args.discovered.filePath,
+        stage: "persist",
+        severity: "warning",
+        code: "index.deleted_session_replaced",
+        message:
+          "A deleted session file now resolves to a different session identity and will be indexed as a new session.",
+        details: {
+          deletedSessionIdentity: args.deletedSession.session_identity,
+          discoveredSessionIdentity: args.discovered.sessionIdentity,
+        },
+      },
+    };
+  }
+
+  if (
+    !args.activeIndexed &&
+    args.discovered.fileSize === args.deletedSession.file_size &&
+    args.discovered.fileMtimeMs === args.deletedSession.file_mtime_ms
+  ) {
+    return { action: "skip_same_identity", warning: null };
+  }
+
+  if (args.activeCanResume) {
+    return { action: "proceed" };
+  }
+
+  const deletedResumeCheckpoint = shouldResumeFromDeletedSession({
+    discovered: args.discovered,
+    deletedSession: args.deletedSession,
+  })
+    ? deserializeDeletedResumeCheckpoint(args.deletedSession)
+    : null;
+  if (deletedResumeCheckpoint) {
+    return {
+      action: "resume_from_deleted",
+      resumeCheckpoint: deletedResumeCheckpoint,
+    };
+  }
+
+  return {
+    action: "skip_same_identity",
+    warning: {
+      provider: args.discovered.provider,
+      sessionId: args.discovered.sourceSessionId,
+      filePath: args.discovered.filePath,
+      stage: "persist",
+      severity: "warning",
+      code: "index.deleted_session_rewrite_ignored",
+      message:
+        "A deleted session file changed in a non-append-only way but still resolves to the same session identity, so it remains deleted.",
+      details: {
+        sessionIdentity: args.discovered.sessionIdentity,
+      },
+    },
   };
 }
 
@@ -1928,6 +2120,63 @@ function shouldResumeFromCheckpoint(args: {
   }
 }
 
+function shouldResumeFromDeletedSession(args: {
+  discovered: ReturnType<typeof discoverSessionFiles>[number];
+  deletedSession: DeletedSessionRow;
+}): boolean {
+  const adapter = getProviderAdapter(args.discovered.provider);
+  if (!adapter.supportsIncrementalCheckpoints) {
+    return false;
+  }
+  const resumeFields = readDeletedResumeFields(args.deletedSession);
+  if (!resumeFields || !args.deletedSession.head_hash || !args.deletedSession.tail_hash) {
+    return false;
+  }
+  if (args.discovered.fileSize <= args.deletedSession.file_size) {
+    return false;
+  }
+
+  try {
+    return verifyAppendOnlyFingerprint(
+      args.discovered.filePath,
+      args.deletedSession.file_size,
+      args.deletedSession.head_hash,
+      args.deletedSession.tail_hash,
+    );
+  } catch {
+    return false;
+  }
+}
+
+function readDeletedResumeFields(deletedSession: DeletedSessionRow): {
+  lastOffsetBytes: number;
+  lastLineNumber: number;
+  lastEventIndex: number;
+  nextMessageSequence: number;
+  processingStateJson: string;
+  sourceMetadataJson: string;
+} | null {
+  if (
+    deletedSession.last_offset_bytes === null ||
+    deletedSession.last_line_number === null ||
+    deletedSession.last_event_index === null ||
+    deletedSession.next_message_sequence === null ||
+    deletedSession.processing_state_json === null ||
+    deletedSession.source_metadata_json === null
+  ) {
+    return null;
+  }
+
+  return {
+    lastOffsetBytes: deletedSession.last_offset_bytes,
+    lastLineNumber: deletedSession.last_line_number,
+    lastEventIndex: deletedSession.last_event_index,
+    nextMessageSequence: deletedSession.next_message_sequence,
+    processingStateJson: deletedSession.processing_state_json,
+    sourceMetadataJson: deletedSession.source_metadata_json,
+  };
+}
+
 function deserializeResumeCheckpoint(checkpoint: IndexCheckpointRow): ResumeCheckpoint | null {
   try {
     const processingRecord = asRecord(JSON.parse(checkpoint.processing_state_json));
@@ -1964,6 +2213,43 @@ function deserializeResumeCheckpoint(checkpoint: IndexCheckpointRow): ResumeChec
   } catch {
     return null;
   }
+}
+
+function deserializeDeletedResumeCheckpoint(
+  deletedSession: DeletedSessionRow,
+): ResumeCheckpoint | null {
+  const resumeFields = readDeletedResumeFields(deletedSession);
+  if (!resumeFields) {
+    return null;
+  }
+
+  const checkpoint = deserializeResumeCheckpoint({
+    file_path: deletedSession.file_path,
+    provider: deletedSession.provider,
+    session_id: deletedSession.session_id,
+    session_identity: deletedSession.session_identity,
+    file_size: deletedSession.file_size,
+    file_mtime_ms: deletedSession.file_mtime_ms,
+    last_offset_bytes: resumeFields.lastOffsetBytes,
+    last_line_number: resumeFields.lastLineNumber,
+    last_event_index: resumeFields.lastEventIndex,
+    next_message_sequence: resumeFields.nextMessageSequence,
+    processing_state_json: resumeFields.processingStateJson,
+    source_metadata_json: resumeFields.sourceMetadataJson,
+    head_hash: deletedSession.head_hash ?? "",
+    tail_hash: deletedSession.tail_hash ?? "",
+  });
+  if (!checkpoint) {
+    return null;
+  }
+
+  return {
+    ...checkpoint,
+    processingState: {
+      ...checkpoint.processingState,
+      aggregate: { ...DEFAULT_SESSION_AGGREGATE_STATE },
+    },
+  };
 }
 
 function parseCheckpointMessage(value: unknown): IndexedMessage | null {
@@ -2029,6 +2315,43 @@ function listIndexCheckpoints(db: SqliteDatabase): IndexCheckpointRow[] {
        FROM index_checkpoints`,
     )
     .all() as IndexCheckpointRow[];
+}
+
+function listDeletedSessions(db: SqliteDatabase): DeletedSessionRow[] {
+  return db
+    .prepare(
+      `SELECT
+         file_path,
+         provider,
+         project_path,
+         session_identity,
+         session_id,
+         deleted_at_ms,
+         file_size,
+         file_mtime_ms,
+         last_offset_bytes,
+         last_line_number,
+         last_event_index,
+         next_message_sequence,
+         processing_state_json,
+         source_metadata_json,
+         head_hash,
+         tail_hash
+       FROM deleted_sessions`,
+    )
+    .all() as DeletedSessionRow[];
+}
+
+function listDeletedProjects(db: SqliteDatabase): DeletedProjectRow[] {
+  return db
+    .prepare(
+      `SELECT
+         provider,
+         project_path,
+         deleted_at_ms
+       FROM deleted_projects`,
+    )
+    .all() as DeletedProjectRow[];
 }
 
 function computeFileHashes(
@@ -2126,6 +2449,10 @@ function deleteSessionDataForFilePath(db: SqliteDatabase, filePath: string): voi
   for (const row of rows) {
     deleteSessionData(db, row.id);
   }
+}
+
+function removeDeletedSessionTombstone(db: SqliteDatabase, filePath: string): void {
+  db.prepare("DELETE FROM deleted_sessions WHERE file_path = ?").run(filePath);
 }
 
 function deriveOperationDurations(messages: IndexedMessage[]): IndexedMessage[] {

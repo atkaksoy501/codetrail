@@ -133,6 +133,7 @@ const themeModeSchema = z.enum([
 ]);
 const sortDirectionSchema = z.enum(["asc", "desc"]);
 const searchModeSchema = z.enum(["simple", "advanced"]);
+const providerSourceFormatSchema = z.enum(["jsonl_stream", "materialized_json"]);
 const historyExportModeSchema = z.enum(["session", "project_all", "bookmarks"]);
 const historyExportScopeSchema = z.enum(["current_page", "all_pages"]);
 const preferredAutoRefreshStrategySchema = z.enum([
@@ -389,6 +390,19 @@ export const ipcContractSchemas = {
       messages: z.array(sessionMessageSchema),
     }),
   },
+  "sessions:delete": {
+    request: z.object({
+      sessionId: z.string().min(1),
+    }),
+    response: z.object({
+      deleted: z.boolean(),
+      projectId: z.string().min(1).nullable(),
+      provider: providerSchema.nullable(),
+      sourceFormat: providerSourceFormatSchema.nullable(),
+      removedMessageCount: z.number().int().nonnegative(),
+      removedBookmarkCount: z.number().int().nonnegative(),
+    }),
+  },
   "bookmarks:listProject": {
     request: z.object({
       projectId: z.string().min(1),
@@ -415,6 +429,19 @@ export const ipcContractSchemas = {
     }),
     response: z.object({
       bookmarked: z.boolean(),
+    }),
+  },
+  "projects:delete": {
+    request: z.object({
+      projectId: z.string().min(1),
+    }),
+    response: z.object({
+      deleted: z.boolean(),
+      provider: providerSchema.nullable(),
+      sourceFormat: providerSourceFormatSchema.nullable(),
+      removedSessionCount: z.number().int().nonnegative(),
+      removedMessageCount: z.number().int().nonnegative(),
+      removedBookmarkCount: z.number().int().nonnegative(),
     }),
   },
   "history:exportMessages": {

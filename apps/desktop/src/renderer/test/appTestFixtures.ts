@@ -318,6 +318,14 @@ export function createAppClient(overrides: Record<string, ChannelHandler> = {}) 
         },
       ],
     }),
+    "sessions:delete": () => ({
+      deleted: true,
+      projectId: "project_1",
+      provider: "claude",
+      sourceFormat: "jsonl_stream",
+      removedMessageCount: 2,
+      removedBookmarkCount: 0,
+    }),
     "bookmarks:listProject": (request) => ({
       projectId: String(request.projectId),
       totalCount: 0,
@@ -398,6 +406,14 @@ export function createAppClient(overrides: Record<string, ChannelHandler> = {}) 
               ],
       };
     },
+    "projects:delete": () => ({
+      deleted: true,
+      provider: "claude",
+      sourceFormat: "jsonl_stream",
+      removedSessionCount: 1,
+      removedMessageCount: 2,
+      removedBookmarkCount: 0,
+    }),
     ...overrides,
   });
 }

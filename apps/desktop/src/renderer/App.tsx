@@ -24,6 +24,10 @@ import {
 } from "./app/constants";
 import type { MainView, PaneStateSnapshot, WatchStatsResponse } from "./app/types";
 import { ConfirmDialog } from "./components/ConfirmDialog";
+import {
+  DeleteIndexedHistoryDialog,
+  type DeleteTarget,
+} from "./components/DeleteIndexedHistoryDialog";
 import { HistoryExportProgressDialog } from "./components/HistoryExportProgressDialog";
 import { SettingsView } from "./components/SettingsView";
 import { ShortcutsDialog } from "./components/ShortcutsDialog";
@@ -47,6 +51,19 @@ export function setTestStrategyIntervalOverrides(
   _testStrategyIntervalOverrides = overrides;
 }
 
+type PendingHistoryDelete =
+  | (Extract<DeleteTarget, { kind: "project" }> & { projectId: string })
+  | (Extract<DeleteTarget, { kind: "session" }> & { sessionId: string });
+
+function resolveExplicitOrSelectedItem<T extends { id: string }>(
+  items: T[],
+  explicitId: string | undefined,
+  selectedId: string | null | undefined,
+  selectedItem: T | null | undefined,
+): T | null {
+  return items.find((item) => item.id === (explicitId ?? selectedId)) ?? selectedItem ?? null;
+}
+
 export function App({
   initialPaneState = null,
 }: {
@@ -63,6 +80,11 @@ export function App({
   const [pendingProviderDisable, setPendingProviderDisable] = useState<Provider | null>(null);
   const [pendingMissingSessionCleanupEnable, setPendingMissingSessionCleanupEnable] =
     useState(false);
+  const [pendingHistoryDelete, setPendingHistoryDelete] = useState<PendingHistoryDelete | null>(
+    null,
+  );
+  const [historyDeleteError, setHistoryDeleteError] = useState<string | null>(null);
+  const [historyDeletePending, setHistoryDeletePending] = useState(false);
   const [refreshStrategy, setRefreshStrategy] = useState<RefreshStrategy>("off");
   const [watcherPendingPathCount, setWatcherPendingPathCount] = useState(0);
   const [autoRefreshScanInFlight, setAutoRefreshScanInFlight] = useState(false);
@@ -208,6 +230,87 @@ export function App({
       history.setRemoveMissingSessionsDuringIncrementalIndexing,
     ],
   );
+  const handleOpenProjectDelete = useCallback(
+    (projectId?: string) => {
+      const targetProject = resolveExplicitOrSelectedItem(
+        history.sortedProjects,
+        projectId,
+        history.selectedProjectId,
+        history.selectedProject,
+      );
+      if (!targetProject) {
+        return;
+      }
+      setHistoryDeleteError(null);
+      setPendingHistoryDelete({
+        kind: "project",
+        projectId: targetProject.id,
+        provider: targetProject.provider,
+        title: targetProject.name || targetProject.path || "(no project path)",
+        path: targetProject.path,
+        sessionCount: targetProject.sessionCount,
+        messageCount: targetProject.messageCount,
+      });
+    },
+    [history.selectedProject, history.selectedProjectId, history.sortedProjects],
+  );
+  const handleOpenSessionDelete = useCallback(
+    (sessionId?: string) => {
+      const targetSession = resolveExplicitOrSelectedItem(
+        history.sortedSessions,
+        sessionId,
+        history.selectedSessionId,
+        history.selectedSession,
+      );
+      if (!targetSession) {
+        return;
+      }
+      setHistoryDeleteError(null);
+      setPendingHistoryDelete({
+        kind: "session",
+        sessionId: targetSession.id,
+        provider: targetSession.provider,
+        title: targetSession.title || "(untitled session)",
+        path: targetSession.filePath,
+        messageCount: targetSession.messageCount,
+      });
+    },
+    [history.selectedSession, history.selectedSessionId, history.sortedSessions],
+  );
+  const handleConfirmHistoryDelete = useCallback(async () => {
+    if (!pendingHistoryDelete || historyDeletePending) {
+      return;
+    }
+    setHistoryDeleteError(null);
+    setHistoryDeletePending(true);
+    try {
+      if (pendingHistoryDelete.kind === "project") {
+        const response = await codetrail.invoke("projects:delete", {
+          projectId: pendingHistoryDelete.projectId,
+        });
+        if (!response.deleted) {
+          setHistoryDeleteError("This project no longer exists in the database.");
+          return;
+        }
+      } else {
+        const response = await codetrail.invoke("sessions:delete", {
+          sessionId: pendingHistoryDelete.sessionId,
+        });
+        if (!response.deleted) {
+          setHistoryDeleteError("This session no longer exists in the database.");
+          return;
+        }
+      }
+      setHistoryDeleteError(null);
+      setPendingHistoryDelete(null);
+      await reloadIndexedData("manual");
+    } catch (error) {
+      logError("Failed deleting indexed history", error);
+      setHistoryDeleteError(toErrorMessage(error));
+    } finally {
+      setHistoryDeletePending(false);
+    }
+  }, [codetrail, historyDeletePending, logError, pendingHistoryDelete, reloadIndexedData]);
 
   useEffect(() => {
     let cancelled = false;
@@ -560,6 +663,8 @@ export function App({
               applyZoomAction={appearance.applyZoomAction}
               setZoomPercent={appearance.setZoomPercent}
               logError={logError}
+              onDeleteProject={handleOpenProjectDelete}
+              onDeleteSession={handleOpenSessionDelete}
             />
           ) : (
             <section className="pane content-pane history-focus-pane">
@@ -689,6 +794,19 @@ export function App({
           setPendingMissingSessionCleanupEnable(false);
         }}
         onCancel={() => setPendingMissingSessionCleanupEnable(false)}
+      />
+      <DeleteIndexedHistoryDialog
+        open={pendingHistoryDelete !== null}
+        target={pendingHistoryDelete}
+        errorMessage={historyDeleteError}
+        busy={historyDeletePending}
+        onConfirm={() => {
+          void handleConfirmHistoryDelete();
+        }}
+        onCancel={() => {
+          setHistoryDeleteError(null);
+          setPendingHistoryDelete(null);
+        }}
       />
       <HistoryExportProgressDialog
         open={history.historyExportState.open}

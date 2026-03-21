@@ -255,9 +255,19 @@ export async function bootstrapMainProcess(
         ...payload,
         providers: applyEnabledProviderFilter(payload.providers),
       }),
+    "projects:delete": (payload) => {
+      const result = queryService.deleteProject(payload);
+      invalidateAllowedRootsCache();
+      return result;
+    },
     "projects:getCombinedDetail": (payload) => queryService.getProjectCombinedDetail(payload),
     "sessions:list": (payload) => queryService.listSessions(payload),
     "sessions:getDetail": (payload) => queryService.getSessionDetail(payload),
+    "sessions:delete": (payload) => {
+      const result = queryService.deleteSession(payload);
+      invalidateAllowedRootsCache();
+      return result;
+    },
     "bookmarks:listProject": (payload) => queryService.listProjectBookmarks(payload),
     "bookmarks:toggle": (payload) => queryService.toggleBookmark(payload),
     "history:exportMessages": async (payload, event) =>

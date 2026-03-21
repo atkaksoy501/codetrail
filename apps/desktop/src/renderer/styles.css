@@ -38,6 +38,7 @@
   --accent-red: #dc2626;
   --accent-red-dim: rgba(220, 38, 38, 0.08);
   --accent-red-border: rgba(220, 38, 38, 0.18);
+  --danger: var(--accent-red);
   --accent-muted: #64748b;
   --accent-muted-dim: rgba(100, 116, 139, 0.08);
   --accent-muted-border: rgba(100, 116, 139, 0.18);
@@ -164,6 +165,7 @@
   --accent-red: #f08080;
   --accent-red-dim: rgba(240, 128, 128, 0.14);
   --accent-red-border: rgba(240, 128, 128, 0.22);
+  --danger: var(--accent-red);
   --accent-muted: #a8b0c0;
   --accent-muted-dim: rgba(148, 163, 184, 0.1);
   --accent-muted-border: rgba(148, 163, 184, 0.18);
@@ -783,6 +785,117 @@ body.platform-macos .titlebar-left {
   gap: 8px;
 }
 
+.delete-history-dialog {
+  max-width: 560px;
+}
+
+.delete-history-dialog-content {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 22px 24px 24px;
+}
+
+.delete-history-dialog-eyebrow {
+  display: inline-flex;
+  align-self: flex-start;
+  border-radius: 999px;
+  padding: 4px 10px;
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  color: var(--danger);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.delete-history-dialog-target {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 1px solid color-mix(in srgb, var(--danger) 18%, var(--border));
+  border-radius: var(--radius-md);
+  background: linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--danger) 7%, transparent),
+      color-mix(in srgb, var(--bg-elevated) 96%, transparent)
+    ), var(--bg-elevated);
+  padding: 14px 16px;
+}
+
+.delete-history-dialog-target-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.delete-history-dialog-target-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.delete-history-dialog-stat {
+  border-radius: 999px;
+  padding: 3px 8px;
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+  font-size: 10.5px;
+  font-weight: 600;
+}
+
+.delete-history-dialog-path {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.delete-history-dialog-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.delete-history-dialog-section h4 {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.delete-history-dialog-section p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+.delete-history-dialog-list {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.delete-history-dialog-error {
+  border: 1px solid color-mix(in srgb, var(--danger) 24%, var(--border));
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--danger) 10%, var(--bg-elevated));
+  padding: 10px 12px;
+  color: var(--danger);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
 .export-progress-dialog {
   max-width: 460px;
 }
@@ -950,6 +1063,53 @@ body.platform-macos .titlebar-left {
   color: var(--accent-blue);
 }
 
+.history-list-context-menu {
+  position: fixed;
+  top: 0;
+  left: 0;
+  min-width: 188px;
+  max-width: min(240px, calc(100vw - 16px));
+  margin-top: 0;
+  padding: 6px 0;
+  z-index: 120;
+}
+
+.history-list-context-group {
+  display: flex;
+  flex-direction: column;
+}
+
+.history-list-context-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 12px;
+  color: var(--text-secondary);
+}
+
+.history-list-context-item-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  color: currentColor;
+}
+
+.history-list-context-item .toolbar-icon {
+  width: 14px;
+  height: 14px;
+}
+
+.history-list-context-item.danger {
+  color: var(--accent-red);
+}
+
+.history-list-context-item.danger:hover {
+  background: color-mix(in srgb, var(--accent-red) 10%, var(--bg-hover));
+  color: var(--accent-red);
+}
+
 .history-export-trigger {
   min-width: 76px;
 }
@@ -1105,6 +1265,23 @@ body.platform-macos .titlebar-left {
   background: var(--bg-hover);
   color: var(--text-primary);
   border-color: var(--border-active);
+}
+
+.pane-delete-btn:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent-red) 28%, var(--border));
+  background: color-mix(in srgb, var(--accent-red) 8%, var(--bg-elevated));
+  color: var(--accent-red);
+}
+
+.pane-delete-btn:hover:not(:disabled) {
+  color: var(--accent-red);
+  background: color-mix(in srgb, var(--accent-red) 14%, var(--bg-elevated));
+  border-color: color-mix(in srgb, var(--accent-red) 40%, var(--border));
+}
+
+.toolbar-icon-trash {
+  width: 14px;
+  height: 14px;
 }
 
 .collapse-btn .toolbar-icon {

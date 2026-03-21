@@ -43,7 +43,18 @@ describe("App shell", () => {
     const user = userEvent.setup();
     const client = createAppClient();
 
-    renderWithClient(<App />, client);
+    renderWithClient(
+      <App
+        initialPaneState={
+          {
+            selectedProjectId: "project_1",
+            selectedSessionId: "session_1",
+            historyMode: "session",
+          } as PaneStateSnapshot
+        }
+      />,
+      client,
+    );
 
     await waitFor(() => {
       expect(screen.getByText("Project One")).toBeInTheDocument();
@@ -529,5 +540,196 @@ describe("App shell", () => {
         ),
       ).toBe(true);
     });
+  });
+
+  it("opens the project delete dialog with JSONL-specific guidance and invokes project deletion", async () => {
+    installScrollIntoViewMock();
+    installDialogMock();
+
+    const user = userEvent.setup();
+    const client = createAppClient();
+
+    renderWithClient(<App />, client);
+
+    await waitFor(() => {
+      expect(screen.getByText("Project One")).toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(screen.getByText("Please review markdown table rendering")).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: "Delete project from Code Trail" }));
+
+    expect(screen.getByText("Delete Project From Code Trail?")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "This removes the indexed project history, its sessions, and any related bookmarks from Code Trail only. Raw transcript files on disk will not be changed.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "If the same JSONL transcript file only grows by appending new content, Code Trail will ingest only the new tail.",
+      ),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Delete Project" }));
+
+    await waitFor(() => {
+      expect(client.invoke).toHaveBeenCalledWith("projects:delete", { projectId: "project_1" });
+    });
+  });
+
+  it("shows materialized-json deletion guidance for project deletes", async () => {
+    installScrollIntoViewMock();
+    installDialogMock();
+
+    const user = userEvent.setup();
+    const client = createAppClient({
+      "projects:list": () => ({
+        projects: [
+          {
+            id: "project_gemini",
+            provider: "gemini",
+            name: "Gemini Project",
+            path: "/workspace/gemini-project",
+            sessionCount: 1,
+            messageCount: 4,
+            lastActivity: "2026-03-01T10:00:05.000Z",
+          },
+        ],
+      }),
+      "sessions:list": () => ({
+        sessions: [
+          {
+            id: "session_gemini",
+            projectId: "project_gemini",
+            provider: "gemini",
+            filePath: "/workspace/gemini-project/session-1.json",
+            title: "Gemini session",
+            modelNames: "gemini-2.5-pro",
+            startedAt: "2026-03-01T10:00:00.000Z",
+            endedAt: "2026-03-01T10:00:05.000Z",
+            durationMs: 5000,
+            gitBranch: "main",
+            cwd: "/workspace/gemini-project",
+            messageCount: 4,
+            tokenInputTotal: 10,
+            tokenOutputTotal: 5,
+          },
+        ],
+      }),
+      "sessions:getDetail": () => ({
+        session: {
+          id: "session_gemini",
+          projectId: "project_gemini",
+          provider: "gemini",
+          filePath: "/workspace/gemini-project/session-1.json",
+          title: "Gemini session",
+          modelNames: "gemini-2.5-pro",
+          startedAt: "2026-03-01T10:00:00.000Z",
+          endedAt: "2026-03-01T10:00:05.000Z",
+          durationMs: 5000,
+          gitBranch: "main",
+          cwd: "/workspace/gemini-project",
+          messageCount: 4,
+          tokenInputTotal: 10,
+          tokenOutputTotal: 5,
+        },
+        totalCount: 1,
+        categoryCounts: {
+          user: 1,
+          assistant: 0,
+          tool_use: 0,
+          tool_edit: 0,
+          tool_result: 0,
+          thinking: 0,
+          system: 0,
+        },
+        page: 0,
+        pageSize: 100,
+        focusIndex: null,
+        messages: [
+          {
+            id: "gm1",
+            sourceId: "gm-src-1",
+            sessionId: "session_gemini",
+            provider: "gemini",
+            category: "user",
+            content: "Gemini content",
+            createdAt: "2026-03-01T10:00:00.000Z",
+            tokenInput: null,
+            tokenOutput: null,
+            operationDurationMs: null,
+            operationDurationSource: null,
+            operationDurationConfidence: null,
+          },
+        ],
+      }),
+    });
+
+    renderWithClient(
+      <App
+        initialPaneState={
+          {
+            enabledProviders: ["gemini"],
+            projectProviders: ["gemini"],
+            searchProviders: ["gemini"],
+            selectedProjectId: "project_gemini",
+            selectedSessionId: "session_gemini",
+            historyMode: "session",
+          } as PaneStateSnapshot
+        }
+      />,
+      client,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Gemini Project")).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: "Delete project from Code Trail" }));
+
+    expect(screen.getByText("Delete Project From Code Trail?")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "This provider stores history as whole-file JSON, not append-resumable JSONL.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Code Trail will not restore partial changes from rewritten files during incremental refresh.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("shows an inline delete error and keeps the dialog open when project deletion fails", async () => {
+    installScrollIntoViewMock();
+    installDialogMock();
+
+    const user = userEvent.setup();
+    const client = createAppClient({
+      "projects:delete": () => ({
+        deleted: false,
+        provider: null,
+        sourceFormat: null,
+        removedSessionCount: 0,
+        removedMessageCount: 0,
+        removedBookmarkCount: 0,
+      }),
+    });
+
+    renderWithClient(<App />, client);
+
+    await waitFor(() => {
+      expect(screen.getByText("Project One")).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: "Delete project from Code Trail" }));
+    await user.click(screen.getByRole("button", { name: "Delete Project" }));
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "This project no longer exists in the database.",
+    );
+    expect(screen.getByText("Delete Project From Code Trail?")).toBeInTheDocument();
   });
 });

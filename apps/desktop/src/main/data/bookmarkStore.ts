@@ -61,9 +61,12 @@ export type BookmarkStore = {
     searchMode?: SearchMode,
   ) => StoredBookmark[];
   countProjectBookmarks: (projectId: string) => number;
+  countSessionBookmarks: (projectId: string, sessionId: string) => number;
   getBookmark: (projectId: string, messageId: string) => StoredBookmark | null;
   upsertBookmark: (snapshot: Omit<BookmarkSnapshot, "snapshotVersion" | "snapshotJson">) => void;
   removeBookmark: (projectId: string, messageId: string) => boolean;
+  removeProjectBookmarks: (projectId: string) => number;
+  removeSessionBookmarks: (projectId: string, sessionId: string) => number;
   reconcileWithIndexedData: (indexedDbPath: string) => BookmarkReconciliationResult;
   close: () => void;
 };
@@ -121,6 +124,9 @@ export function createBookmarkStore(bookmarksDbPath: string): BookmarkStore {
      WHERE project_id = ? AND message_id = ?`,
   );
   const countStmt = db.prepare("SELECT COUNT(*) as cnt FROM bookmarks WHERE project_id = ?");
+  const countSessionStmt = db.prepare(
+    "SELECT COUNT(*) as cnt FROM bookmarks WHERE project_id = ? AND session_id = ?",
+  );
 
   const upsertStmt = db.prepare(
     `INSERT INTO bookmarks (
@@ -155,8 +161,20 @@ export function createBookmarkStore(bookmarksDbPath: string): BookmarkStore {
   );
 
   const removeStmt = db.prepare("DELETE FROM bookmarks WHERE project_id = ? AND message_id = ?");
+  const removeProjectStmt = db.prepare("DELETE FROM bookmarks WHERE project_id = ?");
+  const removeSessionStmt = db.prepare(
+    "DELETE FROM bookmarks WHERE project_id = ? AND session_id = ?",
+  );
   const deleteFtsRowStmt = db.prepare(
     "DELETE FROM bookmarks_fts WHERE project_id = ? AND message_id = ?",
+  );
+  const deleteProjectFtsRowsStmt = db.prepare("DELETE FROM bookmarks_fts WHERE project_id = ?");
+  const deleteSessionFtsRowsStmt = db.prepare(
+    `DELETE FROM bookmarks_fts
+     WHERE project_id = ?
+       AND message_id IN (
+         SELECT message_id FROM bookmarks WHERE project_id = ? AND session_id = ?
+       )`,
   );
   const insertFtsRowStmt = db.prepare(
     "INSERT INTO bookmarks_fts (project_id, message_id, message_content) VALUES (?, ?, ?)",
@@ -214,6 +232,10 @@ export function createBookmarkStore(bookmarksDbPath: string): BookmarkStore {
       const row = countStmt.get(projectId) as { cnt: number } | undefined;
       return Number(row?.cnt ?? 0);
     },
+    countSessionBookmarks: (projectId, sessionId) => {
+      const row = countSessionStmt.get(projectId, sessionId) as { cnt: number } | undefined;
+      return Number(row?.cnt ?? 0);
+    },
     getBookmark: (projectId, messageId) => {
       const row = getStmt.get(projectId, messageId) as StoredBookmark | undefined;
       return row ?? null;
@@ -257,6 +279,24 @@ export function createBookmarkStore(bookmarksDbPath: string): BookmarkStore {
         deleteFtsRowStmt.run(projectId, messageId);
       }
       return info.changes > 0;
+    },
+    removeProjectBookmarks: (projectId) => {
+      const run = db.transaction((targetProjectId: string) => {
+        deleteProjectFtsRowsStmt.run(targetProjectId);
+        const info = removeProjectStmt.run(targetProjectId);
+        return Number(info.changes ?? 0);
+      });
+      return run(projectId);
+    },
+    removeSessionBookmarks: (projectId, sessionId) => {
+      const run = db.transaction((targetProjectId: string, targetSessionId: string) => {
+        // The session FTS cleanup needs the outer project id plus the same project id again for
+        // the subquery that still reads live bookmark rows to resolve matching message ids.
+        deleteSessionFtsRowsStmt.run(targetProjectId, targetProjectId, targetSessionId);
+        const info = removeSessionStmt.run(targetProjectId, targetSessionId);
+        return Number(info.changes ?? 0);
+      });
+      return run(projectId, sessionId);
     },
     reconcileWithIndexedData: (indexedDbPath) => reconcileBookmarks(db, indexedDbPath),
     close: () => db.close(),

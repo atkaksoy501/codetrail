@@ -31,8 +31,9 @@ import {
   getAdjacentItemId,
   getFirstVisibleMessageId,
 } from "../lib/historyNavigation";
-import { deriveSessionTitle, toggleValue } from "../lib/viewUtils";
-import { focusHistoryList, formatDuration } from "./historyControllerShared";
+import { toggleValue } from "../lib/viewUtils";
+import { focusHistoryList } from "./historyControllerShared";
+import { formatProjectDetails, formatSessionDetails } from "./historyCopyFormat";
 
 // Interaction handlers are collected here so keyboard/mouse behavior can share the same
 // state-transition rules without being spread across components.
@@ -473,52 +474,29 @@ export function useHistoryInteractions({
     }
     const messageCount = sessionDetailTotalCount ?? selectedSession.messageCount;
     const pageCount = Math.max(1, Math.ceil(messageCount / PAGE_SIZE));
-    const lines = [
-      `Title: ${deriveSessionTitle(selectedSession)}`,
-      `Provider: ${prettyProvider(selectedSession.provider)}`,
-      `Project: ${selectedProject?.name || selectedProject?.path || "(unknown project)"}`,
-      `Session ID: ${selectedSession.id}`,
-      `File: ${selectedSession.filePath}`,
-      `CWD: ${selectedSession.cwd ?? "-"}`,
-      `Branch: ${selectedSession.gitBranch ?? "-"}`,
-      `Models: ${selectedSession.modelNames || "-"}`,
-      `Started: ${selectedSession.startedAt ?? "-"}`,
-      `Ended: ${selectedSession.endedAt ?? "-"}`,
-      `Duration: ${formatDuration(selectedSession.durationMs)}`,
-      `Messages: ${messageCount}`,
-      `Page: ${sessionPage + 1}/${pageCount}`,
-    ];
-    const copied = await copyTextToClipboard(lines.join("\n"));
+    const copied = await copyTextToClipboard(
+      formatSessionDetails(selectedSession, {
+        projectLabel: selectedProject?.name || selectedProject?.path || "(unknown project)",
+        messageCount,
+        page: { current: sessionPage + 1, total: pageCount },
+      }),
+    );
     if (!copied) {
       logError("Failed copying session details", "Clipboard API unavailable");
     }
-  }, [
-    logError,
-    prettyProvider,
-    selectedProject,
-    selectedSession,
-    sessionDetailTotalCount,
-    sessionPage,
-  ]);
+  }, [logError, selectedProject, selectedSession, sessionDetailTotalCount, sessionPage]);
 
   const handleCopyProjectDetails = useCallback(async () => {
     if (!selectedProject) {
       return;
     }
-    const lines = [
-      `Name: ${selectedProject.name || "(untitled project)"}`,
-      `Provider: ${prettyProvider(selectedProject.provider)}`,
-      `Project ID: ${selectedProject.id}`,
-      `Path: ${selectedProject.path || "-"}`,
-      `Sessions: ${selectedProject.sessionCount}`,
-      `Messages: ${allSessionsCount}`,
-      `Last Activity: ${selectedProject.lastActivity ?? "-"}`,
-    ];
-    const copied = await copyTextToClipboard(lines.join("\n"));
+    const copied = await copyTextToClipboard(
+      formatProjectDetails(selectedProject, { messageCount: allSessionsCount }),
+    );
     if (!copied) {
       logError("Failed copying project details", "Clipboard API unavailable");
     }
-  }, [allSessionsCount, logError, prettyProvider, selectedProject]);
+  }, [allSessionsCount, logError, selectedProject]);
 
   const focusSessionSearch = useCallback(() => {
     window.setTimeout(() => {

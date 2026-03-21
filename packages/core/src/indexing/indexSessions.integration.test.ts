@@ -16,6 +16,111 @@ import type { DiscoveryConfig } from "../discovery";
 import { makeSessionId } from "./ids";
 import { runIncrementalIndexing } from "./indexSessions";
 
+function createDiscoveryConfig(dir: string): DiscoveryConfig {
+  return {
+    claudeRoot: join(dir, ".claude", "projects"),
+    codexRoot: join(dir, ".codex", "sessions"),
+    geminiRoot: join(dir, ".gemini", "tmp"),
+    geminiHistoryRoot: join(dir, ".gemini", "history"),
+    geminiProjectsPath: join(dir, ".gemini", "projects.json"),
+    cursorRoot: join(dir, ".cursor", "projects"),
+    copilotRoot: join(dir, ".copilot-workspace"),
+    includeClaudeSubagents: false,
+  };
+}
+
+function tombstoneSession(dbPath: string, filePath: string): void {
+  const db = openDatabase(dbPath);
+  // These indexing tests live below the query-service layer, so they build the tombstone row
+  // directly instead of reaching across package boundaries into the desktop delete plumbing.
+  const indexed = db
+    .prepare(
+      `SELECT file_path, provider, project_path, session_identity, file_size, file_mtime_ms
+       FROM indexed_files
+       WHERE file_path = ?`,
+    )
+    .get(filePath) as {
+    file_path: string;
+    provider: string;
+    project_path: string;
+    session_identity: string;
+    file_size: number;
+    file_mtime_ms: number;
+  };
+  const checkpoint = db
+    .prepare(
+      `SELECT session_id, last_offset_bytes, last_line_number, last_event_index,
+              next_message_sequence, processing_state_json, source_metadata_json,
+              head_hash, tail_hash
+       FROM index_checkpoints
+       WHERE file_path = ?`,
+    )
+    .get(filePath) as
+    | {
+        session_id: string;
+        last_offset_bytes: number | null;
+        last_line_number: number | null;
+        last_event_index: number | null;
+        next_message_sequence: number | null;
+        processing_state_json: string | null;
+        source_metadata_json: string | null;
+        head_hash: string | null;
+        tail_hash: string | null;
+      }
+    | undefined;
+  const session = db.prepare("SELECT id FROM sessions WHERE file_path = ?").get(filePath) as {
+    id: string;
+  };
+
+  db.prepare(
+    `INSERT INTO deleted_sessions (
+      file_path,
+      provider,
+      project_path,
+      session_identity,
+      session_id,
+      deleted_at_ms,
+      file_size,
+      file_mtime_ms,
+      last_offset_bytes,
+      last_line_number,
+      last_event_index,
+      next_message_sequence,
+      processing_state_json,
+      source_metadata_json,
+      head_hash,
+      tail_hash
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    indexed.file_path,
+    indexed.provider,
+    indexed.project_path,
+    indexed.session_identity,
+    checkpoint?.session_id ?? session.id,
+    Date.now(),
+    indexed.file_size,
+    indexed.file_mtime_ms,
+    checkpoint?.last_offset_bytes ?? null,
+    checkpoint?.last_line_number ?? null,
+    checkpoint?.last_event_index ?? null,
+    checkpoint?.next_message_sequence ?? null,
+    checkpoint?.processing_state_json ?? null,
+    checkpoint?.source_metadata_json ?? null,
+    checkpoint?.head_hash ?? null,
+    checkpoint?.tail_hash ?? null,
+  );
+
+  db.prepare(
+    "DELETE FROM tool_calls WHERE message_id IN (SELECT id FROM messages WHERE session_id = ?)",
+  ).run(session.id);
+  db.prepare("DELETE FROM message_fts WHERE session_id = ?").run(session.id);
+  db.prepare("DELETE FROM messages WHERE session_id = ?").run(session.id);
+  db.prepare("DELETE FROM sessions WHERE id = ?").run(session.id);
+  db.prepare("DELETE FROM index_checkpoints WHERE file_path = ?").run(filePath);
+  db.prepare("DELETE FROM indexed_files WHERE file_path = ?").run(filePath);
+  db.close();
+}
+
 describe("runIncrementalIndexing", () => {
   it("purges disabled providers during incremental indexing", () => {
     const dir = mkdtempSync(join(tmpdir(), "codetrail-enabled-providers-"));
@@ -1397,6 +1502,324 @@ describe("runIncrementalIndexing", () => {
 
     expect(sessionCount.c).toBe(2);
     expect(identities[0]?.id).not.toBe(identities[1]?.id);
+
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("ingests only appended tail content for a tombstoned JSONL session", () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-deleted-session-append-"));
+    const dbPath = join(dir, "index.db");
+    const claudeProject = join(dir, ".claude", "projects", "project-a");
+    const sessionFile = join(claudeProject, "claude-session-1.jsonl");
+    mkdirSync(claudeProject, { recursive: true });
+    writeFileSync(
+      sessionFile,
+      `${JSON.stringify({
+        sessionId: "claude-session-1",
+        type: "user",
+        cwd: "/workspace/claude",
+        gitBranch: "main",
+        timestamp: "2026-02-27T10:00:00Z",
+        message: {
+          role: "user",
+          content: [{ type: "text", text: "Before delete" }],
+        },
+      })}\n`,
+    );
+
+    runIncrementalIndexing({ dbPath, discoveryConfig: createDiscoveryConfig(dir) });
+    tombstoneSession(dbPath, sessionFile);
+
+    appendFileSync(
+      sessionFile,
+      `${JSON.stringify({
+        sessionId: "claude-session-1",
+        type: "assistant",
+        cwd: "/workspace/claude",
+        gitBranch: "main",
+        timestamp: "2026-02-27T10:00:01Z",
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: "After append" }],
+        },
+      })}\n`,
+    );
+    const appendedAt = new Date("2026-02-27T10:00:02Z");
+    utimesSync(sessionFile, appendedAt, appendedAt);
+
+    const result = runIncrementalIndexing({ dbPath, discoveryConfig: createDiscoveryConfig(dir) });
+
+    expect(result.indexedFiles).toBe(1);
+
+    const db = openDatabase(dbPath);
+    const messages = db
+      .prepare("SELECT content FROM messages ORDER BY created_at, id")
+      .all() as Array<{ content: string }>;
+    const deletedCount = (
+      db
+        .prepare("SELECT COUNT(*) as c FROM deleted_sessions WHERE file_path = ?")
+        .get(sessionFile) as {
+        c: number;
+      }
+    ).c;
+    db.close();
+
+    expect(messages).toEqual([{ content: "After append" }]);
+    expect(deletedCount).toBe(1);
+
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("keeps a tombstoned JSONL session deleted when the file is rewritten in place with the same identity", () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-deleted-session-same-identity-"));
+    const dbPath = join(dir, "index.db");
+    const claudeProject = join(dir, ".claude", "projects", "project-a");
+    const sessionFile = join(claudeProject, "claude-session-1.jsonl");
+    mkdirSync(claudeProject, { recursive: true });
+    writeFileSync(
+      sessionFile,
+      `${JSON.stringify({
+        sessionId: "claude-session-1",
+        type: "user",
+        cwd: "/workspace/claude",
+        gitBranch: "main",
+        timestamp: "2026-02-27T10:00:00Z",
+        message: {
+          role: "user",
+          content: [{ type: "text", text: "Original" }],
+        },
+      })}\n`,
+    );
+
+    runIncrementalIndexing({ dbPath, discoveryConfig: createDiscoveryConfig(dir) });
+    tombstoneSession(dbPath, sessionFile);
+
+    writeFileSync(
+      sessionFile,
+      `${JSON.stringify({
+        sessionId: "claude-session-1",
+        type: "assistant",
+        cwd: "/workspace/claude",
+        gitBranch: "main",
+        timestamp: "2026-02-27T10:05:00Z",
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: "Rewritten but same identity" }],
+        },
+      })}\n`,
+    );
+    const rewrittenAt = new Date("2026-02-27T10:05:01Z");
+    utimesSync(sessionFile, rewrittenAt, rewrittenAt);
+
+    const notices: string[] = [];
+    const result = runIncrementalIndexing(
+      { dbPath, discoveryConfig: createDiscoveryConfig(dir) },
+      {
+        onNotice: (notice) => {
+          notices.push(notice.code);
+        },
+      },
+    );
+
+    expect(result.indexedFiles).toBe(0);
+
+    const db = openDatabase(dbPath);
+    const sessionCount = (db.prepare("SELECT COUNT(*) as c FROM sessions").get() as { c: number })
+      .c;
+    const deletedCount = (
+      db
+        .prepare("SELECT COUNT(*) as c FROM deleted_sessions WHERE file_path = ?")
+        .get(sessionFile) as {
+        c: number;
+      }
+    ).c;
+    db.close();
+
+    expect(sessionCount).toBe(0);
+    expect(deletedCount).toBe(1);
+    expect(notices).toContain("index.deleted_session_rewrite_ignored");
+
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("ingests a rewritten tombstoned JSONL file as new when the session identity changes", () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-deleted-codex-new-identity-"));
+    const dbPath = join(dir, "index.db");
+    const codexDayDir = join(dir, ".codex", "sessions", "2026", "02", "27");
+    const sessionFile = join(codexDayDir, "rollout-codex-1.jsonl");
+    mkdirSync(codexDayDir, { recursive: true });
+    writeFileSync(
+      sessionFile,
+      `${[
+        JSON.stringify({
+          timestamp: "2026-02-27T10:00:00Z",
+          type: "session_meta",
+          payload: { id: "codex-session-1", cwd: "/workspace/codex", git: { branch: "main" } },
+        }),
+        JSON.stringify({
+          timestamp: "2026-02-27T10:00:01Z",
+          type: "response_item",
+          payload: {
+            type: "message",
+            role: "assistant",
+            content: [{ type: "output_text", text: "Original" }],
+          },
+        }),
+      ].join("\n")}\n`,
+    );
+
+    runIncrementalIndexing({ dbPath, discoveryConfig: createDiscoveryConfig(dir) });
+    tombstoneSession(dbPath, sessionFile);
+
+    writeFileSync(
+      sessionFile,
+      `${[
+        JSON.stringify({
+          timestamp: "2026-02-27T10:06:00Z",
+          type: "session_meta",
+          payload: { id: "codex-session-2", cwd: "/workspace/codex", git: { branch: "main" } },
+        }),
+        JSON.stringify({
+          timestamp: "2026-02-27T10:06:01Z",
+          type: "response_item",
+          payload: {
+            type: "message",
+            role: "assistant",
+            content: [{ type: "output_text", text: "Imported as new" }],
+          },
+        }),
+      ].join("\n")}\n`,
+    );
+    const rewrittenAt = new Date("2026-02-27T10:06:01Z");
+    utimesSync(sessionFile, rewrittenAt, rewrittenAt);
+
+    const notices: string[] = [];
+    const result = runIncrementalIndexing(
+      { dbPath, discoveryConfig: createDiscoveryConfig(dir) },
+      {
+        onNotice: (notice) => {
+          notices.push(notice.code);
+        },
+      },
+    );
+
+    expect(result.indexedFiles).toBe(1);
+
+    const db = openDatabase(dbPath);
+    const messages = db
+      .prepare("SELECT content FROM messages ORDER BY created_at, id")
+      .all() as Array<{ content: string }>;
+    const deletedCount = (
+      db
+        .prepare("SELECT COUNT(*) as c FROM deleted_sessions WHERE file_path = ?")
+        .get(sessionFile) as {
+        c: number;
+      }
+    ).c;
+    db.close();
+
+    expect(messages).toEqual([{ content: "Imported as new" }]);
+    expect(deletedCount).toBe(0);
+    expect(notices).toContain("index.deleted_session_replaced");
+
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("keeps a tombstoned materialized-json session deleted during normal refresh but restores it on force reindex", () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-deleted-gemini-session-"));
+    const dbPath = join(dir, "index.db");
+    const geminiRoot = join(dir, ".gemini", "tmp");
+    const geminiHistoryRoot = join(dir, ".gemini", "history");
+    mkdirSync(join(geminiRoot, "dux", "chats"), { recursive: true });
+    mkdirSync(join(geminiHistoryRoot, "dux"), { recursive: true });
+    writeFileSync(join(geminiRoot, "dux", ".project_root"), "/workspace/dux");
+    writeFileSync(join(geminiHistoryRoot, "dux", ".project_root"), "/workspace/dux");
+    const sessionFile = join(geminiRoot, "dux", "chats", "session-1.json");
+    writeFileSync(
+      sessionFile,
+      JSON.stringify({
+        sessionId: "gemini-session-1",
+        projectHash: "ddd29e90e8e0e53b3e06996841fdaf7a26e33cdca62e0678fb37e500d58d2bf8",
+        startTime: "2026-02-27T12:00:00Z",
+        lastUpdated: "2026-02-27T12:00:10Z",
+        messages: [
+          {
+            id: "g-user-1",
+            type: "user",
+            timestamp: "2026-02-27T12:00:00Z",
+            content: "Hello Gemini",
+          },
+        ],
+      }),
+    );
+
+    runIncrementalIndexing({ dbPath, discoveryConfig: createDiscoveryConfig(dir) });
+    tombstoneSession(dbPath, sessionFile);
+
+    writeFileSync(
+      sessionFile,
+      JSON.stringify({
+        sessionId: "gemini-session-1",
+        projectHash: "ddd29e90e8e0e53b3e06996841fdaf7a26e33cdca62e0678fb37e500d58d2bf8",
+        startTime: "2026-02-27T12:00:00Z",
+        lastUpdated: "2026-02-27T12:00:20Z",
+        messages: [
+          {
+            id: "g-user-1",
+            type: "user",
+            timestamp: "2026-02-27T12:00:00Z",
+            content: "Hello Gemini",
+          },
+          {
+            id: "g-assistant-1",
+            type: "gemini",
+            model: "gemini-2.5-pro",
+            timestamp: "2026-02-27T12:00:10Z",
+            content: "Rewritten Gemini content",
+          },
+        ],
+      }),
+    );
+    const rewrittenAt = new Date("2026-02-27T12:00:21Z");
+    utimesSync(sessionFile, rewrittenAt, rewrittenAt);
+
+    const notices: string[] = [];
+    const normal = runIncrementalIndexing(
+      { dbPath, discoveryConfig: createDiscoveryConfig(dir) },
+      {
+        onNotice: (notice) => {
+          notices.push(notice.code);
+        },
+      },
+    );
+    expect(normal.indexedFiles).toBe(0);
+
+    let db = openDatabase(dbPath);
+    expect((db.prepare("SELECT COUNT(*) as c FROM sessions").get() as { c: number }).c).toBe(0);
+    db.close();
+
+    const forced = runIncrementalIndexing({
+      dbPath,
+      discoveryConfig: createDiscoveryConfig(dir),
+      forceReindex: true,
+    });
+    expect(forced.indexedFiles).toBe(1);
+
+    db = openDatabase(dbPath);
+    const messages = db
+      .prepare("SELECT content FROM messages ORDER BY created_at, id")
+      .all() as Array<{ content: string }>;
+    const deletedCount = (
+      db.prepare("SELECT COUNT(*) as c FROM deleted_sessions").get() as { c: number }
+    ).c;
+    db.close();
+
+    expect(messages.map((message) => message.content)).toEqual([
+      "Hello Gemini",
+      "Rewritten Gemini content",
+    ]);
+    expect(deletedCount).toBe(0);
+    expect(notices).toContain("index.deleted_session_rewrite_ignored");
 
     rmSync(dir, { recursive: true, force: true });
   });

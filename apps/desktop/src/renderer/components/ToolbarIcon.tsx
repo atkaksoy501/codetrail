@@ -18,11 +18,12 @@ export type ToolbarIconName =
   | "chevronLeft"
   | "bookmark"
   | "folderOpen"
+  | "trash"
   | "export"
   | "sortAsc"
   | "sortDesc";
 
-const TOOLBAR_ICON_PATHS: Record<ToolbarIconName, string> = {
+const TOOLBAR_ICON_PATHS = {
   history: "M4 3h16v4H4zM4 10h16v4H4zM4 17h16v4H4z",
   search:
     "M9 3a6 6 0 1 0 0 12a6 6 0 0 0 0-12m0 2a4 4 0 1 1 0 8a4 4 0 0 1 0-8m6.5 9.1l1.4-1.4L22 18l-1.4 1.4z",
@@ -30,7 +31,6 @@ const TOOLBAR_ICON_PATHS: Record<ToolbarIconName, string> = {
   reindex: "M4 4h16v6H4zM4 14h10v6H4zM16 14h4v6h-4z",
   focus: "M3 8V3h5M21 8V3h-5M3 16v5h5M21 16v5h-5M8 8h8v8H8z",
   closeFocus: "M4 4l16 16M20 4L4 20",
-  copy: "",
   shortcuts: "M4 7h16M4 12h16M4 17h10",
   help: "M12 22a10 10 0 1 0 0-20a10 10 0 0 0 0 20M9.1 9a3 3 0 1 1 5.8 1c0 2-3 2-3 4M12 17h.01",
   theme:
@@ -44,11 +44,10 @@ const TOOLBAR_ICON_PATHS: Record<ToolbarIconName, string> = {
   collapseAll: "M7 7h10v10H7z",
   chevronLeft: "M15 5l-6 7 6 7",
   bookmark: "M6 4h12v16l-6-4-6 4z",
-  folderOpen: "",
   export: "M12 3v11M8 10l4 4 4-4M5 19h14",
   sortAsc: "M7 17V6M7 6l-3 3M7 6l3 3M12 17h8M12 13h6M12 9h4M12 5h2",
   sortDesc: "M7 6v11M7 17l-3-3M7 17l3-3M12 17h2M12 13h4M12 9h6M12 5h8",
-};
+} satisfies Record<Exclude<ToolbarIconName, "copy" | "folderOpen" | "trash">, string>;
 
 const TOOLBAR_ICON_TITLES: Record<ToolbarIconName, string> = {
   history: "History",
@@ -70,14 +69,18 @@ const TOOLBAR_ICON_TITLES: Record<ToolbarIconName, string> = {
   chevronLeft: "Back",
   bookmark: "Bookmark",
   folderOpen: "Open folder",
+  trash: "Delete",
   export: "Export",
   sortAsc: "Sort ascending",
   sortDesc: "Sort descending",
 };
 
+function isPathToolbarIconName(name: ToolbarIconName): name is keyof typeof TOOLBAR_ICON_PATHS {
+  return name in TOOLBAR_ICON_PATHS;
+}
+
 export function ToolbarIcon({ name }: { name: ToolbarIconName }) {
   const title = TOOLBAR_ICON_TITLES[name];
-  const path = TOOLBAR_ICON_PATHS[name];
 
   if (name === "copy") {
     return (
@@ -114,10 +117,30 @@ export function ToolbarIcon({ name }: { name: ToolbarIconName }) {
     );
   }
 
+  if (name === "trash") {
+    return (
+      <svg className="toolbar-icon toolbar-icon-trash" viewBox="0 0 12 12" aria-hidden>
+        <title>{title}</title>
+        <path
+          d="M1.5 3h9M4.5 3V2a1 1 0 0 1 1-1h1a1 1 0 0 1 1 1v1M3 3v7a1 1 0 0 0 1 1h4a1 1 0 0 0 1-1V3M5 5.5v3M7 5.5v3"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    );
+  }
+
+  if (!isPathToolbarIconName(name)) {
+    return null;
+  }
+
   return (
     <svg className="toolbar-icon" viewBox="0 0 24 24" aria-hidden>
       <title>{title}</title>
-      <path d={path} />
+      <path d={TOOLBAR_ICON_PATHS[name]} />
     </svg>
   );
 }

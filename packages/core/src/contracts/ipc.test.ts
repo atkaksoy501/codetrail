@@ -116,6 +116,19 @@ const channelExamples: Record<IpcChannel, ChannelExample> = {
       messages: [],
     },
   },
+  "sessions:delete": {
+    request: {
+      sessionId: "session_1",
+    },
+    response: {
+      deleted: true,
+      projectId: "project_1",
+      provider: "claude",
+      sourceFormat: "jsonl_stream",
+      removedMessageCount: 2,
+      removedBookmarkCount: 1,
+    },
+  },
   "bookmarks:listProject": {
     request: {
       projectId: "project_1",
@@ -189,6 +202,17 @@ const channelExamples: Record<IpcChannel, ChannelExample> = {
         system: 0,
       },
       results: [],
+    },
+  },
+  "projects:delete": {
+    request: { projectId: "project_1" },
+    response: {
+      deleted: true,
+      provider: "claude",
+      sourceFormat: "jsonl_stream",
+      removedSessionCount: 3,
+      removedMessageCount: 20,
+      removedBookmarkCount: 4,
     },
   },
   "path:openInFileManager": {

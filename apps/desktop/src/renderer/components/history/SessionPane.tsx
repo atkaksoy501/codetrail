@@ -3,6 +3,7 @@ import { type Ref, useCallback, useEffect, useState } from "react";
 import type { SessionSummary } from "../../app/types";
 import { deriveSessionTitle, formatDate, sessionActivityOf } from "../../lib/viewUtils";
 import { ToolbarIcon } from "../ToolbarIcon";
+import { HistoryListContextMenu } from "./HistoryListContextMenu";
 import { scheduleSelectedSessionScroll } from "./sessionAutoScroll";
 
 export function SessionPane({
@@ -16,10 +17,12 @@ export function SessionPane({
   collapsed,
   canCopySession,
   canOpenSessionLocation,
+  canDeleteSession,
   onToggleCollapsed,
   onToggleSortDirection,
   onCopySession,
   onOpenSessionLocation,
+  onDeleteSession,
   onSelectAllSessions,
   onSelectBookmarks,
   onSelectSession,
@@ -35,10 +38,12 @@ export function SessionPane({
   collapsed: boolean;
   canCopySession: boolean;
   canOpenSessionLocation: boolean;
+  canDeleteSession: boolean;
   onToggleCollapsed: () => void;
   onToggleSortDirection: () => void;
-  onCopySession: () => void;
-  onOpenSessionLocation: () => void;
+  onCopySession: (sessionId?: string) => void;
+  onOpenSessionLocation: (sessionId?: string) => void;
+  onDeleteSession: (sessionId?: string) => void;
   onSelectAllSessions: () => void;
   onSelectBookmarks: () => void;
   onSelectSession: (sessionId: string) => void;
@@ -47,6 +52,11 @@ export function SessionPane({
   const [selectedSessionElement, setSelectedSessionElement] = useState<HTMLButtonElement | null>(
     null,
   );
+  const [contextMenu, setContextMenu] = useState<{
+    sessionId: string;
+    x: number;
+    y: number;
+  } | null>(null);
   const selectedItemId = allSessionsSelected
     ? "__project_all__"
     : bookmarksSelected
@@ -92,7 +102,7 @@ export function SessionPane({
               <button
                 type="button"
                 className="collapse-btn"
-                onClick={onCopySession}
+                onClick={() => onCopySession()}
                 aria-label="Copy session details"
                 title="Copy session details"
                 disabled={!canCopySession}
@@ -101,8 +111,18 @@ export function SessionPane({
               </button>
               <button
                 type="button"
+                className="collapse-btn pane-delete-btn"
+                onClick={() => onDeleteSession()}
+                aria-label="Delete session from Code Trail"
+                title="Delete session from Code Trail"
+                disabled={!canDeleteSession}
+              >
+                <ToolbarIcon name="trash" />
+              </button>
+              <button
+                type="button"
                 className="collapse-btn pane-open-location-btn"
-                onClick={onOpenSessionLocation}
+                onClick={() => onOpenSessionLocation()}
                 aria-label="Open session folder"
                 title="Open session folder"
                 disabled={!canOpenSessionLocation}
@@ -203,7 +223,19 @@ export function SessionPane({
                 ? "session-item active"
                 : "session-item"
             }
-            onClick={() => onSelectSession(session.id)}
+            onClick={() => {
+              setContextMenu(null);
+              onSelectSession(session.id);
+            }}
+            onContextMenu={(event) => {
+              event.preventDefault();
+              onSelectSession(session.id);
+              setContextMenu({
+                sessionId: session.id,
+                x: event.clientX,
+                y: event.clientY,
+              });
+            }}
           >
             <div className="session-preview">{deriveSessionTitle(session)}</div>
             <div className="session-meta">
@@ -213,6 +245,41 @@ export function SessionPane({
           </button>
         ))}
       </div>
+      <HistoryListContextMenu
+        open={Boolean(contextMenu)}
+        x={contextMenu?.x ?? 0}
+        y={contextMenu?.y ?? 0}
+        onClose={() => setContextMenu(null)}
+        groups={
+          contextMenu
+            ? [
+                [
+                  {
+                    id: "copy-session",
+                    label: "Copy",
+                    icon: "copy",
+                    onSelect: () => onCopySession(contextMenu.sessionId),
+                  },
+                  {
+                    id: "open-session-folder",
+                    label: "Open Folder",
+                    icon: "folderOpen",
+                    onSelect: () => onOpenSessionLocation(contextMenu.sessionId),
+                  },
+                ],
+                [
+                  {
+                    id: "delete-session",
+                    label: "Delete",
+                    icon: "trash",
+                    tone: "danger",
+                    onSelect: () => onDeleteSession(contextMenu.sessionId),
+                  },
+                ],
+              ]
+            : []
+        }
+      />
     </aside>
   );
 }

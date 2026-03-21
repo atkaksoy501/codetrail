@@ -95,6 +95,30 @@ const tableStatements = [
     tail_hash TEXT NOT NULL,
     updated_at TEXT NOT NULL
   )`,
+  `CREATE TABLE IF NOT EXISTS deleted_sessions (
+    file_path TEXT PRIMARY KEY,
+    provider TEXT NOT NULL,
+    project_path TEXT NOT NULL,
+    session_identity TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    deleted_at_ms INTEGER NOT NULL,
+    file_size INTEGER NOT NULL,
+    file_mtime_ms INTEGER NOT NULL,
+    last_offset_bytes INTEGER,
+    last_line_number INTEGER,
+    last_event_index INTEGER,
+    next_message_sequence INTEGER,
+    processing_state_json TEXT,
+    source_metadata_json TEXT,
+    head_hash TEXT,
+    tail_hash TEXT
+  )`,
+  `CREATE TABLE IF NOT EXISTS deleted_projects (
+    provider TEXT NOT NULL,
+    project_path TEXT NOT NULL,
+    deleted_at_ms INTEGER NOT NULL,
+    PRIMARY KEY(provider, project_path)
+  )`,
   `CREATE VIRTUAL TABLE IF NOT EXISTS message_fts USING fts5(
     message_id UNINDEXED,
     session_id UNINDEXED,
@@ -111,6 +135,7 @@ const indexStatements = [
   "CREATE INDEX IF NOT EXISTS idx_messages_session_created ON messages(session_id, created_at, id)",
   "CREATE INDEX IF NOT EXISTS idx_messages_session_category_created ON messages(session_id, category, created_at, id)",
   "CREATE INDEX IF NOT EXISTS idx_messages_session_source_id ON messages(session_id, source_id)",
+  "CREATE INDEX IF NOT EXISTS idx_deleted_sessions_project_path ON deleted_sessions(provider, project_path)",
 ] as const;
 
 const dataTables = [
@@ -120,6 +145,8 @@ const dataTables = [
   "projects",
   "indexed_files",
   "index_checkpoints",
+  "deleted_sessions",
+  "deleted_projects",
 ] as const;
 
 export function openDatabase(databasePath: string): SqliteDatabase {
@@ -188,6 +215,8 @@ export function clearProvidersData(db: SqliteDatabase, providers: Provider[]): v
     deleteByProvider(`DELETE FROM message_fts WHERE provider IN (${placeholders})`);
     deleteByProvider(`DELETE FROM messages WHERE provider IN (${placeholders})`);
     deleteByProvider(`DELETE FROM index_checkpoints WHERE provider IN (${placeholders})`);
+    deleteByProvider(`DELETE FROM deleted_sessions WHERE provider IN (${placeholders})`);
+    deleteByProvider(`DELETE FROM deleted_projects WHERE provider IN (${placeholders})`);
     deleteByProvider(`DELETE FROM indexed_files WHERE provider IN (${placeholders})`);
     deleteByProvider(`DELETE FROM sessions WHERE provider IN (${placeholders})`);
     deleteByProvider(`DELETE FROM projects WHERE provider IN (${placeholders})`);
@@ -220,6 +249,8 @@ function clearAllSchemaObjects(db: SqliteDatabase): void {
   db.exec("DROP TABLE IF EXISTS projects");
   db.exec("DROP TABLE IF EXISTS indexed_files");
   db.exec("DROP TABLE IF EXISTS index_checkpoints");
+  db.exec("DROP TABLE IF EXISTS deleted_sessions");
+  db.exec("DROP TABLE IF EXISTS deleted_projects");
   db.exec("DROP TABLE IF EXISTS meta");
 }
 

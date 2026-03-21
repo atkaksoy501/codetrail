@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -52,10 +52,12 @@ describe("SessionPane", () => {
         bookmarksSelected={false}
         collapsed={false}
         canCopySession={true}
+        canDeleteSession={true}
         canOpenSessionLocation={true}
         onToggleCollapsed={onToggleCollapsed}
         onToggleSortDirection={onToggleSortDirection}
         onCopySession={onCopySession}
+        onDeleteSession={vi.fn()}
         onOpenSessionLocation={onOpenSessionLocation}
         onSelectAllSessions={onSelectAllSessions}
         onSelectBookmarks={onSelectBookmarks}
@@ -100,10 +102,12 @@ describe("SessionPane", () => {
         bookmarksSelected={false}
         collapsed={true}
         canCopySession={false}
+        canDeleteSession={false}
         canOpenSessionLocation={false}
         onToggleCollapsed={vi.fn()}
         onToggleSortDirection={vi.fn()}
         onCopySession={vi.fn()}
+        onDeleteSession={vi.fn()}
         onOpenSessionLocation={vi.fn()}
         onSelectAllSessions={onSelectAllSessions}
         onSelectBookmarks={onSelectBookmarks}
@@ -153,10 +157,12 @@ describe("SessionPane", () => {
         bookmarksSelected={false}
         collapsed={false}
         canCopySession={true}
+        canDeleteSession={true}
         canOpenSessionLocation={true}
         onToggleCollapsed={vi.fn()}
         onToggleSortDirection={vi.fn()}
         onCopySession={vi.fn()}
+        onDeleteSession={vi.fn()}
         onOpenSessionLocation={vi.fn()}
         onSelectAllSessions={vi.fn()}
         onSelectBookmarks={vi.fn()}
@@ -179,10 +185,12 @@ describe("SessionPane", () => {
         bookmarksSelected={true}
         collapsed={false}
         canCopySession={true}
+        canDeleteSession={true}
         canOpenSessionLocation={true}
         onToggleCollapsed={vi.fn()}
         onToggleSortDirection={vi.fn()}
         onCopySession={vi.fn()}
+        onDeleteSession={vi.fn()}
         onOpenSessionLocation={vi.fn()}
         onSelectAllSessions={vi.fn()}
         onSelectBookmarks={vi.fn()}
@@ -194,5 +202,49 @@ describe("SessionPane", () => {
 
     window.requestAnimationFrame = originalRequestAnimationFrame;
     window.cancelAnimationFrame = originalCancelAnimationFrame;
+  });
+
+  it("opens a session context menu with grouped actions for the clicked row", async () => {
+    const user = userEvent.setup();
+    const onSelectSession = vi.fn();
+    const onCopySession = vi.fn();
+    const onOpenSessionLocation = vi.fn();
+    const onDeleteSession = vi.fn();
+
+    render(
+      <SessionPane
+        sortedSessions={sessions}
+        selectedSessionId="session_1"
+        sortDirection="desc"
+        allSessionsCount={7}
+        allSessionsSelected={false}
+        bookmarksCount={2}
+        bookmarksSelected={false}
+        collapsed={false}
+        canCopySession={true}
+        canDeleteSession={true}
+        canOpenSessionLocation={true}
+        onToggleCollapsed={vi.fn()}
+        onToggleSortDirection={vi.fn()}
+        onCopySession={onCopySession}
+        onDeleteSession={onDeleteSession}
+        onOpenSessionLocation={onOpenSessionLocation}
+        onSelectAllSessions={vi.fn()}
+        onSelectBookmarks={vi.fn()}
+        onSelectSession={onSelectSession}
+      />,
+    );
+
+    fireEvent.contextMenu(screen.getByRole("button", { name: /Investigate markdown rendering/i }));
+
+    expect(screen.getByRole("menuitem", { name: "Copy" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Open Folder" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Delete" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("menuitem", { name: "Delete" }));
+
+    expect(onSelectSession).toHaveBeenCalledWith("session_1");
+    expect(onDeleteSession).toHaveBeenCalledWith("session_1");
+    expect(screen.queryByRole("menuitem", { name: "Copy" })).toBeNull();
   });
 });

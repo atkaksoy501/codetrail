@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -62,7 +62,9 @@ describe("ProjectPane", () => {
         onCopyProjectDetails={onCopyProjectDetails}
         onSelectProject={onSelectProject}
         onOpenProjectLocation={onOpenProjectLocation}
+        onDeleteProject={vi.fn()}
         canCopyProjectDetails={true}
+        canDeleteProject={true}
         canOpenProjectLocation={true}
       />,
     );
@@ -111,7 +113,9 @@ describe("ProjectPane", () => {
         onCopyProjectDetails={vi.fn()}
         onSelectProject={vi.fn()}
         onOpenProjectLocation={vi.fn()}
+        onDeleteProject={vi.fn()}
         canCopyProjectDetails={false}
+        canDeleteProject={false}
         canOpenProjectLocation={false}
       />,
     );
@@ -124,5 +128,50 @@ describe("ProjectPane", () => {
     expect(screen.queryByRole("button", { name: "Sort projects descending" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Copy project details" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Open project folder" })).toBeNull();
+  });
+
+  it("opens a project context menu with grouped actions for the clicked row", async () => {
+    const user = userEvent.setup();
+    const onSelectProject = vi.fn();
+    const onCopyProjectDetails = vi.fn();
+    const onOpenProjectLocation = vi.fn();
+    const onDeleteProject = vi.fn();
+
+    render(
+      <ProjectPane
+        sortedProjects={projects}
+        selectedProjectId="project_1"
+        sortDirection="desc"
+        collapsed={false}
+        projectQueryInput=""
+        projectProviders={["claude", "codex"]}
+        providers={["claude", "codex", "gemini", "cursor"]}
+        projectProviderCounts={{ claude: 1, codex: 1, gemini: 0, cursor: 0, copilot: 0 }}
+        projectUpdates={{}}
+        onToggleCollapsed={vi.fn()}
+        onProjectQueryChange={vi.fn()}
+        onToggleProvider={vi.fn()}
+        onToggleSortDirection={vi.fn()}
+        onCopyProjectDetails={onCopyProjectDetails}
+        onSelectProject={onSelectProject}
+        onOpenProjectLocation={onOpenProjectLocation}
+        onDeleteProject={onDeleteProject}
+        canCopyProjectDetails={true}
+        canDeleteProject={true}
+        canOpenProjectLocation={true}
+      />,
+    );
+
+    fireEvent.contextMenu(screen.getByRole("button", { name: /Project Two/i }));
+
+    expect(screen.getByRole("menuitem", { name: "Copy" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Open Folder" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Delete" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("menuitem", { name: "Open Folder" }));
+
+    expect(onSelectProject).toHaveBeenCalledWith("project_2");
+    expect(onOpenProjectLocation).toHaveBeenCalledWith("project_2");
+    expect(screen.queryByRole("menuitem", { name: "Delete" })).toBeNull();
   });
 });

@@ -2,6 +2,7 @@ import {
   type IpcRequest,
   type IpcResponse,
   type MessageCategory,
+  PROVIDER_METADATA,
   type Provider,
   type SearchQueryPlan,
   buildSearchQueryPlan,
@@ -49,6 +50,35 @@ type SessionSummaryRow = {
   token_output_total: number;
 };
 
+type ProjectSummaryRow = {
+  id: string;
+  provider: Provider;
+  name: string;
+  path: string;
+  created_at: string;
+  updated_at: string;
+  session_count: number;
+  message_count: number;
+  last_activity: string | null;
+};
+
+type IndexCheckpointDeleteRow = {
+  file_path: string;
+  provider: Provider;
+  session_id: string;
+  session_identity: string;
+  file_size: number;
+  file_mtime_ms: number;
+  last_offset_bytes: number;
+  last_line_number: number;
+  last_event_index: number;
+  next_message_sequence: number;
+  processing_state_json: string;
+  source_metadata_json: string;
+  head_hash: string;
+  tail_hash: string;
+};
+
 type MessageRow = {
   id: string;
   source_id: string;
@@ -90,10 +120,12 @@ export type QueryService = {
   getProjectCombinedDetail: (
     request: IpcRequest<"projects:getCombinedDetail">,
   ) => IpcResponse<"projects:getCombinedDetail">;
+  deleteProject: (request: IpcRequest<"projects:delete">) => IpcResponse<"projects:delete">;
   listSessions: (request: IpcRequest<"sessions:list">) => IpcResponse<"sessions:list">;
   getSessionDetail: (
     request: IpcRequest<"sessions:getDetail">,
   ) => IpcResponse<"sessions:getDetail">;
+  deleteSession: (request: IpcRequest<"sessions:delete">) => IpcResponse<"sessions:delete">;
   listProjectBookmarks: (
     request: IpcRequest<"bookmarks:listProject">,
   ) => IpcResponse<"bookmarks:listProject">;
@@ -140,8 +172,10 @@ export function createQueryServiceFromDb(
   return {
     listProjects: (request) => listProjectsWithDatabase(db, request),
     getProjectCombinedDetail: (request) => getProjectCombinedDetailWithDatabase(db, request),
+    deleteProject: (request) => deleteProjectWithStore(db, bookmarkStore, request),
     listSessions: (request) => listSessionsWithDatabase(db, request),
     getSessionDetail: (request) => getSessionDetailWithDatabase(db, request),
+    deleteSession: (request) => deleteSessionWithStore(db, bookmarkStore, request),
     listProjectBookmarks: (request) => listProjectBookmarksWithStore(db, bookmarkStore, request),
     toggleBookmark: (request) => toggleBookmarkWithStore(db, bookmarkStore, request),
     runSearchQuery: (request) => runSearchQueryWithDatabase(db, request),
@@ -182,6 +216,18 @@ export function listSessions(
   );
 }
 
+export function deleteProject(
+  dbPath: string,
+  request: IpcRequest<"projects:delete">,
+  dependencies: QueryServiceDependencies = {},
+): IpcResponse<"projects:delete"> {
+  return withDatabaseAndBookmarkStore(
+    dbPath,
+    (db, bookmarkStore) => deleteProjectWithStore(db, bookmarkStore, request),
+    dependencies,
+  );
+}
+
 export function getProjectCombinedDetail(
   dbPath: string,
   request: IpcRequest<"projects:getCombinedDetail">,
@@ -203,6 +249,18 @@ export function getSessionDetail(
     dbPath,
     (db) => getSessionDetailWithDatabase(db, request),
     dependencies.openDatabase,
+  );
+}
+
+export function deleteSession(
+  dbPath: string,
+  request: IpcRequest<"sessions:delete">,
+  dependencies: QueryServiceDependencies = {},
+): IpcResponse<"sessions:delete"> {
+  return withDatabaseAndBookmarkStore(
+    dbPath,
+    (db, bookmarkStore) => deleteSessionWithStore(db, bookmarkStore, request),
+    dependencies,
   );
 }
 
@@ -636,6 +694,126 @@ function getSessionDetailWithDatabase(
     queryError: null,
     highlightPatterns: queryPlan.highlightPatterns,
     messages: rows.map(mapSessionMessageRow),
+  };
+}
+
+function deleteSessionWithStore(
+  db: DatabaseHandle,
+  bookmarkStore: BookmarkStore,
+  request: IpcRequest<"sessions:delete">,
+): IpcResponse<"sessions:delete"> {
+  const sessionRow = db
+    .prepare(
+      `SELECT
+         s.id,
+         s.project_id,
+         s.provider,
+         s.file_path,
+         s.message_count
+       FROM sessions s
+       WHERE s.id = ?`,
+    )
+    .get(request.sessionId) as
+    | {
+        id: string;
+        project_id: string;
+        provider: Provider;
+        file_path: string;
+        message_count: number;
+      }
+    | undefined;
+
+  if (!sessionRow) {
+    return {
+      deleted: false,
+      projectId: null,
+      provider: null,
+      sourceFormat: null,
+      removedMessageCount: 0,
+      removedBookmarkCount: 0,
+    };
+  }
+
+  let removedBookmarkCount = 0;
+
+  const run = db.transaction(() => {
+    upsertDeletedSessionTombstone(db, sessionRow.id);
+    deleteSessionCascade(db, sessionRow.id, sessionRow.file_path);
+    db.exec("DELETE FROM projects WHERE id NOT IN (SELECT DISTINCT project_id FROM sessions)");
+  });
+  run();
+  removedBookmarkCount = bookmarkStore.removeSessionBookmarks(sessionRow.project_id, sessionRow.id);
+
+  return {
+    deleted: true,
+    projectId: sessionRow.project_id,
+    provider: sessionRow.provider,
+    sourceFormat: PROVIDER_METADATA[sessionRow.provider].sourceFormat,
+    removedMessageCount: sessionRow.message_count,
+    removedBookmarkCount,
+  };
+}
+
+function deleteProjectWithStore(
+  db: DatabaseHandle,
+  bookmarkStore: BookmarkStore,
+  request: IpcRequest<"projects:delete">,
+): IpcResponse<"projects:delete"> {
+  const projectRow = db
+    .prepare(
+      `SELECT
+         p.id,
+         p.provider,
+         p.name,
+         p.path,
+         p.created_at,
+         p.updated_at,
+         COUNT(DISTINCT s.id) as session_count,
+         COALESCE(SUM(s.message_count), 0) as message_count,
+         MAX(COALESCE(s.ended_at, s.started_at)) as last_activity
+       FROM projects p
+       LEFT JOIN sessions s ON s.project_id = p.id
+       WHERE p.id = ?
+       GROUP BY p.id, p.provider, p.name, p.path, p.created_at, p.updated_at`,
+    )
+    .get(request.projectId) as ProjectSummaryRow | undefined;
+
+  if (!projectRow) {
+    return {
+      deleted: false,
+      provider: null,
+      sourceFormat: null,
+      removedSessionCount: 0,
+      removedMessageCount: 0,
+      removedBookmarkCount: 0,
+    };
+  }
+
+  let removedBookmarkCount = 0;
+
+  const run = db.transaction(() => {
+    upsertDeletedProjectTombstone(db, projectRow.provider, projectRow.path);
+    const sessionIds = db
+      .prepare("SELECT id, file_path FROM sessions WHERE project_id = ?")
+      .all(projectRow.id) as Array<{ id: string; file_path: string }>;
+    for (const row of sessionIds) {
+      upsertDeletedSessionTombstone(db, row.id);
+    }
+    for (const row of sessionIds) {
+      deleteSessionCascade(db, row.id, row.file_path);
+    }
+    db.prepare("DELETE FROM projects WHERE id = ?").run(projectRow.id);
+  });
+  run();
+  removedBookmarkCount = bookmarkStore.removeProjectBookmarks(projectRow.id);
+
+  return {
+    deleted: true,
+    provider: projectRow.provider,
+    sourceFormat: PROVIDER_METADATA[projectRow.provider].sourceFormat,
+    removedSessionCount: projectRow.session_count,
+    removedMessageCount: projectRow.message_count,
+    removedBookmarkCount,
   };
 }
 
@@ -1144,6 +1322,179 @@ function mapSessionSummaryRow(
     tokenInputTotal: row.token_input_total,
     tokenOutputTotal: row.token_output_total,
   };
+}
+
+function assertDeletedSessionResumeMetadata(
+  sessionRow:
+    | {
+        id: string;
+        provider: Provider;
+        file_path: string;
+        project_path: string;
+        session_identity: string | null;
+        file_size: number | null;
+        file_mtime_ms: number | null;
+      }
+    | undefined,
+): asserts sessionRow is {
+  id: string;
+  provider: Provider;
+  file_path: string;
+  project_path: string;
+  session_identity: string;
+  file_size: number;
+  file_mtime_ms: number;
+} {
+  if (!sessionRow) {
+    throw new Error("Cannot delete indexed history because the session no longer exists.");
+  }
+  if (
+    !sessionRow.session_identity ||
+    sessionRow.file_size === null ||
+    sessionRow.file_mtime_ms === null
+  ) {
+    throw new Error(
+      `Cannot delete indexed history for session "${sessionRow.id}" because its incremental resume metadata is incomplete.`,
+    );
+  }
+}
+
+function deleteSessionCascade(db: DatabaseHandle, sessionId: string, filePath: string): void {
+  db.prepare(
+    "DELETE FROM tool_calls WHERE message_id IN (SELECT id FROM messages WHERE session_id = ?)",
+  ).run(sessionId);
+  db.prepare("DELETE FROM message_fts WHERE session_id = ?").run(sessionId);
+  db.prepare("DELETE FROM messages WHERE session_id = ?").run(sessionId);
+  db.prepare("DELETE FROM sessions WHERE id = ?").run(sessionId);
+  db.prepare("DELETE FROM indexed_files WHERE file_path = ?").run(filePath);
+  db.prepare("DELETE FROM index_checkpoints WHERE file_path = ?").run(filePath);
+}
+
+function upsertDeletedProjectTombstone(
+  db: DatabaseHandle,
+  provider: Provider,
+  projectPath: string,
+): void {
+  db.prepare(
+    `INSERT INTO deleted_projects (provider, project_path, deleted_at_ms)
+     VALUES (?, ?, ?)
+     ON CONFLICT(provider, project_path) DO UPDATE SET deleted_at_ms = excluded.deleted_at_ms`,
+  ).run(provider, projectPath, Date.now());
+}
+
+function upsertDeletedSessionTombstone(db: DatabaseHandle, sessionId: string): void {
+  const sessionRow = db
+    .prepare(
+      `SELECT
+         s.id,
+         s.provider,
+         s.file_path,
+         p.path as project_path,
+         f.session_identity,
+         f.file_size,
+         f.file_mtime_ms
+       FROM sessions s
+       JOIN projects p ON p.id = s.project_id
+       LEFT JOIN indexed_files f ON f.file_path = s.file_path
+       WHERE s.id = ?`,
+    )
+    .get(sessionId) as
+    | {
+        id: string;
+        provider: Provider;
+        file_path: string;
+        project_path: string;
+        session_identity: string | null;
+        file_size: number | null;
+        file_mtime_ms: number | null;
+      }
+    | undefined;
+  if (!sessionRow) {
+    throw new Error("Cannot delete indexed history because the session no longer exists.");
+  }
+  if (!sessionRow.file_path || !sessionRow.project_path) {
+    console.warn(
+      `[codetrail] Skipping deleted-session tombstone for "${sessionRow.id}" because required file metadata is missing.`,
+    );
+    return;
+  }
+  assertDeletedSessionResumeMetadata(sessionRow);
+
+  const checkpointRow = db
+    .prepare(
+      `SELECT
+         file_path,
+         provider,
+         session_id,
+         session_identity,
+         file_size,
+         file_mtime_ms,
+         last_offset_bytes,
+         last_line_number,
+         last_event_index,
+         next_message_sequence,
+         processing_state_json,
+         source_metadata_json,
+         head_hash,
+         tail_hash
+       FROM index_checkpoints
+       WHERE file_path = ?`,
+    )
+    .get(sessionRow.file_path) as IndexCheckpointDeleteRow | undefined;
+
+  db.prepare(
+    `INSERT INTO deleted_sessions (
+       file_path,
+       provider,
+       project_path,
+       session_identity,
+       session_id,
+       deleted_at_ms,
+       file_size,
+       file_mtime_ms,
+       last_offset_bytes,
+       last_line_number,
+       last_event_index,
+       next_message_sequence,
+       processing_state_json,
+       source_metadata_json,
+       head_hash,
+       tail_hash
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(file_path) DO UPDATE SET
+       provider = excluded.provider,
+       project_path = excluded.project_path,
+       session_identity = excluded.session_identity,
+       session_id = excluded.session_id,
+       deleted_at_ms = excluded.deleted_at_ms,
+       file_size = excluded.file_size,
+       file_mtime_ms = excluded.file_mtime_ms,
+       last_offset_bytes = excluded.last_offset_bytes,
+       last_line_number = excluded.last_line_number,
+       last_event_index = excluded.last_event_index,
+       next_message_sequence = excluded.next_message_sequence,
+       processing_state_json = excluded.processing_state_json,
+       source_metadata_json = excluded.source_metadata_json,
+       head_hash = excluded.head_hash,
+       tail_hash = excluded.tail_hash`,
+  ).run(
+    sessionRow.file_path,
+    sessionRow.provider,
+    sessionRow.project_path,
+    sessionRow.session_identity,
+    sessionRow.id,
+    Date.now(),
+    checkpointRow?.file_size ?? sessionRow.file_size ?? 0,
+    checkpointRow?.file_mtime_ms ?? sessionRow.file_mtime_ms ?? 0,
+    checkpointRow?.last_offset_bytes ?? null,
+    checkpointRow?.last_line_number ?? null,
+    checkpointRow?.last_event_index ?? null,
+    checkpointRow?.next_message_sequence ?? null,
+    checkpointRow?.processing_state_json ?? null,
+    checkpointRow?.source_metadata_json ?? null,
+    checkpointRow?.head_hash ?? null,
+    checkpointRow?.tail_hash ?? null,
+  );
 }
 
 function withDatabase<T>(

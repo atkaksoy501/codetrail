@@ -31,6 +31,8 @@ const {
   mockListProjectBookmarks,
   mockToggleBookmark,
   mockRunSearchQuery,
+  mockDeleteProject,
+  mockDeleteSession,
   mockQueryServiceClose,
   mockFileWatcherService,
   mockFileWatcherInstances,
@@ -112,6 +114,22 @@ const {
     mockListProjectBookmarks: vi.fn((payload) => ({ items: [{ id: "b1", ...payload }], total: 1 })),
     mockToggleBookmark: vi.fn((payload) => ({ bookmarked: payload.bookmarked })),
     mockRunSearchQuery: vi.fn((payload) => ({ items: [{ id: "m1", ...payload }], total: 1 })),
+    mockDeleteProject: vi.fn(() => ({
+      deleted: true,
+      provider: "claude",
+      sourceFormat: "jsonl_stream",
+      removedSessionCount: 1,
+      removedMessageCount: 1,
+      removedBookmarkCount: 0,
+    })),
+    mockDeleteSession: vi.fn(() => ({
+      deleted: true,
+      projectId: "project-1",
+      provider: "claude",
+      sourceFormat: "jsonl_stream",
+      removedMessageCount: 1,
+      removedBookmarkCount: 0,
+    })),
     mockQueryServiceClose: vi.fn(),
     mockFileWatcherInstances: fileWatcherInstances,
     mockFileWatcherService: vi.fn(
@@ -277,6 +295,8 @@ describe("bootstrapMainProcess", () => {
       listProjectBookmarks: mockListProjectBookmarks,
       toggleBookmark: mockToggleBookmark,
       runSearchQuery: mockRunSearchQuery,
+      deleteProject: mockDeleteProject,
+      deleteSession: mockDeleteSession,
       close: mockQueryServiceClose,
     }));
     mockRegisterIpcHandlers.mockImplementation((_ipcMain, nextHandlers) => {
@@ -987,6 +1007,8 @@ describe("bootstrapMainProcess", () => {
       listProjectBookmarks: vi.fn(),
       toggleBookmark: vi.fn(),
       runSearchQuery: vi.fn(),
+      deleteProject: vi.fn(),
+      deleteSession: vi.fn(),
     };
 
     mockCreateQueryService

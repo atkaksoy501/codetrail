@@ -1,10 +1,11 @@
 import type { Provider } from "@codetrail/core/browser";
-import { type Ref, useEffect, useRef } from "react";
+import { type Ref, useEffect, useRef, useState } from "react";
 
 import type { ProjectSummary } from "../../app/types";
 import { SEARCH_PLACEHOLDERS } from "../../lib/searchPlaceholders";
 import { compactPath, formatDate, prettyProvider } from "../../lib/viewUtils";
 import { ToolbarIcon } from "../ToolbarIcon";
+import { HistoryListContextMenu } from "./HistoryListContextMenu";
 
 export function ProjectPane({
   sortedProjects,
@@ -23,8 +24,10 @@ export function ProjectPane({
   onCopyProjectDetails,
   onSelectProject,
   onOpenProjectLocation,
+  onDeleteProject,
   canCopyProjectDetails,
   canOpenProjectLocation,
+  canDeleteProject,
   listRef,
 }: {
   sortedProjects: ProjectSummary[];
@@ -40,14 +43,21 @@ export function ProjectPane({
   onProjectQueryChange: (value: string) => void;
   onToggleProvider: (provider: Provider) => void;
   onToggleSortDirection: () => void;
-  onCopyProjectDetails: () => void;
+  onCopyProjectDetails: (projectId?: string) => void;
   onSelectProject: (projectId: string) => void;
-  onOpenProjectLocation: () => void;
+  onOpenProjectLocation: (projectId?: string) => void;
+  onDeleteProject: (projectId?: string) => void;
   canCopyProjectDetails: boolean;
   canOpenProjectLocation: boolean;
+  canDeleteProject: boolean;
   listRef?: Ref<HTMLDivElement>;
 }) {
   const selectedProjectRef = useRef<HTMLButtonElement | null>(null);
+  const [contextMenu, setContextMenu] = useState<{
+    projectId: string;
+    x: number;
+    y: number;
+  } | null>(null);
   const sortTooltip =
     sortDirection === "asc"
       ? "Projects: oldest activity first. Click to show newest activity first."
@@ -84,7 +94,7 @@ export function ProjectPane({
               <button
                 type="button"
                 className="collapse-btn"
-                onClick={onCopyProjectDetails}
+                onClick={() => onCopyProjectDetails()}
                 aria-label="Copy project details"
                 title="Copy project details"
                 disabled={!canCopyProjectDetails}
@@ -93,8 +103,18 @@ export function ProjectPane({
               </button>
               <button
                 type="button"
+                className="collapse-btn pane-delete-btn"
+                onClick={() => onDeleteProject()}
+                aria-label="Delete project from Code Trail"
+                title="Delete project from Code Trail"
+                disabled={!canDeleteProject}
+              >
+                <ToolbarIcon name="trash" />
+              </button>
+              <button
+                type="button"
                 className="collapse-btn pane-open-location-btn"
-                onClick={onOpenProjectLocation}
+                onClick={() => onOpenProjectLocation()}
                 aria-label="Open project folder"
                 title="Open project folder"
                 disabled={!canOpenProjectLocation}
@@ -151,7 +171,19 @@ export function ProjectPane({
               className={`list-item project-item${project.id === selectedProjectId ? " active" : ""}${
                 update ? " recently-updated" : ""
               }`}
-              onClick={() => onSelectProject(project.id)}
+              onClick={() => {
+                setContextMenu(null);
+                onSelectProject(project.id);
+              }}
+              onContextMenu={(event) => {
+                event.preventDefault();
+                onSelectProject(project.id);
+                setContextMenu({
+                  projectId: project.id,
+                  x: event.clientX,
+                  y: event.clientY,
+                });
+              }}
             >
               <div className="list-item-name">
                 {project.id === selectedProjectId ? <span className="active-dot" /> : null}
@@ -180,6 +212,41 @@ export function ProjectPane({
           );
         })}
       </div>
+      <HistoryListContextMenu
+        open={Boolean(contextMenu)}
+        x={contextMenu?.x ?? 0}
+        y={contextMenu?.y ?? 0}
+        onClose={() => setContextMenu(null)}
+        groups={
+          contextMenu
+            ? [
+                [
+                  {
+                    id: "copy-project",
+                    label: "Copy",
+                    icon: "copy",
+                    onSelect: () => onCopyProjectDetails(contextMenu.projectId),
+                  },
+                  {
+                    id: "open-project-folder",
+                    label: "Open Folder",
+                    icon: "folderOpen",
+                    onSelect: () => onOpenProjectLocation(contextMenu.projectId),
+                  },
+                ],
+                [
+                  {
+                    id: "delete-project",
+                    label: "Delete",
+                    icon: "trash",
+                    tone: "danger",
+                    onSelect: () => onDeleteProject(contextMenu.projectId),
+                  },
+                ],
+              ]
+            : []
+        }
+      />
     </aside>
   );
 }

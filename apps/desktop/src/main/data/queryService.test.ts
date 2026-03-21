@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createInMemoryDatabase } from "@codetrail/core";
 
+import type { BookmarkStore } from "./bookmarkStore";
 import { createQueryServiceFromDb, listProjects } from "./queryService";
 
 function seedQueryDb() {
@@ -114,7 +115,96 @@ function seedQueryDb() {
      VALUES (?, ?, ?, ?, ?)`,
   ).run("message_2", "session_1", "claude", "assistant", "Query behavior looks stable");
 
+  db.prepare(
+    `INSERT INTO indexed_files (
+      file_path,
+      provider,
+      project_path,
+      session_identity,
+      file_size,
+      file_mtime_ms,
+      indexed_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    "/workspace/project-one/session-1.jsonl",
+    "claude",
+    "/workspace/project-one",
+    "claude:session_1",
+    512,
+    Date.parse("2026-03-01T10:00:05.000Z"),
+    now,
+  );
+
+  db.prepare(
+    `INSERT INTO index_checkpoints (
+      file_path,
+      provider,
+      session_id,
+      session_identity,
+      file_size,
+      file_mtime_ms,
+      last_offset_bytes,
+      last_line_number,
+      last_event_index,
+      next_message_sequence,
+      processing_state_json,
+      source_metadata_json,
+      head_hash,
+      tail_hash,
+      updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    "/workspace/project-one/session-1.jsonl",
+    "claude",
+    "session_1",
+    "claude:session_1",
+    512,
+    Date.parse("2026-03-01T10:00:05.000Z"),
+    512,
+    1,
+    1,
+    2,
+    JSON.stringify({
+      pendingToolCallById: {},
+      previousMessageRole: "assistant",
+      previousTimestamp: "2026-03-01T10:00:05.000Z",
+      aggregate: {
+        startedAt: "2026-03-01T10:00:00.000Z",
+        endedAt: "2026-03-01T10:00:05.000Z",
+        messageCount: 2,
+      },
+    }),
+    JSON.stringify({
+      models: ["claude-opus-4-1"],
+      cwd: "/workspace/project-one",
+      gitBranch: "main",
+    }),
+    "head-1",
+    "tail-1",
+    now,
+  );
+
   return db;
+}
+
+function createBookmarkStoreMock(overrides: Partial<BookmarkStore> = {}): BookmarkStore {
+  return {
+    listProjectBookmarks: vi.fn(() => []),
+    countProjectBookmarks: vi.fn(() => 0),
+    countSessionBookmarks: vi.fn(() => 0),
+    getBookmark: vi.fn(() => null),
+    upsertBookmark: vi.fn(),
+    removeBookmark: vi.fn(() => false),
+    removeProjectBookmarks: vi.fn(() => 0),
+    removeSessionBookmarks: vi.fn(() => 0),
+    reconcileWithIndexedData: vi.fn(() => ({
+      deletedMissingProjects: 0,
+      markedOrphaned: 0,
+      restored: 0,
+    })),
+    close: vi.fn(),
+    ...overrides,
+  };
 }
 
 describe("queryService in-memory", () => {
@@ -882,5 +972,377 @@ describe("queryService in-memory", () => {
     expect(byId.get("session_user_title")).toBe("User title wins");
     expect(byId.get("session_assistant_title")).toBe("Assistant title wins");
     expect(byId.get("session_first_message_title")).toBe("First message title wins");
+  });
+
+  it("deletes a session, creates a tombstone, and removes indexed rows", () => {
+    const db = seedQueryDb();
+    const bookmarkStore = createBookmarkStoreMock({
+      removeSessionBookmarks: vi.fn(() => 2),
+    });
+    const service = createQueryServiceFromDb(db, {
+      bookmarkStore,
+      ownsBookmarkStore: false,
+    });
+
+    const result = service.deleteSession({ sessionId: "session_1" });
+
+    expect(result).toEqual({
+      deleted: true,
+      projectId: "project_1",
+      provider: "claude",
+      sourceFormat: "jsonl_stream",
+      removedMessageCount: 2,
+      removedBookmarkCount: 2,
+    });
+    expect(bookmarkStore.removeSessionBookmarks).toHaveBeenCalledWith("project_1", "session_1");
+    expect((db.prepare("SELECT COUNT(*) as c FROM sessions").get() as { c: number }).c).toBe(0);
+    expect((db.prepare("SELECT COUNT(*) as c FROM messages").get() as { c: number }).c).toBe(0);
+    expect((db.prepare("SELECT COUNT(*) as c FROM indexed_files").get() as { c: number }).c).toBe(
+      0,
+    );
+    expect(
+      (db.prepare("SELECT COUNT(*) as c FROM index_checkpoints").get() as { c: number }).c,
+    ).toBe(0);
+    expect((db.prepare("SELECT COUNT(*) as c FROM projects").get() as { c: number }).c).toBe(0);
+
+    const deletedSession = db.prepare("SELECT * FROM deleted_sessions").get() as {
+      provider: string;
+      project_path: string;
+      session_identity: string;
+      session_id: string;
+      file_path: string;
+      head_hash: string;
+      tail_hash: string;
+      last_offset_bytes: number;
+    };
+    expect(deletedSession).toMatchObject({
+      provider: "claude",
+      project_path: "/workspace/project-one",
+      session_identity: "claude:session_1",
+      session_id: "session_1",
+      file_path: "/workspace/project-one/session-1.jsonl",
+      head_hash: "head-1",
+      tail_hash: "tail-1",
+      last_offset_bytes: 512,
+    });
+    expect(
+      (db.prepare("SELECT COUNT(*) as c FROM deleted_projects").get() as { c: number }).c,
+    ).toBe(0);
+  });
+
+  it("returns deleted false when deleting a session that does not exist", () => {
+    const db = seedQueryDb();
+    const bookmarkStore = createBookmarkStoreMock();
+    const service = createQueryServiceFromDb(db, {
+      bookmarkStore,
+      ownsBookmarkStore: false,
+    });
+
+    expect(service.deleteSession({ sessionId: "missing" })).toEqual({
+      deleted: false,
+      projectId: null,
+      provider: null,
+      sourceFormat: null,
+      removedMessageCount: 0,
+      removedBookmarkCount: 0,
+    });
+    expect(bookmarkStore.removeSessionBookmarks).not.toHaveBeenCalled();
+  });
+
+  it("fails session deletion loudly when tombstone metadata is incomplete and leaves data untouched", () => {
+    const db = seedQueryDb();
+    db.prepare("DELETE FROM indexed_files WHERE file_path = ?").run(
+      "/workspace/project-one/session-1.jsonl",
+    );
+    db.prepare("DELETE FROM index_checkpoints WHERE file_path = ?").run(
+      "/workspace/project-one/session-1.jsonl",
+    );
+
+    const bookmarkStore = createBookmarkStoreMock({
+      removeSessionBookmarks: vi.fn(() => 2),
+    });
+    const service = createQueryServiceFromDb(db, {
+      bookmarkStore,
+      ownsBookmarkStore: false,
+    });
+
+    expect(() => service.deleteSession({ sessionId: "session_1" })).toThrowError(
+      'Cannot delete indexed history for session "session_1" because its incremental resume metadata is incomplete.',
+    );
+    expect(bookmarkStore.removeSessionBookmarks).not.toHaveBeenCalled();
+    expect((db.prepare("SELECT COUNT(*) as c FROM sessions").get() as { c: number }).c).toBe(1);
+    expect((db.prepare("SELECT COUNT(*) as c FROM messages").get() as { c: number }).c).toBe(2);
+    expect(
+      (db.prepare("SELECT COUNT(*) as c FROM deleted_sessions").get() as { c: number }).c,
+    ).toBe(0);
+  });
+
+  it("deletes a project, creates project and session tombstones, and removes all project data", () => {
+    const db = seedQueryDb();
+    const now = "2026-03-01T10:10:00.000Z";
+
+    db.prepare(
+      `INSERT INTO sessions (
+        id,
+        project_id,
+        provider,
+        file_path,
+        title,
+        model_names,
+        started_at,
+        ended_at,
+        duration_ms,
+        git_branch,
+        cwd,
+        message_count,
+        token_input_total,
+        token_output_total
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      "session_2",
+      "project_1",
+      "claude",
+      "/workspace/project-one/session-2.jsonl",
+      "Follow-up review",
+      "claude-opus-4-1",
+      now,
+      now,
+      2000,
+      "main",
+      "/workspace/project-one",
+      1,
+      3,
+      2,
+    );
+    db.prepare(
+      `INSERT INTO messages (
+        id,
+        source_id,
+        session_id,
+        provider,
+        category,
+        content,
+        created_at,
+        token_input,
+        token_output,
+        operation_duration_ms,
+        operation_duration_source,
+        operation_duration_confidence
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      "message_3",
+      "source_3",
+      "session_2",
+      "claude",
+      "assistant",
+      "Second session content",
+      now,
+      3,
+      2,
+      2000,
+      "native",
+      "high",
+    );
+    db.prepare(
+      `INSERT INTO message_fts (message_id, session_id, provider, category, content)
+       VALUES (?, ?, ?, ?, ?)`,
+    ).run("message_3", "session_2", "claude", "assistant", "Second session content");
+    db.prepare(
+      `INSERT INTO indexed_files (
+        file_path,
+        provider,
+        project_path,
+        session_identity,
+        file_size,
+        file_mtime_ms,
+        indexed_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      "/workspace/project-one/session-2.jsonl",
+      "claude",
+      "/workspace/project-one",
+      "claude:session_2",
+      256,
+      Date.parse(now),
+      now,
+    );
+    db.prepare(
+      `INSERT INTO index_checkpoints (
+        file_path,
+        provider,
+        session_id,
+        session_identity,
+        file_size,
+        file_mtime_ms,
+        last_offset_bytes,
+        last_line_number,
+        last_event_index,
+        next_message_sequence,
+        processing_state_json,
+        source_metadata_json,
+        head_hash,
+        tail_hash,
+        updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      "/workspace/project-one/session-2.jsonl",
+      "claude",
+      "session_2",
+      "claude:session_2",
+      256,
+      Date.parse(now),
+      256,
+      0,
+      0,
+      1,
+      JSON.stringify({
+        pendingToolCallById: {},
+        previousMessageRole: "assistant",
+        previousTimestamp: now,
+        aggregate: { startedAt: now, endedAt: now, messageCount: 1 },
+      }),
+      JSON.stringify({
+        models: ["claude-opus-4-1"],
+        cwd: "/workspace/project-one",
+        gitBranch: "main",
+      }),
+      "head-2",
+      "tail-2",
+      now,
+    );
+
+    const bookmarkStore = createBookmarkStoreMock({
+      removeProjectBookmarks: vi.fn(() => 5),
+    });
+    const service = createQueryServiceFromDb(db, {
+      bookmarkStore,
+      ownsBookmarkStore: false,
+    });
+
+    const result = service.deleteProject({ projectId: "project_1" });
+
+    expect(result).toEqual({
+      deleted: true,
+      provider: "claude",
+      sourceFormat: "jsonl_stream",
+      removedSessionCount: 2,
+      removedMessageCount: 3,
+      removedBookmarkCount: 5,
+    });
+    expect(bookmarkStore.removeProjectBookmarks).toHaveBeenCalledWith("project_1");
+    expect((db.prepare("SELECT COUNT(*) as c FROM projects").get() as { c: number }).c).toBe(0);
+    expect((db.prepare("SELECT COUNT(*) as c FROM sessions").get() as { c: number }).c).toBe(0);
+    expect((db.prepare("SELECT COUNT(*) as c FROM messages").get() as { c: number }).c).toBe(0);
+    expect((db.prepare("SELECT COUNT(*) as c FROM indexed_files").get() as { c: number }).c).toBe(
+      0,
+    );
+    expect(
+      (db.prepare("SELECT COUNT(*) as c FROM index_checkpoints").get() as { c: number }).c,
+    ).toBe(0);
+    expect(
+      (
+        db
+          .prepare(
+            "SELECT COUNT(*) as c FROM deleted_projects WHERE provider = ? AND project_path = ?",
+          )
+          .get("claude", "/workspace/project-one") as { c: number }
+      ).c,
+    ).toBe(1);
+    expect(
+      (
+        db
+          .prepare("SELECT COUNT(*) as c FROM deleted_sessions WHERE project_path = ?")
+          .get("/workspace/project-one") as { c: number }
+      ).c,
+    ).toBe(2);
+  });
+
+  it("returns deleted false when deleting a project that does not exist", () => {
+    const db = seedQueryDb();
+    const bookmarkStore = createBookmarkStoreMock();
+    const service = createQueryServiceFromDb(db, {
+      bookmarkStore,
+      ownsBookmarkStore: false,
+    });
+
+    expect(service.deleteProject({ projectId: "missing" })).toEqual({
+      deleted: false,
+      provider: null,
+      sourceFormat: null,
+      removedSessionCount: 0,
+      removedMessageCount: 0,
+      removedBookmarkCount: 0,
+    });
+    expect(bookmarkStore.removeProjectBookmarks).not.toHaveBeenCalled();
+  });
+
+  it("fails project deletion loudly when a session cannot be tombstoned and leaves project data untouched", () => {
+    const db = seedQueryDb();
+    db.prepare("DELETE FROM indexed_files WHERE file_path = ?").run(
+      "/workspace/project-one/session-1.jsonl",
+    );
+    db.prepare("DELETE FROM index_checkpoints WHERE file_path = ?").run(
+      "/workspace/project-one/session-1.jsonl",
+    );
+
+    const bookmarkStore = createBookmarkStoreMock({
+      removeProjectBookmarks: vi.fn(() => 2),
+    });
+    const service = createQueryServiceFromDb(db, {
+      bookmarkStore,
+      ownsBookmarkStore: false,
+    });
+
+    expect(() => service.deleteProject({ projectId: "project_1" })).toThrowError(
+      'Cannot delete indexed history for session "session_1" because its incremental resume metadata is incomplete.',
+    );
+    expect(bookmarkStore.removeProjectBookmarks).not.toHaveBeenCalled();
+    expect((db.prepare("SELECT COUNT(*) as c FROM projects").get() as { c: number }).c).toBe(1);
+    expect((db.prepare("SELECT COUNT(*) as c FROM sessions").get() as { c: number }).c).toBe(1);
+    expect(
+      (db.prepare("SELECT COUNT(*) as c FROM deleted_projects").get() as { c: number }).c,
+    ).toBe(0);
+  });
+
+  it("allows project deletion when a legacy session row is missing file metadata and skips its tombstone", () => {
+    const db = seedQueryDb();
+    db.prepare("UPDATE sessions SET file_path = '' WHERE id = ?").run("session_1");
+    db.prepare("DELETE FROM indexed_files WHERE file_path = ?").run(
+      "/workspace/project-one/session-1.jsonl",
+    );
+    db.prepare("DELETE FROM index_checkpoints WHERE file_path = ?").run(
+      "/workspace/project-one/session-1.jsonl",
+    );
+
+    const bookmarkStore = createBookmarkStoreMock({
+      removeProjectBookmarks: vi.fn(() => 2),
+    });
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const service = createQueryServiceFromDb(db, {
+      bookmarkStore,
+      ownsBookmarkStore: false,
+    });
+
+    const result = service.deleteProject({ projectId: "project_1" });
+
+    expect(result).toEqual({
+      deleted: true,
+      provider: "claude",
+      sourceFormat: "jsonl_stream",
+      removedSessionCount: 1,
+      removedMessageCount: 2,
+      removedBookmarkCount: 2,
+    });
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[codetrail] Skipping deleted-session tombstone for "session_1" because required file metadata is missing.',
+    );
+    expect(
+      (db.prepare("SELECT COUNT(*) as c FROM deleted_sessions").get() as { c: number }).c,
+    ).toBe(0);
+    expect(
+      (db.prepare("SELECT COUNT(*) as c FROM deleted_projects").get() as { c: number }).c,
+    ).toBe(1);
+
+    warnSpy.mockRestore();
   });
 });

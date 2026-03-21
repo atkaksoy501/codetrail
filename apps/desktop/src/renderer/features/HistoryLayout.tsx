@@ -2,8 +2,10 @@ import type { Dispatch, SetStateAction } from "react";
 
 import { ProjectPane } from "../components/history/ProjectPane";
 import { SessionPane } from "../components/history/SessionPane";
+import { copyTextToClipboard } from "../lib/clipboard";
 import { openInFileManager, openPath } from "../lib/pathActions";
 import { HistoryDetailPane } from "./HistoryDetailPane";
+import { formatProjectDetails, formatSessionDetails } from "./historyCopyFormat";
 import type { useHistoryController } from "./useHistoryController";
 
 type HistoryController = ReturnType<typeof useHistoryController>;
@@ -18,6 +20,8 @@ export function HistoryLayout({
   applyZoomAction,
   setZoomPercent,
   logError,
+  onDeleteProject,
+  onDeleteSession,
 }: {
   history: HistoryController;
   advancedSearchEnabled: boolean;
@@ -28,6 +32,8 @@ export function HistoryLayout({
   applyZoomAction: (action: "in" | "out" | "reset") => Promise<void>;
   setZoomPercent: (percent: number) => Promise<void>;
   logError: (context: string, error: unknown) => void;
+  onDeleteProject: (projectId?: string) => void;
+  onDeleteSession: (sessionId?: string) => void;
 }) {
   return (
     <>
@@ -55,22 +61,40 @@ export function HistoryLayout({
         onToggleSortDirection={() =>
           history.setProjectSortDirection((value) => (value === "asc" ? "desc" : "asc"))
         }
-        onCopyProjectDetails={() => void history.handleCopyProjectDetails()}
-        onSelectProject={history.selectProjectAllMessages}
-        onOpenProjectLocation={() => {
-          if (!history.selectedProject?.path?.trim()) {
+        onCopyProjectDetails={(projectId) => {
+          if (!projectId) {
+            void history.handleCopyProjectDetails();
             return;
           }
-          void openInFileManager(history.sortedProjects, history.selectedProjectId).then(
-            (result) => {
-              if (!result.ok) {
-                logError("Failed opening project location", result.error ?? "Unknown error");
-              }
-            },
+          const project = history.sortedProjects.find((candidate) => candidate.id === projectId);
+          if (!project) {
+            return;
+          }
+          void copyTextToClipboard(formatProjectDetails(project)).then((copied) => {
+            if (!copied) {
+              logError("Failed copying project details", "Clipboard API unavailable");
+            }
+          });
+        }}
+        onSelectProject={history.selectProjectAllMessages}
+        onDeleteProject={onDeleteProject}
+        onOpenProjectLocation={(projectId) => {
+          const targetProjectId = projectId || history.selectedProjectId;
+          const project = history.sortedProjects.find(
+            (candidate) => candidate.id === targetProjectId,
           );
+          if (!project?.path?.trim()) {
+            return;
+          }
+          void openInFileManager(history.sortedProjects, targetProjectId).then((result) => {
+            if (!result.ok) {
+              logError("Failed opening project location", result.error ?? "Unknown error");
+            }
+          });
         }}
         canCopyProjectDetails={Boolean(history.selectedProject)}
         canOpenProjectLocation={Boolean(history.selectedProject?.path?.trim())}
+        canDeleteProject={Boolean(history.selectedProject)}
       />
 
       <div className="pane-resizer" onPointerDown={history.beginResize("project")} />
@@ -89,16 +113,42 @@ export function HistoryLayout({
         canOpenSessionLocation={
           history.historyMode === "session" && Boolean(history.selectedSession?.filePath?.trim())
         }
+        canDeleteSession={history.historyMode === "session" && !!history.selectedSession}
         onToggleCollapsed={() => history.setSessionPaneCollapsed((value) => !value)}
         onToggleSortDirection={() =>
           history.setSessionSortDirection((value) => (value === "asc" ? "desc" : "asc"))
         }
-        onCopySession={() => void history.handleCopySessionDetails()}
-        onOpenSessionLocation={() => {
-          if (!history.selectedSession?.filePath?.trim()) {
+        onCopySession={(sessionId) => {
+          if (!sessionId) {
+            void history.handleCopySessionDetails();
             return;
           }
-          void openPath(history.selectedSession.filePath).then((result) => {
+          const session = history.sortedSessions.find((candidate) => candidate.id === sessionId);
+          if (!session) {
+            return;
+          }
+          const project =
+            history.sortedProjects.find((candidate) => candidate.id === session.projectId) ?? null;
+          void copyTextToClipboard(
+            formatSessionDetails(session, {
+              projectLabel: project?.name || project?.path || "(unknown project)",
+            }),
+          ).then((copied) => {
+            if (!copied) {
+              logError("Failed copying session details", "Clipboard API unavailable");
+            }
+          });
+        }}
+        onDeleteSession={onDeleteSession}
+        onOpenSessionLocation={(sessionId) => {
+          const targetSessionId = sessionId || history.selectedSessionId;
+          const session = history.sortedSessions.find(
+            (candidate) => candidate.id === targetSessionId,
+          );
+          if (!session?.filePath?.trim()) {
+            return;
+          }
+          void openPath(session.filePath).then((result) => {
             if (!result.ok) {
               logError("Failed opening session location", result.error ?? "Unknown error");
             }
