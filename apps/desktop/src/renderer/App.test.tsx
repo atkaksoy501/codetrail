@@ -558,7 +558,8 @@ describe("App shell", () => {
       expect(screen.getByText("Please review markdown table rendering")).toBeInTheDocument();
     });
 
-    await user.click(screen.getByRole("button", { name: "Delete project from Code Trail" }));
+    await user.click(screen.getByRole("button", { name: "Project options" }));
+    await user.click(screen.getByRole("button", { name: "Delete" }));
 
     expect(screen.getByText("Delete Project From Code Trail?")).toBeInTheDocument();
     expect(
@@ -687,7 +688,8 @@ describe("App shell", () => {
       expect(screen.getByText("Gemini Project")).toBeInTheDocument();
     });
 
-    await user.click(screen.getByRole("button", { name: "Delete project from Code Trail" }));
+    await user.click(screen.getByRole("button", { name: "Project options" }));
+    await user.click(screen.getByRole("button", { name: "Delete" }));
 
     expect(screen.getByText("Delete Project From Code Trail?")).toBeInTheDocument();
     expect(
@@ -724,7 +726,8 @@ describe("App shell", () => {
       expect(screen.getByText("Project One")).toBeInTheDocument();
     });
 
-    await user.click(screen.getByRole("button", { name: "Delete project from Code Trail" }));
+    await user.click(screen.getByRole("button", { name: "Project options" }));
+    await user.click(screen.getByRole("button", { name: "Delete" }));
     await user.click(screen.getByRole("button", { name: "Delete Project" }));
 
     expect(screen.getByRole("alert")).toHaveTextContent(

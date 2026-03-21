@@ -41,7 +41,10 @@ export function HistoryLayout({
         sortedProjects={history.sortedProjects}
         selectedProjectId={history.selectedProjectId}
         listRef={history.refs.projectListRef}
+        sortField={history.projectSortField}
         sortDirection={history.projectSortDirection}
+        viewMode={history.projectViewMode}
+        updateSource={history.projectListUpdateSource}
         collapsed={history.projectPaneCollapsed}
         projectQueryInput={history.projectQueryInput}
         projectProviders={history.projectProviders}
@@ -58,8 +61,12 @@ export function HistoryLayout({
             return next;
           })
         }
+        onSetSortField={history.setProjectSortField}
         onToggleSortDirection={() =>
           history.setProjectSortDirection((value) => (value === "asc" ? "desc" : "asc"))
+        }
+        onToggleViewMode={() =>
+          history.setProjectViewMode((value) => (value === "list" ? "tree" : "list"))
         }
         onCopyProjectDetails={(projectId) => {
           if (!projectId) {

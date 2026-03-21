@@ -2,7 +2,13 @@
 
 import { describe, expect, it } from "vitest";
 
-import { getAdjacentItemId, getEdgeItemId, getFirstVisibleMessageId } from "./historyNavigation";
+import {
+  getAdjacentItemId,
+  getAdjacentVisibleProjectId,
+  getAdjacentVisibleProjectTarget,
+  getEdgeItemId,
+  getFirstVisibleMessageId,
+} from "./historyNavigation";
 
 describe("historyNavigation", () => {
   it("falls back to the first item when there is no current selection", () => {
@@ -72,5 +78,79 @@ describe("historyNavigation", () => {
     });
 
     expect(getFirstVisibleMessageId(container)).toBe("m1");
+  });
+
+  it("navigates projects using the rendered visible DOM order", () => {
+    const container = document.createElement("div");
+    const first = document.createElement("button");
+    first.dataset.projectNavKind = "project";
+    first.dataset.projectNavId = "project_2";
+    const second = document.createElement("button");
+    second.dataset.projectNavKind = "project";
+    second.dataset.projectNavId = "project_1";
+    const third = document.createElement("button");
+    third.dataset.projectNavKind = "project";
+    third.dataset.projectNavId = "project_3";
+    container.append(first, second, third);
+
+    expect(getAdjacentVisibleProjectId(container, "project_2", "next")).toBe("project_1");
+    expect(getAdjacentVisibleProjectId(container, "project_3", "previous")).toBe("project_1");
+  });
+
+  it("returns the first visible project when nothing is selected", () => {
+    const container = document.createElement("div");
+    const first = document.createElement("button");
+    first.dataset.projectNavKind = "project";
+    first.dataset.projectNavId = "project_5";
+    const second = document.createElement("button");
+    second.dataset.projectNavKind = "project";
+    second.dataset.projectNavId = "project_8";
+    container.append(first, second);
+
+    expect(getAdjacentVisibleProjectId(container, "", "next")).toBe("project_5");
+  });
+
+  it("treats a collapsed folder row as the next selectable visible target", () => {
+    const container = document.createElement("div");
+    const current = document.createElement("button");
+    current.dataset.projectNavKind = "project";
+    current.dataset.projectNavId = "project_1";
+    const folder = document.createElement("button");
+    folder.dataset.projectNavKind = "folder";
+    folder.dataset.folderId = "folder_a";
+    folder.dataset.folderFirstProjectId = "project_2";
+    folder.dataset.folderLastProjectId = "project_3";
+    folder.setAttribute("aria-expanded", "false");
+    container.append(current, folder);
+
+    const target = getAdjacentVisibleProjectTarget(
+      container,
+      { kind: "project", id: "project_1" },
+      "next",
+    );
+    expect(target?.kind).toBe("folder");
+    expect(target?.id).toBe("folder_a");
+  });
+
+  it("selects a collapsed folder row when moving upward into it", () => {
+    const container = document.createElement("div");
+    const folder = document.createElement("button");
+    folder.dataset.projectNavKind = "folder";
+    folder.dataset.folderId = "folder_b";
+    folder.dataset.folderFirstProjectId = "project_2";
+    folder.dataset.folderLastProjectId = "project_3";
+    folder.setAttribute("aria-expanded", "false");
+    const current = document.createElement("button");
+    current.dataset.projectNavKind = "project";
+    current.dataset.projectNavId = "project_4";
+    container.append(folder, current);
+
+    const target = getAdjacentVisibleProjectTarget(
+      container,
+      { kind: "project", id: "project_4" },
+      "previous",
+    );
+    expect(target?.kind).toBe("folder");
+    expect(target?.id).toBe("folder_b");
   });
 });

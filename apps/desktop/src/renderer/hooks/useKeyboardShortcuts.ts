@@ -56,6 +56,7 @@ export function useKeyboardShortcuts(args: {
   selectNextSession: () => void;
   selectPreviousProject: () => void;
   selectNextProject: () => void;
+  handleProjectTreeArrow: (direction: "left" | "right") => void;
   pageHistoryMessagesUp: () => void;
   pageHistoryMessagesDown: () => void;
   pageSearchResultsUp: () => void;
@@ -244,6 +245,16 @@ function handleFocusedPaneArrowShortcut(context: ShortcutContext): boolean {
   if (context.focusedPane === "project" && context.event.key === "ArrowDown") {
     context.event.preventDefault();
     context.selectNextProject();
+    return true;
+  }
+  if (context.focusedPane === "project" && context.event.key === "ArrowLeft") {
+    context.event.preventDefault();
+    context.handleProjectTreeArrow("left");
+    return true;
+  }
+  if (context.focusedPane === "project" && context.event.key === "ArrowRight") {
+    context.event.preventDefault();
+    context.handleProjectTreeArrow("right");
     return true;
   }
   if (context.focusedPane === "session" && context.event.key === "ArrowUp") {

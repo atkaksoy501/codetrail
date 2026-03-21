@@ -89,6 +89,10 @@ function Harness({ logError }: { logError: (context: string, error: unknown) => 
   const [historyMode, setHistoryMode] = useState<"session" | "bookmarks" | "project_all">(
     "session",
   );
+  const [projectViewMode, setProjectViewMode] = useState<"list" | "tree">("list");
+  const [projectSortField, setProjectSortField] = useState<"last_active" | "name" | "sessions">(
+    "last_active",
+  );
   const [projectSortDirection, setProjectSortDirection] = useState<"asc" | "desc">("desc");
   const [sessionSortDirection, setSessionSortDirection] = useState<"asc" | "desc">("desc");
   const [messageSortDirection, setMessageSortDirection] = useState<"asc" | "desc">("asc");
@@ -135,6 +139,8 @@ function Harness({ logError }: { logError: (context: string, error: unknown) => 
       selectedProjectId,
       selectedSessionId,
       historyMode,
+      projectViewMode,
+      projectSortField,
       projectSortDirection,
       sessionSortDirection,
       messageSortDirection,
@@ -164,6 +170,8 @@ function Harness({ logError }: { logError: (context: string, error: unknown) => 
     setSelectedProjectId,
     setSelectedSessionId,
     setHistoryMode,
+    setProjectViewMode,
+    setProjectSortField,
     setProjectSortDirection,
     setSessionSortDirection,
     setMessageSortDirection,
@@ -213,6 +221,8 @@ describe("usePaneStateSync", () => {
             selectedProjectId: "project_1",
             selectedSessionId: "session_1",
             historyMode: "bookmarks",
+            projectViewMode: "tree",
+            projectSortField: "sessions",
             projectSortDirection: "desc",
             sessionSortDirection: "desc",
             messageSortDirection: "asc",
@@ -255,6 +265,8 @@ describe("usePaneStateSync", () => {
       expect(paneSaveCalls.length).toBeGreaterThan(0);
       const lastPaneSavePayload = paneSaveCalls.at(-1)?.[1];
       expect(lastPaneSavePayload).toMatchObject({
+        projectViewMode: "tree",
+        projectSortField: "sessions",
         preferredAutoRefreshStrategy: "scan-10s",
         systemMessageRegexRules: {
           claude: ["^<command-name>"],
@@ -326,6 +338,8 @@ describe("usePaneStateSync", () => {
             selectedProjectId: null,
             selectedSessionId: null,
             historyMode: null,
+            projectViewMode: null,
+            projectSortField: null,
             projectSortDirection: null,
             sessionSortDirection: null,
             messageSortDirection: null,

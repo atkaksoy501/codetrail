@@ -22,6 +22,8 @@ export type HistoryMessage =
 
 export type MainView = "history" | "search" | "settings" | "help";
 export type SortDirection = "asc" | "desc";
+export type ProjectViewMode = "list" | "tree";
+export type ProjectSortField = "last_active" | "name" | "sessions";
 export type BulkExpandScope = "all" | MessageCategory;
 
 export type HistorySelection =

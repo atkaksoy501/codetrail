@@ -104,7 +104,7 @@ export function SessionPane({
                 className="collapse-btn"
                 onClick={() => onCopySession()}
                 aria-label="Copy session details"
-                title="Copy session details"
+                title="Copy details for the selected session"
                 disabled={!canCopySession}
               >
                 <ToolbarIcon name="copy" />
@@ -114,7 +114,7 @@ export function SessionPane({
                 className="collapse-btn pane-delete-btn"
                 onClick={() => onDeleteSession()}
                 aria-label="Delete session from Code Trail"
-                title="Delete session from Code Trail"
+                title="Delete the selected session from Code Trail"
                 disabled={!canDeleteSession}
               >
                 <ToolbarIcon name="trash" />
@@ -124,7 +124,7 @@ export function SessionPane({
                 className="collapse-btn pane-open-location-btn"
                 onClick={() => onOpenSessionLocation()}
                 aria-label="Open session folder"
-                title="Open session folder"
+                title="Open the selected session folder"
                 disabled={!canOpenSessionLocation}
               >
                 <ToolbarIcon name="folderOpen" />
@@ -157,7 +157,7 @@ export function SessionPane({
             }
             onClick={onSelectAllSessions}
             aria-label="Switch to All Sessions"
-            title="All Sessions"
+            title="Show All Sessions"
           >
             <ToolbarIcon name="history" />
           </button>
@@ -171,7 +171,7 @@ export function SessionPane({
               }
               onClick={onSelectBookmarks}
               aria-label="Switch to Bookmarks"
-              title="Bookmarked Messages"
+              title="Show Bookmarked Messages"
             >
               <ToolbarIcon name="bookmark" />
             </button>

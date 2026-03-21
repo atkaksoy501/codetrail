@@ -29,7 +29,11 @@ import type { CodetrailClient } from "../lib/codetrailClient";
 import {
   type Direction,
   getAdjacentItemId,
+  getAdjacentVisibleProjectTarget,
   getFirstVisibleMessageId,
+  getProjectNavigationTargetFromContainer,
+  getProjectNavigationTargetFromElement,
+  getProjectParentFolderTarget,
 } from "../lib/historyNavigation";
 import { toggleValue } from "../lib/viewUtils";
 import { focusHistoryList } from "./historyControllerShared";
@@ -383,14 +387,98 @@ export function useHistoryInteractions({
 
   const selectAdjacentProject = useCallback(
     (direction: Direction) => {
-      const nextProjectId = getAdjacentItemId(sortedProjects, selectedProjectId, direction);
+      const currentTarget =
+        getProjectNavigationTargetFromElement(
+          document.activeElement instanceof HTMLElement ? document.activeElement : null,
+        ) ?? getProjectNavigationTargetFromContainer(projectListRef.current);
+      const visibleTarget = getAdjacentVisibleProjectTarget(
+        projectListRef.current,
+        currentTarget,
+        direction,
+      );
+      if (visibleTarget?.kind === "folder") {
+        focusHistoryList(projectListRef.current);
+        window.requestAnimationFrame(() => {
+          visibleTarget.element.focus({ preventScroll: true });
+        });
+        return;
+      }
+
+      const nextProjectId =
+        visibleTarget?.id || getAdjacentItemId(sortedProjects, selectedProjectId, direction);
       if (!nextProjectId) {
         return;
       }
       focusHistoryList(projectListRef.current);
+      window.requestAnimationFrame(() => {
+        visibleTarget?.element.focus({ preventScroll: true });
+      });
       selectProjectAllMessages(nextProjectId);
     },
     [projectListRef, selectProjectAllMessages, selectedProjectId, sortedProjects],
+  );
+
+  const handleProjectTreeArrow = useCallback(
+    (direction: "left" | "right") => {
+      const container = projectListRef.current;
+      if (!container) {
+        return;
+      }
+      const currentTarget =
+        getProjectNavigationTargetFromElement(
+          document.activeElement instanceof HTMLElement ? document.activeElement : null,
+        ) ?? getProjectNavigationTargetFromContainer(container);
+      if (!currentTarget) {
+        return;
+      }
+
+      if (currentTarget.kind === "folder") {
+        const folderElement = container.querySelector<HTMLButtonElement>(
+          `[data-project-nav-kind="folder"][data-folder-id="${CSS.escape(currentTarget.id)}"]`,
+        );
+        if (!folderElement) {
+          return;
+        }
+        const expanded = folderElement.getAttribute("aria-expanded") === "true";
+        if (direction === "right" && !expanded) {
+          folderElement.click();
+          window.requestAnimationFrame(() => {
+            folderElement.focus({ preventScroll: true });
+          });
+          return;
+        }
+        if (direction === "left" && expanded) {
+          folderElement.click();
+          window.requestAnimationFrame(() => {
+            folderElement.focus({ preventScroll: true });
+          });
+          return;
+        }
+        if (direction === "right" && expanded) {
+          const childTarget = getAdjacentVisibleProjectTarget(container, currentTarget, "next");
+          if (childTarget?.kind === "project") {
+            focusHistoryList(container);
+            window.requestAnimationFrame(() => {
+              childTarget.element.focus({ preventScroll: true });
+            });
+            selectProjectAllMessages(childTarget.id);
+          }
+        }
+        return;
+      }
+
+      if (direction === "left") {
+        const parentFolder = getProjectParentFolderTarget(container, currentTarget.id);
+        if (!parentFolder || parentFolder.kind !== "folder") {
+          return;
+        }
+        focusHistoryList(container);
+        window.requestAnimationFrame(() => {
+          parentFolder.element.focus({ preventScroll: true });
+        });
+      }
+    },
+    [projectListRef, selectProjectAllMessages],
   );
 
   const goToPreviousHistoryPage = useCallback(() => {
@@ -542,6 +630,7 @@ export function useHistoryInteractions({
     selectSessionView,
     selectAdjacentSession,
     selectAdjacentProject,
+    handleProjectTreeArrow,
     goToPreviousHistoryPage,
     goToNextHistoryPage,
     focusAdjacentHistoryMessage,

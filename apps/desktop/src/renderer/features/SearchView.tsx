@@ -158,7 +158,7 @@ export function SearchView({
                             search.setSearchPage(0);
                           }}
                           placeholder={SEARCH_PLACEHOLDERS.globalProjects}
-                          title="Filter visible search results by project name only. Refer to Help for search syntax details."
+                          title="Filter the visible search results by project name only. This does not search message text. Refer to Help for search syntax details."
                         />
                       </label>
 
@@ -179,8 +179,8 @@ export function SearchView({
                             aria-expanded={projectMenuOpen}
                             title={
                               selectedProject
-                                ? `${getProjectOptionLabel(selectedProject)} — ${selectedProject.path || "(unknown path)"}`
-                                : "All projects"
+                                ? `Project filter: ${getProjectOptionLabel(selectedProject)} — ${selectedProject.path || "(unknown path)"}. Click to choose a different project scope.`
+                                : "Project filter: All projects. Click to choose a specific project."
                             }
                             onClick={() => setProjectMenuOpen((value) => !value)}
                           >
@@ -263,6 +263,7 @@ export function SearchView({
                           className={`msg-filter search-filter-chip search-filter-chip-provider search-filter-chip-provider-${provider}${
                             search.searchProviders.includes(provider) ? " is-active" : ""
                           }`}
+                          title={`Toggle ${prettyProvider(provider)} results in Search`}
                           onClick={() => {
                             search.setSearchProviders((value) => toggleValue(value, provider));
                             search.setSearchPage(0);

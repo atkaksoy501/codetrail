@@ -152,7 +152,7 @@ export function HistoryDetailPane({
                   history.setBulkExpandScope(parseBulkExpandScope(event.target.value));
                 }}
                 aria-label="Select expand and collapse scope"
-                title="Choose which message type expand/collapse applies to"
+                title="Choose which message type the expand/collapse action applies to"
               >
                 <option value="all">All</option>
                 {CATEGORIES.map((category) => (
@@ -260,6 +260,11 @@ export function HistoryDetailPane({
               setAdvancedSearchEnabled((value) => !value);
               history.setSessionPage(0);
             }}
+            title={
+              advancedSearchEnabled
+                ? "Advanced search is on. You can use quoted phrases, AND/OR/NOT, parentheses, and postfix wildcard syntax like term*. Turn this off to go back to plain text search. Refer to Help for more."
+                : "Advanced search is off. Search works like plain text matching, with optional postfix wildcard syntax like term*. Turn this on if you want quoted phrases, AND/OR/NOT, and grouped expressions with parentheses. Refer to Help for more."
+            }
           />
         </div>
         {history.historyQueryError ? (

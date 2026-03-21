@@ -32,7 +32,9 @@ import type {
   PendingMessagePageNavigation,
   PendingRevealTarget,
   ProjectCombinedDetail,
+  ProjectSortField,
   ProjectSummary,
+  ProjectViewMode,
   SessionDetail,
   SessionSummary,
   SortDirection,
@@ -82,6 +84,47 @@ type ProjectUpdateState = {
 
 const MESSAGE_PAGE_SCROLL_OVERLAP_PX = 20;
 const PROJECT_UPDATE_HIGHLIGHT_MS = 8_000;
+const PROJECT_NAME_COLLATOR = new Intl.Collator(undefined, {
+  sensitivity: "base",
+  numeric: true,
+});
+
+function getProjectSortLabel(project: ProjectSummary): string {
+  return project.name.trim() || project.path.trim() || project.id;
+}
+
+function compareProjectName(left: ProjectSummary, right: ProjectSummary): number {
+  return PROJECT_NAME_COLLATOR.compare(getProjectSortLabel(left), getProjectSortLabel(right));
+}
+
+function compareProjectsByField(
+  left: ProjectSummary,
+  right: ProjectSummary,
+  sortField: ProjectSortField,
+): number {
+  if (sortField === "name") {
+    return (
+      compareProjectName(left, right) ||
+      compareRecent(left.lastActivity, right.lastActivity) ||
+      left.id.localeCompare(right.id)
+    );
+  }
+
+  if (sortField === "sessions") {
+    return (
+      left.sessionCount - right.sessionCount ||
+      compareRecent(left.lastActivity, right.lastActivity) ||
+      compareProjectName(left, right) ||
+      left.id.localeCompare(right.id)
+    );
+  }
+
+  return (
+    compareRecent(left.lastActivity, right.lastActivity) ||
+    compareProjectName(left, right) ||
+    left.id.localeCompare(right.id)
+  );
+}
 
 // ── Periodic-refresh scroll policy ──────────────────────────────────────────
 //
@@ -178,6 +221,12 @@ export function useHistoryController({
     initialPaneState?.systemMessageRegexRules
       ? { ...EMPTY_SYSTEM_MESSAGE_REGEX_RULES, ...initialPaneState.systemMessageRegexRules }
       : EMPTY_SYSTEM_MESSAGE_REGEX_RULES,
+  );
+  const [projectViewMode, setProjectViewMode] = useState<ProjectViewMode>(
+    initialPaneState?.projectViewMode ?? "list",
+  );
+  const [projectSortField, setProjectSortField] = useState<ProjectSortField>(
+    initialPaneState?.projectSortField ?? "last_active",
   );
   const [projectSortDirection, setProjectSortDirection] = useState<SortDirection>(
     initialPaneState?.projectSortDirection ?? "desc",
@@ -302,22 +351,22 @@ export function useHistoryController({
   const naturallySortedProjects = useMemo(() => {
     const next = projects.filter((project) => enabledProviders.includes(project.provider));
     next.sort((left, right) => {
-      const byRecent =
-        compareRecent(right.lastActivity, left.lastActivity) || left.name.localeCompare(right.name);
-      return projectSortDirection === "desc" ? byRecent : -byRecent;
+      const naturalOrder = compareProjectsByField(left, right, projectSortField);
+      return projectSortDirection === "asc" ? naturalOrder : -naturalOrder;
     });
     return next;
-  }, [enabledProviders, projectSortDirection, projects]);
+  }, [enabledProviders, projectSortDirection, projectSortField, projects]);
 
   const projectOrderControlKey = useMemo(
     () =>
       [
         projectSortDirection,
+        projectSortField,
         enabledProviders.join(","),
         projectProviders.join(","),
         projectQuery,
       ].join("\u0000"),
-    [enabledProviders, projectProviders, projectQuery, projectSortDirection],
+    [enabledProviders, projectProviders, projectQuery, projectSortDirection, projectSortField],
   );
 
   useEffect(() => {
@@ -389,10 +438,12 @@ export function useHistoryController({
       projectPaneCollapsed,
       sessionPaneCollapsed,
       sessionScrollTop,
+      projectViewMode,
     }),
     [
       projectPaneCollapsed,
       projectPaneWidth,
+      projectViewMode,
       sessionPaneCollapsed,
       sessionPaneWidth,
       sessionScrollTop,
@@ -434,6 +485,7 @@ export function useHistoryController({
 
   const paneSortState = useMemo(
     () => ({
+      projectSortField,
       projectSortDirection,
       sessionSortDirection,
       messageSortDirection,
@@ -444,6 +496,7 @@ export function useHistoryController({
       bookmarkSortDirection,
       messageSortDirection,
       projectAllSortDirection,
+      projectSortField,
       projectSortDirection,
       sessionSortDirection,
     ],
@@ -519,6 +572,8 @@ export function useHistoryController({
     setSelectedProjectId: setSelectedProjectIdForPaneStateSync,
     setSelectedSessionId: setSelectedSessionIdForPaneStateSync,
     setHistoryMode: setHistoryModeForPaneStateSync,
+    setProjectViewMode,
+    setProjectSortField,
     setProjectSortDirection,
     setSessionSortDirection,
     setMessageSortDirection,
@@ -891,6 +946,7 @@ export function useHistoryController({
     selectSessionView,
     selectAdjacentSession,
     selectAdjacentProject,
+    handleProjectTreeArrow,
     goToPreviousHistoryPage,
     goToNextHistoryPage,
     focusAdjacentHistoryMessage,
@@ -1083,8 +1139,13 @@ export function useHistoryController({
     projectQueryInput,
     setProjectQueryInput,
     projectProviderCounts,
+    projectViewMode,
+    setProjectViewMode,
+    projectSortField,
+    setProjectSortField,
     projectSortDirection,
     setProjectSortDirection,
+    projectListUpdateSource,
     sessionSortDirection,
     setSessionSortDirection,
     messageSortDirection,
@@ -1161,8 +1222,6 @@ export function useHistoryController({
     handleCopyProjectDetails,
     focusSessionSearch,
     focusAdjacentHistoryMessage,
-    selectAdjacentSession,
-    selectAdjacentProject,
     pageHistoryMessagesUp: () => pageHistoryMessages("up"),
     pageHistoryMessagesDown: () => pageHistoryMessages("down"),
     handleExportMessages,
@@ -1170,6 +1229,9 @@ export function useHistoryController({
     selectProjectAllMessages,
     selectBookmarksView,
     selectSessionView,
+    selectAdjacentSession,
+    selectAdjacentProject,
+    handleProjectTreeArrow,
     goToPreviousHistoryPage,
     goToNextHistoryPage,
     handleRefresh,

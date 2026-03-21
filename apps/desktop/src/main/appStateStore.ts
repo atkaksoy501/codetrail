@@ -78,6 +78,8 @@ const REGULAR_FONT_VALUES: RegularFontFamily[] = [...UI_REGULAR_FONT_VALUES];
 const MONO_FONT_SIZE_VALUES: MonoFontSize[] = [...UI_MONO_FONT_SIZE_VALUES];
 const REGULAR_FONT_SIZE_VALUES: RegularFontSize[] = [...UI_REGULAR_FONT_SIZE_VALUES];
 const HISTORY_MODE_VALUES = ["session", "bookmarks", "project_all"] as const;
+const PROJECT_VIEW_MODE_VALUES = ["list", "tree"] as const;
+const PROJECT_SORT_FIELD_VALUES = ["last_active", "name", "sessions"] as const;
 const SORT_DIRECTION_VALUES = ["asc", "desc"] as const;
 const AUTO_REFRESH_STRATEGY_VALUES = [
   "watch-1s",
@@ -284,6 +286,8 @@ function sanitizePaneState(
   const selectedProjectId = sanitizeOptionalNonEmptyString(record.selectedProjectId);
   const selectedSessionId = sanitizeOptionalNonEmptyString(record.selectedSessionId);
   const historyMode = sanitizeStringValue(record.historyMode, HISTORY_MODE_VALUES);
+  const projectViewMode = sanitizeStringValue(record.projectViewMode, PROJECT_VIEW_MODE_VALUES);
+  const projectSortField = sanitizeStringValue(record.projectSortField, PROJECT_SORT_FIELD_VALUES);
   const projectSortDirection = sanitizeStringValue(
     record.projectSortDirection,
     SORT_DIRECTION_VALUES,
@@ -334,6 +338,8 @@ function sanitizePaneState(
     ...(selectedProjectId ? { selectedProjectId } : {}),
     ...(selectedSessionId ? { selectedSessionId } : {}),
     ...(historyMode ? { historyMode } : {}),
+    ...(projectViewMode ? { projectViewMode } : {}),
+    ...(projectSortField ? { projectSortField } : {}),
     ...(projectSortDirection ? { projectSortDirection } : {}),
     ...(sessionSortDirection ? { sessionSortDirection } : {}),
     ...(messageSortDirection ? { messageSortDirection } : {}),

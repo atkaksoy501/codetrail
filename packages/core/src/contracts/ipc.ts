@@ -132,6 +132,8 @@ const themeModeSchema = z.enum([
   "sand",
 ]);
 const sortDirectionSchema = z.enum(["asc", "desc"]);
+const projectViewModeSchema = z.enum(["list", "tree"]);
+const projectSortFieldSchema = z.enum(["last_active", "name", "sessions"]);
 const searchModeSchema = z.enum(["simple", "advanced"]);
 const providerSourceFormatSchema = z.enum(["jsonl_stream", "materialized_json"]);
 const historyExportModeSchema = z.enum(["session", "project_all", "bookmarks"]);
@@ -179,6 +181,8 @@ export const paneStateBaseSchema = z.object({
   selectedProjectId: z.string(),
   selectedSessionId: z.string(),
   historyMode: z.enum(["session", "bookmarks", "project_all"]),
+  projectViewMode: projectViewModeSchema,
+  projectSortField: projectSortFieldSchema,
   projectSortDirection: sortDirectionSchema,
   sessionSortDirection: sortDirectionSchema,
   messageSortDirection: sortDirectionSchema,

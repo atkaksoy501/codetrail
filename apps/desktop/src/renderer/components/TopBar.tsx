@@ -35,7 +35,7 @@ function RefreshStrategyDropdown({
         aria-label="Auto-refresh strategy"
         aria-haspopup="menu"
         aria-expanded={open}
-        title="Toggle auto-refresh (Cmd/Ctrl+Shift+R)"
+        title={`Auto-refresh: ${selectedLabel}. Click to change strategy (Cmd/Ctrl+Shift+R).`}
       >
         <ToolbarIcon name="refresh" />
         {selectedLabel}
@@ -97,7 +97,7 @@ function ThemeDropdown({
         aria-label="Choose theme"
         aria-haspopup="menu"
         aria-expanded={open}
-        title={`Theme: ${getThemeLabel(value)}`}
+        title={`Theme: ${getThemeLabel(value)}. Click to choose a different theme.`}
       >
         <ToolbarIcon name="theme" />
       </button>
@@ -199,8 +199,8 @@ export function TopBar({
           aria-label="Search"
           title={
             mainView === "search"
-              ? "Return to history view (Esc)"
-              : "Open search (Cmd/Ctrl+Shift+F)"
+              ? "Search view is open. Return to history view (Esc)."
+              : "Open Search (Cmd/Ctrl+Shift+F)."
           }
         >
           <ToolbarIcon name="search" />
@@ -212,7 +212,11 @@ export function TopBar({
           onClick={onIncrementalRefresh}
           disabled={indexing}
           aria-label={indexing ? "Indexing in progress" : "Incremental refresh"}
-          title={indexing ? "Indexing in progress..." : "Incremental refresh (Cmd/Ctrl+R)"}
+          title={
+            indexing
+              ? "Indexing is already in progress."
+              : "Run an incremental refresh now (Cmd/Ctrl+R)."
+          }
         >
           <ToolbarIcon name="refresh" />
           {indexing ? "Indexing..." : "Refresh"}
@@ -231,7 +235,9 @@ export function TopBar({
           disabled={focusDisabled}
           aria-label={focusMode ? "Exit focus mode" : "Enter focus mode"}
           title={
-            focusMode ? "Exit focus mode (Cmd/Ctrl+Shift+M)" : "Enter focus mode (Cmd/Ctrl+Shift+M)"
+            focusMode
+              ? "Exit focus mode (Cmd/Ctrl+Shift+M)."
+              : "Enter focus mode (Cmd/Ctrl+Shift+M)."
           }
         >
           <ToolbarIcon name={focusMode ? "closeFocus" : "focus"} />
@@ -242,7 +248,11 @@ export function TopBar({
           className={mainView === "help" ? "tb-btn active" : "tb-btn"}
           onClick={onToggleHelp}
           aria-label={mainView === "help" ? "Return to history view" : "Open help"}
-          title={mainView === "help" ? "Return to history view (Esc)" : "Open help (?)"}
+          title={
+            mainView === "help"
+              ? "Help view is open. Return to history view (Esc)."
+              : "Open Help (?)."
+          }
         >
           <ToolbarIcon name="help" />
           Help
@@ -255,7 +265,9 @@ export function TopBar({
           onClick={onToggleSettings}
           aria-label={mainView === "settings" ? "Return to history view" : "Open settings"}
           title={
-            mainView === "settings" ? "Return to history view (Esc)" : "Open settings (Cmd/Ctrl+,)"
+            mainView === "settings"
+              ? "Settings view is open. Return to history view (Esc)."
+              : "Open Settings (Cmd/Ctrl+,)."
           }
         >
           <ToolbarIcon name="settings" />

@@ -153,7 +153,7 @@ function MessageCardComponent({
             className="message-action-button"
             onClick={handleCopyBodyButtonClick}
             aria-label="Copy formatted message body"
-            title="Copy formatted message body"
+            title="Copy the formatted message body"
           >
             Copy
           </button>
@@ -162,7 +162,7 @@ function MessageCardComponent({
             className="message-action-button"
             onClick={handleCopyRawButtonClick}
             aria-label="Copy raw message data"
-            title="Copy raw message data"
+            title="Copy the raw message data"
           >
             Copy Raw
           </button>
@@ -172,7 +172,7 @@ function MessageCardComponent({
               className="message-action-button message-reveal-button"
               onClick={handleRevealButtonClick}
               aria-label="Reveal this message in session"
-              title="Reveal in session"
+              title="Reveal this message in its session"
             >
               Reveal in Session
             </button>
@@ -187,7 +187,7 @@ function MessageCardComponent({
               aria-label={
                 isBookmarked ? "Remove bookmark from this message" : "Bookmark this message"
               }
-              title={isBookmarked ? "Remove bookmark" : "Bookmark message"}
+              title={isBookmarked ? "Remove bookmark from this message" : "Bookmark this message"}
             >
               <BookmarkIcon filled={isBookmarked} />
             </button>

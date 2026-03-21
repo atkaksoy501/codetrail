@@ -569,6 +569,7 @@ export function App({
     selectNextSession: () => history.selectAdjacentSession("next"),
     selectPreviousProject: () => history.selectAdjacentProject("previous"),
     selectNextProject: () => history.selectAdjacentProject("next"),
+    handleProjectTreeArrow: history.handleProjectTreeArrow,
     pageHistoryMessagesUp: history.pageHistoryMessagesUp,
     pageHistoryMessagesDown: history.pageHistoryMessagesDown,
     pageSearchResultsUp: search.pageSearchResultsUp,

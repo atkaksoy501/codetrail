@@ -580,7 +580,6 @@ function getThemeVariantCssOverridesFromVariant(
     "--path-pill-bg": variant.inspector.pathBg,
     "--path-pill-border": variant.surfaces.panelBorder,
     "--path-pill-text": variant.inspector.pathCrumb,
-    "--session-pane-heading-text": variant.text.muted,
     "--session-pane-preview-text": variant.text.secondary,
     "--session-pane-meta-text": variant.text.tertiary,
     "--message-heading-text": variant.text.primary,

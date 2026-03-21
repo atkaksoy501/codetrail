@@ -5,6 +5,27 @@ type ItemLike = {
 };
 
 const MESSAGE_SELECTOR = "[data-history-message-id]";
+const PROJECT_SELECTOR = "[data-project-nav-id]";
+const PROJECT_NAV_SELECTOR = "[data-project-nav-kind]";
+
+export type ProjectNavigationTarget =
+  | { kind: "project"; id: string }
+  | { kind: "folder"; id: string };
+
+export type VisibleProjectNavigationTarget =
+  | {
+      kind: "project";
+      id: string;
+      element: HTMLButtonElement;
+    }
+  | {
+      kind: "folder";
+      id: string;
+      element: HTMLButtonElement;
+      firstProjectId: string;
+      lastProjectId: string;
+      expanded: boolean;
+    };
 
 export function getAdjacentItemId<T extends ItemLike>(
   items: T[],
@@ -64,4 +85,159 @@ export function getFirstVisibleMessageId(container: HTMLElement | null): string 
   }
 
   return messageElements[0]?.dataset.historyMessageId ?? "";
+}
+
+export function getAdjacentVisibleProjectId(
+  container: HTMLElement | null,
+  currentId: string,
+  direction: Direction,
+): string {
+  if (!container) {
+    return "";
+  }
+
+  const projectElements = Array.from(container.querySelectorAll<HTMLElement>(PROJECT_SELECTOR));
+  const projectIds = projectElements
+    .map((element) => element.dataset.projectNavId ?? "")
+    .filter((id) => id.length > 0);
+
+  if (projectIds.length === 0) {
+    return "";
+  }
+
+  const nextProjectId = getAdjacentItemId(
+    projectIds.map((id) => ({ id })),
+    currentId,
+    direction,
+  );
+
+  return nextProjectId ?? "";
+}
+
+function getNavigationTargetKey(target: ProjectNavigationTarget | null): string {
+  return target ? `${target.kind}:${target.id}` : "";
+}
+
+export function getProjectNavigationTargetFromElement(
+  element: HTMLElement | null,
+): ProjectNavigationTarget | null {
+  const navElement = element?.closest<HTMLElement>(PROJECT_NAV_SELECTOR) ?? null;
+  if (!navElement) {
+    return null;
+  }
+
+  if (navElement.dataset.projectNavKind === "project") {
+    const projectId = navElement.dataset.projectNavId ?? "";
+    return projectId ? { kind: "project", id: projectId } : null;
+  }
+
+  if (navElement.dataset.projectNavKind === "folder") {
+    const folderId = navElement.dataset.folderId ?? "";
+    return folderId ? { kind: "folder", id: folderId } : null;
+  }
+
+  return null;
+}
+
+export function getProjectNavigationTargetFromContainer(
+  container: HTMLElement | null,
+): ProjectNavigationTarget | null {
+  if (!container) {
+    return null;
+  }
+  const activeElement = container.querySelector<HTMLElement>(`${PROJECT_NAV_SELECTOR}.active`);
+  return getProjectNavigationTargetFromElement(activeElement);
+}
+
+function getVisibleProjectNavigationTargetFromElement(
+  element: HTMLElement | null,
+): VisibleProjectNavigationTarget | null {
+  const navElement = element?.closest<HTMLElement>(PROJECT_NAV_SELECTOR) ?? null;
+  if (!navElement || !(navElement instanceof HTMLButtonElement)) {
+    return null;
+  }
+
+  if (navElement.dataset.projectNavKind === "project") {
+    const projectId = navElement.dataset.projectNavId ?? "";
+    return projectId
+      ? {
+          kind: "project",
+          id: projectId,
+          element: navElement,
+        }
+      : null;
+  }
+
+  if (navElement.dataset.projectNavKind === "folder") {
+    const folderId = navElement.dataset.folderId ?? "";
+    return folderId
+      ? {
+          kind: "folder",
+          id: folderId,
+          element: navElement,
+          firstProjectId: navElement.dataset.folderFirstProjectId ?? "",
+          lastProjectId: navElement.dataset.folderLastProjectId ?? "",
+          expanded: navElement.getAttribute("aria-expanded") === "true",
+        }
+      : null;
+  }
+
+  return null;
+}
+
+export function getAdjacentVisibleProjectTarget(
+  container: HTMLElement | null,
+  currentTarget: ProjectNavigationTarget | null,
+  direction: Direction,
+): VisibleProjectNavigationTarget | null {
+  if (!container) {
+    return null;
+  }
+
+  const navElements = Array.from(container.querySelectorAll<HTMLElement>(PROJECT_NAV_SELECTOR))
+    .map((element) => getVisibleProjectNavigationTargetFromElement(element))
+    .filter((target): target is VisibleProjectNavigationTarget => target !== null);
+  if (navElements.length === 0) {
+    return null;
+  }
+
+  const currentKey = getNavigationTargetKey(currentTarget);
+  const currentIndex = currentKey
+    ? navElements.findIndex((target) => getNavigationTargetKey(target) === currentKey)
+    : -1;
+
+  if (currentIndex < 0) {
+    return navElements[0] ?? null;
+  }
+
+  const step = direction === "next" ? 1 : -1;
+  for (let index = currentIndex + step; index >= 0 && index < navElements.length; index += step) {
+    const target = navElements[index];
+    if (target) {
+      return target;
+    }
+  }
+
+  return null;
+}
+
+export function getProjectParentFolderTarget(
+  container: HTMLElement | null,
+  projectId: string,
+): VisibleProjectNavigationTarget | null {
+  if (!container || !projectId) {
+    return null;
+  }
+
+  const projectElement = container.querySelector<HTMLElement>(
+    `${PROJECT_SELECTOR}[data-project-nav-id="${CSS.escape(projectId)}"]`,
+  );
+  const parentFolderId = projectElement?.dataset.parentFolderId ?? "";
+  if (!parentFolderId) {
+    return null;
+  }
+  const folderElement = container.querySelector<HTMLElement>(
+    `[data-project-nav-kind="folder"][data-folder-id="${CSS.escape(parentFolderId)}"]`,
+  );
+  return getVisibleProjectNavigationTargetFromElement(folderElement);
 }

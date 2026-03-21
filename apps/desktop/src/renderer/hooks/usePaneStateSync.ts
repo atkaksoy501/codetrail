@@ -18,7 +18,13 @@ import type {
 import type { NonOffRefreshStrategy } from "../app/autoRefresh";
 import { EMPTY_SYSTEM_MESSAGE_REGEX_RULES } from "../app/constants";
 import { createHistorySelection } from "../app/historySelection";
-import type { HistorySelection, HistorySelectionMode, SortDirection } from "../app/types";
+import type {
+  HistorySelection,
+  HistorySelectionMode,
+  ProjectSortField,
+  ProjectViewMode,
+  SortDirection,
+} from "../app/types";
 import { shouldIgnoreAsyncEffectError } from "../lib/asyncEffectUtils";
 import { useCodetrailClient } from "../lib/codetrailClient";
 import { clamp } from "../lib/viewUtils";
@@ -65,6 +71,8 @@ export function usePaneStateSync(args: {
   setSelectedProjectId: Dispatch<SetStateAction<string>>;
   setSelectedSessionId: Dispatch<SetStateAction<string>>;
   setHistoryMode: Dispatch<SetStateAction<HistorySelectionMode>>;
+  setProjectViewMode: Dispatch<SetStateAction<ProjectViewMode>>;
+  setProjectSortField: Dispatch<SetStateAction<ProjectSortField>>;
   setProjectSortDirection: Dispatch<SetStateAction<SortDirection>>;
   setSessionSortDirection: Dispatch<SetStateAction<SortDirection>>;
   setMessageSortDirection: Dispatch<SetStateAction<SortDirection>>;
@@ -101,6 +109,8 @@ export function usePaneStateSync(args: {
     setSelectedProjectId,
     setSelectedSessionId,
     setHistoryMode,
+    setProjectViewMode,
+    setProjectSortField,
     setProjectSortDirection,
     setSessionSortDirection,
     setMessageSortDirection,
@@ -180,6 +190,8 @@ export function usePaneStateSync(args: {
         hydrateIfPresent(paneResponse.monoFontSize, setMonoFontSize);
         hydrateIfPresent(paneResponse.regularFontSize, setRegularFontSize);
         hydrateIfPresent(paneResponse.useMonospaceForAllMessages, setUseMonospaceForAllMessages);
+        hydrateIfPresent(paneResponse.projectViewMode, setProjectViewMode);
+        hydrateIfPresent(paneResponse.projectSortField, setProjectSortField);
         hydrateIfPresent(paneResponse.projectSortDirection, setProjectSortDirection);
         hydrateIfPresent(paneResponse.sessionSortDirection, setSessionSortDirection);
         hydrateIfPresent(paneResponse.messageSortDirection, setMessageSortDirection);
@@ -258,6 +270,8 @@ export function usePaneStateSync(args: {
     setSelectedProjectId,
     setSelectedSessionId,
     setHistoryMode,
+    setProjectViewMode,
+    setProjectSortField,
     setProjectSortDirection,
     setSessionSortDirection,
     setMessageSortDirection,
@@ -297,6 +311,8 @@ export function usePaneStateSync(args: {
       selectedProjectId: paneState.selectedProjectId,
       selectedSessionId: paneState.selectedSessionId,
       historyMode: paneState.historyMode,
+      projectViewMode: paneState.projectViewMode,
+      projectSortField: paneState.projectSortField,
       projectSortDirection: paneState.projectSortDirection,
       sessionSortDirection: paneState.sessionSortDirection,
       messageSortDirection: paneState.messageSortDirection,

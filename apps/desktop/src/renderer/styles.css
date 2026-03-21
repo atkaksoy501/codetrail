@@ -71,7 +71,6 @@
   --syntax-string: #be123c;
   --syntax-number: #0f766e;
   --syntax-comment: #64748b;
-  --session-pane-heading-text: #5c5f72;
   --session-pane-preview-text: #4f5468;
   --session-pane-meta-text: #72788d;
   --session-pane-count-text: #2563eb;
@@ -198,7 +197,6 @@
   --syntax-string: #a6d189;
   --syntax-number: #ef9f76;
   --syntax-comment: #737994;
-  --session-pane-heading-text: #b4bcd2;
   --session-pane-preview-text: #c5cce0;
   --session-pane-meta-text: #a2a9be;
   --session-pane-count-text: #82adff;
@@ -317,7 +315,6 @@
   --syntax-string: #b5bd68;
   --syntax-number: #de935f;
   --syntax-comment: #969896;
-  --session-pane-heading-text: #b8bcba;
   --session-pane-preview-text: #d0d3d1;
   --session-pane-meta-text: #a5a8a6;
   --session-pane-count-text: #b294bb;
@@ -434,7 +431,6 @@
   --syntax-string: #a6e3a1;
   --syntax-number: #fab387;
   --syntax-comment: #6c7086;
-  --session-pane-heading-text: #bac2de;
   --session-pane-preview-text: #cdd6f4;
   --session-pane-meta-text: #a6adc8;
   --session-pane-count-text: #cba6f7;
@@ -1245,6 +1241,13 @@ body.platform-macos .titlebar-left {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
+}
+
+.project-pane-inline-icon {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
 }
 
 .collapse-btn {
@@ -1261,10 +1264,113 @@ body.platform-macos .titlebar-left {
   transition: all 0.2s;
 }
 
+.project-pane-sort-group {
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  overflow: visible;
+  flex-shrink: 0;
+  position: relative;
+}
+
+.project-pane-sort-group:focus-within {
+  border-color: var(--border-active);
+}
+
+.project-pane-sort-group .collapse-btn {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.project-pane-sort-group .collapse-btn + .collapse-btn {
+  border-left: 1px solid var(--border);
+}
+
+.project-pane-sort-group .collapse-btn:hover {
+  background: var(--bg-hover);
+  border-color: transparent;
+}
+
+.project-pane-sort-field-btn {
+  width: 24px;
+  min-width: 24px;
+  padding: 0;
+}
+
+.project-pane-sort-field-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.project-pane-header-menu {
+  min-width: 168px;
+}
+
+.project-pane-overflow-menu {
+  min-width: 188px;
+}
+
+.project-pane-overflow-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.project-pane-overflow-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+}
+
+.project-pane-overflow-item:hover .project-pane-overflow-icon {
+  color: inherit;
+}
+
+.project-pane-overflow-item-danger {
+  color: var(--accent-red);
+}
+
+.project-pane-overflow-item-danger:hover {
+  background: color-mix(in srgb, var(--accent-red) 12%, var(--bg-hover));
+  color: var(--accent-red);
+}
+
+.project-pane-overflow-item-danger .project-pane-overflow-icon {
+  color: var(--accent-red);
+}
+
 .collapse-btn:hover {
   background: var(--bg-hover);
   color: var(--text-primary);
   border-color: var(--border-active);
+}
+
+.project-pane-sort-direction-btn {
+  width: 24px;
+  min-width: 24px;
+}
+
+.project-pane-view-toggle-btn.active {
+  border-color: color-mix(in srgb, var(--accent-orange) 42%, var(--border));
+  background: color-mix(in srgb, var(--accent-orange) 16%, var(--bg-elevated));
+  color: var(--accent-orange);
+}
+
+.project-pane-view-toggle-btn.active:hover {
+  border-color: color-mix(in srgb, var(--accent-orange) 52%, var(--border));
+  background: color-mix(in srgb, var(--accent-orange) 22%, var(--bg-hover));
+  color: var(--accent-orange);
 }
 
 .pane-delete-btn:not(:disabled) {
@@ -1518,6 +1624,7 @@ body.platform-macos .titlebar-left {
   min-height: 0;
   flex: 1;
   overflow-y: auto;
+  overflow-x: hidden;
   padding: 0 8px 8px;
 }
 
@@ -1563,6 +1670,7 @@ body.platform-macos .titlebar-left {
   display: flex;
   flex-direction: column;
   width: 100%;
+  box-sizing: border-box;
   border: 1px solid transparent;
   border-radius: var(--radius-md);
   background: transparent;
@@ -1586,8 +1694,95 @@ body.platform-macos .titlebar-left {
   box-shadow: var(--shadow-sm);
 }
 
+.project-list-tree {
+  padding: 0 8px 8px;
+}
+
 .project-item {
   position: relative;
+}
+
+.project-folder-group {
+  margin-bottom: 2px;
+}
+
+.project-folder-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  margin-bottom: 2px;
+  padding: 7px 10px;
+  text-align: left;
+  color: var(--text-secondary);
+  transition: all 0.15s;
+}
+
+.project-folder-row:hover {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+}
+
+.project-folder-row.active {
+  background: var(--accent-blue-dim);
+  border-color: rgba(37, 99, 235, 0.12);
+  box-shadow: var(--shadow-sm);
+  color: var(--text-primary);
+}
+
+.project-folder-chevron,
+.project-folder-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-tertiary);
+}
+
+.project-folder-label {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text-secondary);
+}
+
+.project-folder-row:hover .project-folder-label {
+  color: var(--text-primary);
+}
+
+.project-folder-row.active .project-folder-label {
+  color: var(--text-primary);
+}
+
+.project-folder-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  margin-left: 8px;
+  border-radius: 999px;
+  padding: 1px 6px;
+  background: color-mix(in srgb, var(--bg-elevated) 82%, transparent);
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.project-folder-children {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
 }
 
 .project-item.recently-updated::before {
@@ -1658,6 +1853,85 @@ body.platform-macos .titlebar-left {
   color: var(--text-tertiary);
 }
 
+.project-tree-item {
+  width: 100%;
+  border-radius: 0;
+  margin-left: 0;
+  margin-bottom: 1px;
+  padding: 7px 12px 7px 20px;
+}
+
+.project-tree-item .project-update-badge {
+  min-width: 30px;
+  padding: 1px 5px;
+  font-size: 10px;
+}
+
+.project-tree-row-main {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+}
+
+.project-tree-name-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+
+.project-tree-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.project-tree-item.active .project-tree-name {
+  color: var(--text-primary);
+}
+
+.project-tree-badge-rail {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  min-width: 0;
+  flex-shrink: 0;
+}
+
+.project-tree-provider-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  padding-inline: 6px;
+  font-size: 10px;
+  line-height: 1.55;
+}
+
+.project-tree-provider-count {
+  opacity: 0.72;
+  font-weight: 500;
+}
+
+.project-tree-update-badge {
+  margin-left: 0;
+  flex-shrink: 0;
+}
+
+.project-folder-update-badge {
+  margin-left: auto;
+  min-width: 30px;
+  padding: 1px 5px;
+  font-size: 10px;
+}
+
 .meta-tag {
   border-radius: 4px;
   font-size: 10.5px;
@@ -1722,11 +1996,6 @@ body.platform-macos .titlebar-left {
 
 .session-item.bookmarks-item .session-preview {
   color: var(--accent-green);
-}
-
-.session-pane .panel-title,
-.session-pane .panel-count {
-  color: var(--session-pane-heading-text);
 }
 
 .session-preview {
