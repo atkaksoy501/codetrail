@@ -318,22 +318,15 @@ export function useHistoryInteractions({
 
   const handleHistorySearchKeyDown = useCallback(
     (event: ReactKeyboardEvent<HTMLInputElement>) => {
-      if (event.key === "Enter") {
-        event.preventDefault();
-        messageListRef.current?.focus({ preventScroll: true });
-        return;
-      }
-      if (event.key !== "Escape") {
+      if (
+        event.key !== "Enter" &&
+        event.key !== "Escape" &&
+        !(event.key === "Tab" && !event.shiftKey)
+      ) {
         return;
       }
       event.preventDefault();
-      const focusTarget =
-        messageListRef.current?.querySelector<HTMLElement>(
-          ".message.focused .message-toggle-button",
-        ) ??
-        messageListRef.current?.querySelector<HTMLElement>(".message .message-toggle-button") ??
-        messageListRef.current?.querySelector<HTMLElement>(".message .message-header");
-      focusTarget?.focus();
+      messageListRef.current?.focus({ preventScroll: true });
     },
     [messageListRef],
   );

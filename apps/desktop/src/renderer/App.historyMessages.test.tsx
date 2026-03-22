@@ -198,7 +198,7 @@ describe("App history messages", () => {
     expect(document.activeElement).toBe(messageList);
   });
 
-  it("lets Ctrl+U/Ctrl+D page messages without leaving the search box and Enter returns focus to messages", async () => {
+  it("lets Ctrl+U/Ctrl+D page messages without leaving the search box and Enter/Escape/Tab return focus to messages", async () => {
     const client = createAppClient();
     const { container } = renderWithClient(<App />, client);
 
@@ -245,6 +245,14 @@ describe("App history messages", () => {
     expect(document.activeElement).toBe(searchInput);
 
     fireEvent.keyDown(searchInput, { key: "Enter" });
+    expect(document.activeElement).toBe(messageList);
+
+    searchInput.focus();
+    fireEvent.keyDown(searchInput, { key: "Escape" });
+    expect(document.activeElement).toBe(messageList);
+
+    searchInput.focus();
+    fireEvent.keyDown(searchInput, { key: "Tab" });
     expect(document.activeElement).toBe(messageList);
   });
 

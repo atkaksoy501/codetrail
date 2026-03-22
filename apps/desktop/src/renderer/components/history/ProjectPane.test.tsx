@@ -207,6 +207,29 @@ describe("ProjectPane", () => {
     expect(screen.queryByRole("button", { name: "Project options" })).toBeNull();
   });
 
+  it("routes Enter, Escape, and Tab from the project search box into the project list", () => {
+    const { container } = renderProjectPane();
+    const searchInput = screen.getByPlaceholderText(SEARCH_PLACEHOLDERS.sidebarProjects);
+    const projectList = container.querySelector<HTMLDivElement>(".list-scroll.project-list");
+
+    expect(projectList).not.toBeNull();
+    if (!projectList) {
+      throw new Error("Expected project list");
+    }
+
+    searchInput.focus();
+    fireEvent.keyDown(searchInput, { key: "Enter" });
+    expect(document.activeElement).toBe(projectList);
+
+    searchInput.focus();
+    fireEvent.keyDown(searchInput, { key: "Escape" });
+    expect(document.activeElement).toBe(projectList);
+
+    searchInput.focus();
+    fireEvent.keyDown(searchInput, { key: "Tab" });
+    expect(document.activeElement).toBe(projectList);
+  });
+
   it("shows a single expand-or-collapse-all control only in tree view", async () => {
     const user = userEvent.setup();
 

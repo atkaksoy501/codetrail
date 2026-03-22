@@ -136,9 +136,25 @@ export function ProjectPane({
     onDeleteProject,
     onDeleteSession,
   } = actions;
+  const projectListContainerRef = useRef<HTMLDivElement | null>(null);
   const selectedProjectRef = useRef<HTMLButtonElement | null>(null);
   const [contextMenu, setContextMenu] = useState<ProjectPaneContextMenuState>(null);
   const projectProviderKey = useMemo(() => projectProviders.join(","), [projectProviders]);
+
+  const setProjectListRefs = useCallback(
+    (element: HTMLDivElement | null) => {
+      projectListContainerRef.current = element;
+      if (!listRef) {
+        return;
+      }
+      if (typeof listRef === "function") {
+        listRef(element);
+        return;
+      }
+      listRef.current = element;
+    },
+    [listRef],
+  );
 
   useEffect(() => {
     if (!selectedProjectId) {
@@ -208,6 +224,18 @@ export function ProjectPane({
 
   const handleFolderFocusSelection = () => {
     onQueueProjectTreeNoopCommit(consumeFocusSelectionBehavior());
+  };
+
+  const handleProjectSearchKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (
+      event.key !== "Enter" &&
+      event.key !== "Escape" &&
+      !(event.key === "Tab" && !event.shiftKey)
+    ) {
+      return;
+    }
+    event.preventDefault();
+    projectListContainerRef.current?.focus({ preventScroll: true });
   };
 
   const renderFlatProjectRow = (project: ProjectSummary) => {
@@ -305,7 +333,7 @@ export function ProjectPane({
         }}
       >
         <span className="project-tree-session-title">{sessionTitle}</span>
-        <span className="project-tree-session-count">{session.messageCount} msgs</span>
+        <span className="project-tree-session-count">{session.messageCount}</span>
       </button>
     );
   };
@@ -526,6 +554,7 @@ export function ProjectPane({
             <input
               className="search-input"
               value={projectQueryInput}
+              onKeyDown={handleProjectSearchKeyDown}
               onChange={(event) => onProjectQueryChange(event.target.value)}
               placeholder={SEARCH_PLACEHOLDERS.sidebarProjects}
             />
@@ -547,7 +576,7 @@ export function ProjectPane({
       </div>
       <div
         className={`list-scroll project-list${viewMode === "tree" ? " project-list-tree" : ""}`}
-        ref={listRef}
+        ref={setProjectListRefs}
         tabIndex={-1}
       >
         {viewMode === "list"
