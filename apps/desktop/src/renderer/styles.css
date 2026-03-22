@@ -2838,14 +2838,65 @@ button svg *,
 }
 
 .message {
-  margin-bottom: 10px;
+  --message-accent: var(--accent-muted);
+  --message-accent-dim: var(--accent-muted-dim);
+  --message-accent-border: var(--accent-muted-border);
+  margin-bottom: 6px;
   animation: fade-in 0.25s ease;
   background: var(--bg-surface);
   border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
+  border-left: 3px solid var(--message-accent);
+  border-radius: var(--radius-sm);
   box-shadow: var(--shadow-card);
   overflow: hidden;
   transition: background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.message:hover {
+  border-color: var(--border-active);
+  border-left-color: var(--message-accent);
+}
+
+.message.category-user {
+  --message-accent: var(--cat-user-text);
+  --message-accent-dim: var(--cat-user-bg);
+  --message-accent-border: var(--cat-user-border);
+}
+
+.message.category-assistant {
+  --message-accent: var(--cat-assistant-text);
+  --message-accent-dim: var(--cat-assistant-bg);
+  --message-accent-border: var(--cat-assistant-border);
+}
+
+.message.category-tool_edit {
+  --message-accent: var(--cat-write-text);
+  --message-accent-dim: var(--cat-write-bg);
+  --message-accent-border: var(--cat-write-border);
+}
+
+.message.category-tool_use {
+  --message-accent: var(--cat-tool-use-text);
+  --message-accent-dim: var(--cat-tool-use-bg);
+  --message-accent-border: var(--cat-tool-use-border);
+}
+
+.message.category-tool_result {
+  --message-accent: var(--cat-tool-result-text);
+  --message-accent-dim: var(--cat-tool-result-bg);
+  --message-accent-border: var(--cat-tool-result-border);
+}
+
+.message.category-thinking {
+  --message-accent: var(--cat-thinking-text);
+  --message-accent-dim: var(--cat-thinking-bg);
+  --message-accent-border: var(--cat-thinking-border);
+}
+
+.message.category-system {
+  --message-accent: var(--cat-system-text);
+  --message-accent-dim: var(--cat-system-bg);
+  --message-accent-border: var(--cat-system-border);
 }
 
 @keyframes fade-in {
@@ -2863,24 +2914,11 @@ button svg *,
 .message-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 6px 12px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-surface);
-  cursor: pointer;
-  transition: border-color 0.2s ease;
-}
-
-.message.collapsed .message-header {
-  border-bottom-color: transparent;
-}
-
-.message-header-left {
-  display: flex;
-  align-items: center;
   gap: 10px;
-  min-width: 0;
+  padding: 8px 12px;
+  background: transparent;
+  cursor: pointer;
+  transition: color 0.2s ease;
 }
 
 .message-toggle-button {
@@ -2888,13 +2926,20 @@ button svg *,
   background: transparent;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   padding: 0;
+  flex: 1 1 auto;
+  justify-content: flex-start;
+  min-width: 0;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+  text-align: left;
 }
 
 .msg-chevron {
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
   color: var(--text-tertiary);
   flex-shrink: 0;
   transition: transform 0.2s ease, color 0.2s ease;
@@ -2909,81 +2954,42 @@ button svg *,
 }
 
 .msg-role {
-  border: 1px solid transparent;
-  border-radius: 5px;
-  padding: 3px 10px;
+  border: 0;
+  border-radius: 4px;
+  padding: 2px 8px;
   text-transform: uppercase;
-  letter-spacing: 0.8px;
+  letter-spacing: 0.5px;
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 600;
   white-space: nowrap;
-}
-
-.msg-role.category-user {
-  background: var(--cat-user-bg);
-  color: var(--cat-user-text);
-  border-color: var(--cat-user-border);
-}
-
-.msg-role.category-assistant {
-  background: var(--cat-assistant-bg);
-  color: var(--cat-assistant-text);
-  border-color: var(--cat-assistant-border);
-}
-
-.msg-role.category-tool_edit {
-  background: var(--cat-write-bg);
-  color: var(--cat-write-text);
-  border-color: var(--cat-write-border);
-}
-
-.msg-role.category-tool_use {
-  background: var(--cat-tool-use-bg);
-  color: var(--cat-tool-use-text);
-  border-color: var(--cat-tool-use-border);
-}
-
-.msg-role.category-tool_result {
-  background: var(--cat-tool-result-bg);
-  color: var(--cat-tool-result-text);
-  border-color: var(--cat-tool-result-border);
-}
-
-.msg-role.category-thinking {
-  background: var(--cat-thinking-bg);
-  color: var(--cat-thinking-text);
-  border-color: var(--cat-thinking-border);
-}
-
-.msg-role.category-system {
-  background: var(--cat-system-bg);
-  color: var(--cat-system-text);
-  border-color: var(--cat-system-border);
+  color: var(--message-accent);
+  background: var(--message-accent-dim);
 }
 
 .message-action-button {
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--bg-surface);
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
   color: var(--text-tertiary);
   font-family: var(--font-sans);
   font-size: 11px;
   font-weight: 500;
   display: inline-flex;
   align-items: center;
-  padding: 4px 10px;
-  box-shadow: var(--shadow-sm);
+  height: 24px;
+  padding: 0 7px;
+  white-space: nowrap;
+  transition: background 0.12s ease, color 0.12s ease, opacity 0.12s ease;
 }
 
 .message-action-button:hover:not(:disabled) {
-  border-color: var(--border-active);
+  background: var(--bg-elevated);
   color: var(--text-primary);
-  box-shadow: var(--shadow-md);
 }
 
 .message-bookmark-button {
-  width: 30px;
-  height: 26px;
+  width: 28px;
+  height: 24px;
   justify-content: center;
   padding: 0;
 }
@@ -2995,13 +3001,14 @@ button svg *,
 
 .message-bookmark-button.is-active {
   color: var(--accent-blue);
-  border-color: rgba(37, 99, 235, 0.35);
   background: var(--accent-blue-dim);
 }
 
 .message-meta {
   display: inline-flex;
   align-items: center;
+  gap: 0;
+  flex-shrink: 0;
 }
 
 .msg-separator {
@@ -3047,16 +3054,56 @@ button svg *,
 .message-header-actions {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 2px;
   flex-shrink: 0;
+  margin-left: auto;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.message:hover .message-header-actions,
+.message:has(:focus-visible) .message-header-actions {
+  opacity: 1;
+}
+
+.message.is-bookmarked .message-header-actions {
+  opacity: 1;
+}
+
+.message.is-bookmarked .message-action-button:not(.message-bookmark-button) {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.message.is-bookmarked:hover .message-action-button:not(.message-bookmark-button),
+.message.is-bookmarked:has(:focus-visible) .message-action-button:not(.message-bookmark-button) {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .message-reveal-button {
   white-space: nowrap;
 }
 
+.message-preview {
+  color: var(--text-secondary);
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1 1 auto;
+  min-width: 0;
+  margin-left: 6px;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.message.collapsed .message-preview {
+  opacity: 1;
+}
+
 .message-body {
-  padding: 16px 18px;
+  padding: 0 12px 10px 39px;
   color: var(--text-secondary);
   font-size: var(--message-font-size);
   line-height: 1.7;
@@ -3073,6 +3120,7 @@ button svg *,
 
 .message.focused {
   border-color: var(--message-focus-border);
+  border-left-color: var(--message-accent);
   box-shadow: 0 0 0 3px var(--message-focus-ring), var(--shadow-card);
 }
 

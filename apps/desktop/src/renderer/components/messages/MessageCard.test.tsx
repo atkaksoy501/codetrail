@@ -77,7 +77,10 @@ describe("MessageCard", () => {
         message={{
           ...message,
           category: "tool_use",
-          content: JSON.stringify({ tool_name: "Read" }),
+          content: JSON.stringify({
+            tool_name: "Read",
+            input: { file_path: "/Users/tcmudemirhan/project/src/app.ts" },
+          }),
         }}
         query=""
         pathRoots={[]}
@@ -89,6 +92,7 @@ describe("MessageCard", () => {
     );
 
     expect(screen.getByText(/Tool Use:/)).toBeInTheDocument();
+    expect(screen.getByText("Read ~/project/src/app.ts")).toBeInTheDocument();
     expect(screen.queryByText("Assistant response body")).toBeNull();
 
     await user.click(screen.getByRole("button", { name: "Expand message" }));

@@ -1,8 +1,8 @@
 import type { MessageCategory } from "@codetrail/core/browser";
-import { type KeyboardEvent, type MouseEvent, type Ref, memo, useMemo } from "react";
+import { type MouseEvent, type Ref, memo, useMemo } from "react";
 
 import { copyTextToClipboard } from "../../lib/clipboard";
-import { formatDate, prettyCategory } from "../../lib/viewUtils";
+import { compactPath, formatDate, prettyCategory } from "../../lib/viewUtils";
 
 import { MessageContent } from "./MessageContent";
 import {
@@ -49,6 +49,10 @@ function MessageCardComponent({
     () => formatMessageTypeLabel(message.category, message.content),
     [message.category, message.content],
   );
+  const previewLabel = useMemo(
+    () => formatMessagePreview(message.category, message.content),
+    [message.category, message.content],
+  );
   const operationDurationLabel = useMemo(
     () =>
       formatOperationDurationLabel(
@@ -58,24 +62,6 @@ function MessageCardComponent({
     [message.operationDurationConfidence, message.operationDurationMs],
   );
   const toggleExpanded = () => onToggleExpanded(message.id, message.category);
-
-  const handleToggleButtonClick = (event: MouseEvent<HTMLButtonElement>) => {
-    event.stopPropagation();
-    toggleExpanded();
-  };
-
-  const handleHeaderKeyDown = (event: KeyboardEvent<HTMLElement>) => {
-    if (event.key !== "Enter" && event.key !== " ") {
-      return;
-    }
-
-    if (event.target !== event.currentTarget) {
-      return;
-    }
-
-    event.preventDefault();
-    toggleExpanded();
-  };
 
   const handleCopyRawButtonClick = (event: MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation();
@@ -101,32 +87,25 @@ function MessageCardComponent({
     <article
       className={`message category-${message.category}${isFocused ? " focused" : ""}${
         isExpanded ? " expanded" : " collapsed"
-      }`}
+      }${isBookmarked ? " is-bookmarked" : ""}`}
       data-history-message-id={message.id}
       ref={cardRef ?? null}
     >
-      <header
-        className="message-header"
-        onClick={toggleExpanded}
-        onKeyDown={handleHeaderKeyDown}
-        tabIndex={0}
-      >
-        <div className="message-header-left">
-          <button
-            type="button"
-            className="message-toggle-button"
-            onClick={handleToggleButtonClick}
-            aria-expanded={isExpanded}
-            aria-label={isExpanded ? "Collapse message" : "Expand message"}
-            title={isExpanded ? "Collapse message" : "Expand message"}
-          >
-            <svg className="msg-chevron" fill="none" viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2" />
-            </svg>
-            <span className={`msg-role category-toggle category-${message.category}`}>
-              {typeLabel}
-            </span>
-          </button>
+      <header className="message-header">
+        <button
+          type="button"
+          className="message-toggle-button"
+          onClick={toggleExpanded}
+          aria-expanded={isExpanded}
+          aria-label={isExpanded ? "Collapse message" : "Expand message"}
+          title={isExpanded ? "Collapse message" : "Expand message"}
+        >
+          <svg className="msg-chevron" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2" />
+          </svg>
+          <span className={`msg-role category-toggle category-${message.category}`}>
+            {typeLabel}
+          </span>
           <div className="message-meta">
             <span className="msg-time">{formatDate(message.createdAt)}</span>
             {operationDurationLabel ? (
@@ -146,7 +125,8 @@ function MessageCardComponent({
               </>
             ) : null}
           </div>
-        </div>
+          {!isExpanded ? <span className="message-preview">{previewLabel}</span> : null}
+        </button>
         <div className="message-header-actions">
           <button
             type="button"
@@ -237,6 +217,47 @@ function formatMessageTypeLabel(category: MessageCategory, content: string): str
     return prettyCategory(category);
   }
   return `${prettyCategory(category)}: ${parsed.prettyName}`;
+}
+
+function formatMessagePreview(category: MessageCategory, content: string): string {
+  if (category === "tool_use") {
+    const parsed = parseToolInvocationPayload(content);
+    if (parsed) {
+      const targetPath = asNonEmptyString(
+        parsed.inputRecord?.file_path ?? parsed.inputRecord?.path ?? parsed.inputRecord?.file,
+      );
+      const command = asNonEmptyString(parsed.inputRecord?.cmd ?? parsed.inputRecord?.command);
+      if (targetPath && parsed.prettyName) {
+        return `${parsed.prettyName} ${compactPath(targetPath)}`;
+      }
+      if (command) {
+        return compactInlineText(command);
+      }
+      if (parsed.prettyName) {
+        return parsed.prettyName;
+      }
+    }
+  }
+
+  if (category === "tool_edit") {
+    const parsed = parseToolEditPayload(content);
+    if (parsed?.filePath) {
+      return `${prettyCategory(category)} ${compactPath(parsed.filePath)}`;
+    }
+    if (parsed?.newText) {
+      return compactInlineText(parsed.newText);
+    }
+  }
+
+  if (category === "tool_result") {
+    const parsed = tryParseJsonRecord(content);
+    const output = asString(parsed?.output);
+    if (output) {
+      return compactInlineText(output);
+    }
+  }
+
+  return compactInlineText(content);
 }
 
 export function isMessageExpandedByDefault(category: MessageCategory): boolean {
@@ -381,4 +402,15 @@ function formatJsonIfParsable(value: string): string {
   } catch {
     return value;
   }
+}
+
+function compactInlineText(value: string, maxLength = 120): string {
+  const compact = value.replace(/\s+/g, " ").trim();
+  if (!compact) {
+    return "Empty message";
+  }
+  if (compact.length <= maxLength) {
+    return compact;
+  }
+  return `${compact.slice(0, maxLength - 1)}…`;
 }
