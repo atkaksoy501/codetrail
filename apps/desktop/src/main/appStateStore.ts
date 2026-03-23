@@ -152,6 +152,14 @@ export class AppStateStore {
   }
 
   setPaneState(value: PaneState): void {
+    this.updatePaneState(value, true);
+  }
+
+  setPaneStateRuntimeOnly(value: PaneState): void {
+    this.updatePaneState(value, false);
+  }
+
+  private updatePaneState(value: PaneState, persist: boolean): void {
     const pane = sanitizePaneState(value, this.state.indexing?.enabledProviders);
     if (!pane) {
       return;
@@ -160,7 +168,9 @@ export class AppStateStore {
       ...this.state,
       pane,
     };
-    this.schedulePersist();
+    if (persist) {
+      this.schedulePersist();
+    }
   }
 
   getIndexingState(): IndexingConfigState | null {

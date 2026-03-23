@@ -1777,6 +1777,12 @@ body.platform-macos .titlebar-left {
   border-radius: 4px;
 }
 
+.virtual-list-spacer {
+  width: 100%;
+  pointer-events: none;
+  flex-shrink: 0;
+}
+
 .list-item,
 .session-item,
 .search-result {

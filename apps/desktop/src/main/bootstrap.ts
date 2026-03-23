@@ -432,7 +432,7 @@ export async function bootstrapMainProcess(
       } as IpcResponse<"ui:getPaneState">;
     },
     "ui:setPaneState": (payload) => {
-      options.appStateStore?.setPaneState(payload);
+      options.appStateStore?.setPaneStateRuntimeOnly(payload);
       return { ok: true };
     },
     "indexer:getConfig": () => {

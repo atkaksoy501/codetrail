@@ -1134,6 +1134,8 @@ export function useHistoryController({
     selectedSessionId: uiSelectedSessionId,
     sessionPaneNavigationItems,
     projectListRef,
+    sortedProjects,
+    projectViewMode,
     canNavigatePages,
     totalPages,
     canGoToNextHistoryPage,

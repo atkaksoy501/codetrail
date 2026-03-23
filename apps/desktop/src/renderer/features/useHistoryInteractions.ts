@@ -21,6 +21,7 @@ import type {
   HistorySelectionCommitMode,
   PendingMessagePageNavigation,
   PendingRevealTarget,
+  ProjectViewMode,
   ProjectSummary,
   SessionPaneNavigationItem,
   SessionSummary,
@@ -36,6 +37,7 @@ import {
   getProjectNavigationTargetFromElement,
   getProjectParentFolderTarget,
 } from "../lib/historyNavigation";
+import { SIDEBAR_LIST_ROW_HEIGHT, scrollVirtualListIndexIntoView } from "../lib/virtualList";
 import { toggleValue } from "../lib/viewUtils";
 import { focusHistoryList } from "./historyControllerShared";
 import { formatProjectDetails, formatSessionDetails } from "./historyCopyFormat";
@@ -91,6 +93,8 @@ export function useHistoryInteractions({
   selectedSessionId,
   sessionPaneNavigationItems,
   projectListRef,
+  sortedProjects,
+  projectViewMode,
   canNavigatePages,
   totalPages,
   canGoToNextHistoryPage,
@@ -154,6 +158,8 @@ export function useHistoryInteractions({
   selectedSessionId: string;
   sessionPaneNavigationItems: SessionPaneNavigationItem[];
   projectListRef: RefObject<HTMLDivElement | null>;
+  sortedProjects: ProjectSummary[];
+  projectViewMode: ProjectViewMode;
   canNavigatePages: boolean;
   totalPages: number;
   canGoToNextHistoryPage: boolean;
@@ -560,6 +566,45 @@ export function useHistoryInteractions({
 
   const selectAdjacentProject = useCallback(
     (direction: Direction) => {
+      if (projectViewMode === "list") {
+        const currentTarget =
+          getProjectNavigationTargetFromElement(
+            document.activeElement instanceof HTMLElement ? document.activeElement : null,
+          ) ?? getProjectNavigationTargetFromContainer(projectListRef.current);
+        const currentProjectId =
+          currentTarget?.kind === "project" ? currentTarget.id : selectedProjectId;
+        const nextProjectId = getAdjacentItemId(sortedProjects, currentProjectId, direction);
+        if (!nextProjectId) {
+          return;
+        }
+
+        pendingProjectPaneFocusCommitModeRef.current = "debounced_project";
+        pendingProjectPaneFocusWaitForKeyboardIdleRef.current = true;
+        const container = projectListRef.current;
+        if (!container) {
+          return;
+        }
+
+        const selector = `[data-project-nav-kind="project"][data-project-nav-id="${CSS.escape(nextProjectId)}"]`;
+        const targetElement = container.querySelector<HTMLElement>(selector);
+        if (targetElement) {
+          focusVisibleProjectTarget(container, targetElement);
+          return;
+        }
+
+        const targetIndex = sortedProjects.findIndex((project) => project.id === nextProjectId);
+        if (targetIndex < 0) {
+          return;
+        }
+
+        scrollVirtualListIndexIntoView(container, targetIndex, SIDEBAR_LIST_ROW_HEIGHT);
+        window.requestAnimationFrame(() => {
+          const nextTargetElement = container.querySelector<HTMLElement>(selector);
+          focusVisibleProjectTarget(container, nextTargetElement);
+        });
+        return;
+      }
+
       const currentTarget =
         getProjectNavigationTargetFromElement(
           document.activeElement instanceof HTMLElement ? document.activeElement : null,
@@ -575,7 +620,15 @@ export function useHistoryInteractions({
 
       focusProjectTargetWithCommitMode(visibleTarget);
     },
-    [focusProjectTargetWithCommitMode, projectListRef],
+    [
+      focusProjectTargetWithCommitMode,
+      pendingProjectPaneFocusCommitModeRef,
+      pendingProjectPaneFocusWaitForKeyboardIdleRef,
+      projectListRef,
+      projectViewMode,
+      selectedProjectId,
+      sortedProjects,
+    ],
   );
 
   const handleProjectTreeArrow = useCallback(

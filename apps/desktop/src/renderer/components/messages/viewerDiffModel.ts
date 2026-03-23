@@ -184,10 +184,7 @@ export function buildDiffViewModel(
   };
 }
 
-function resolveAbsoluteDiffFilePath(
-  filePath: string | null,
-  pathRoots: string[],
-): string | null {
+function resolveAbsoluteDiffFilePath(filePath: string | null, pathRoots: string[]): string | null {
   if (!filePath) {
     return null;
   }
@@ -221,7 +218,7 @@ function resolveAbsoluteDiffFilePath(
   if (candidates.size !== 1) {
     return null;
   }
-  return Array.from(candidates)[0] ?? null;
+  return candidates.values().next().value ?? null;
 }
 
 function collectChangedDiffBlock(
@@ -255,8 +252,7 @@ function shouldRenderInlineDiff(left: string, right: string): boolean {
   const leftTokenCount = left.split(/(\s+)/).filter((part) => part.length > 0).length;
   const rightTokenCount = right.split(/(\s+)/).filter((part) => part.length > 0).length;
   return (
-    leftTokenCount <= INLINE_DIFF_MAX_TOKEN_COUNT &&
-    rightTokenCount <= INLINE_DIFF_MAX_TOKEN_COUNT
+    leftTokenCount <= INLINE_DIFF_MAX_TOKEN_COUNT && rightTokenCount <= INLINE_DIFF_MAX_TOKEN_COUNT
   );
 }
 
@@ -351,6 +347,9 @@ function normalizeRelativePath(value: string): string | null {
       continue;
     }
     if (part === "..") {
+      if (parts.length === 0) {
+        return null;
+      }
       parts.pop();
       continue;
     }

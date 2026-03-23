@@ -208,6 +208,38 @@ describe("AppStateStore", () => {
     });
   });
 
+  it("keeps pane state in memory without writing until flush when updated runtime-only", () => {
+    const fs = createMemoryFs();
+    const fakeTimer = createFakeTimer();
+    const filePath = "/tmp/codetrail-runtime-only-ui-state.json";
+
+    const store = new AppStateStore(filePath, {
+      fs,
+      timer: fakeTimer.timer,
+    });
+
+    store.setPaneStateRuntimeOnly({ projectPaneWidth: 320, sessionPaneWidth: 390 });
+
+    expect(store.getPaneState()).toEqual({
+      projectPaneWidth: 320,
+      sessionPaneWidth: 390,
+      darkShikiTheme: "github-dark-default",
+      lightShikiTheme: "github-light-default",
+      messagePageSize: 50,
+      defaultViewerWrapMode: "nowrap",
+      defaultDiffViewMode: "unified",
+      externalTools: createDefaultExternalTools(),
+    });
+    expect(fakeTimer.timer.setTimeout).not.toHaveBeenCalled();
+    expect(fs.writeFileSync).not.toHaveBeenCalled();
+
+    fakeTimer.runAll();
+    expect(fs.writeFileSync).not.toHaveBeenCalled();
+
+    store.flush();
+    expect(fs.writeFileSync).toHaveBeenCalledTimes(1);
+  });
+
   it("falls back to empty state for malformed payloads", () => {
     const filePath = "/tmp/codetrail-malformed-ui-state.json";
     const fs = createMemoryFs({

@@ -261,7 +261,17 @@ function getRequiredHandler(handlers: HandlerMap, channel: string): Handler {
 describe("bootstrapMainProcess", () => {
   let handlers: HandlerMap;
   let setPaneState: ReturnType<typeof vi.fn>;
+  let setPaneStateRuntimeOnly: ReturnType<typeof vi.fn>;
   let setIndexingState: ReturnType<typeof vi.fn>;
+  type AppStateStoreMock = Pick<
+    AppStateStore,
+    | "getFilePath"
+    | "getPaneState"
+    | "setPaneState"
+    | "setPaneStateRuntimeOnly"
+    | "getIndexingState"
+    | "setIndexingState"
+  >;
   const paneState: PaneState = {
     projectPaneWidth: 220,
     sessionPaneWidth: 480,
@@ -303,6 +313,7 @@ describe("bootstrapMainProcess", () => {
   beforeEach(() => {
     handlers = {};
     setPaneState = vi.fn();
+    setPaneStateRuntimeOnly = vi.fn();
     setIndexingState = vi.fn();
     vi.clearAllMocks();
     mockFileWatcherInstances.length = 0;
@@ -338,10 +349,7 @@ describe("bootstrapMainProcess", () => {
   });
 
   it("wires all handlers and delegates query/indexing operations", async () => {
-    const appStateStore: Pick<
-      AppStateStore,
-      "getFilePath" | "getPaneState" | "setPaneState" | "getIndexingState" | "setIndexingState"
-    > = {
+    const appStateStore: AppStateStoreMock = {
       getFilePath: () => "/tmp/state.json",
       getPaneState: () => paneState,
       getIndexingState: () => ({
@@ -349,6 +357,7 @@ describe("bootstrapMainProcess", () => {
         removeMissingSessionsDuringIncrementalIndexing: false,
       }),
       setPaneState,
+      setPaneStateRuntimeOnly,
       setIndexingState,
     };
 
@@ -574,7 +583,10 @@ describe("bootstrapMainProcess", () => {
       runStartupIndexing: false,
     });
 
-    const result = await getRequiredHandler(handlers, "editor:listAvailable")({
+    const result = await getRequiredHandler(
+      handlers,
+      "editor:listAvailable",
+    )({
       externalTools: [
         {
           id: "custom:1",
@@ -607,7 +619,10 @@ describe("bootstrapMainProcess", () => {
     await bootstrapMainProcess({ runStartupIndexing: false });
 
     await expect(
-      getRequiredHandler(handlers, "editor:open")({
+      getRequiredHandler(
+        handlers,
+        "editor:open",
+      )({
         kind: "file",
         filePath: "../outside.txt",
       }),
@@ -617,11 +632,8 @@ describe("bootstrapMainProcess", () => {
     });
   });
 
-  it("hydrates and persists pane state through ui handlers", async () => {
-    const appStateStore: Pick<
-      AppStateStore,
-      "getFilePath" | "getPaneState" | "setPaneState" | "getIndexingState" | "setIndexingState"
-    > = {
+  it("hydrates pane state through ui handlers", async () => {
+    const appStateStore: AppStateStoreMock = {
       getFilePath: () => "/tmp/state.json",
       getPaneState: () => paneState,
       getIndexingState: () => ({
@@ -629,6 +641,7 @@ describe("bootstrapMainProcess", () => {
         removeMissingSessionsDuringIncrementalIndexing: false,
       }),
       setPaneState,
+      setPaneStateRuntimeOnly,
       setIndexingState,
     };
 
@@ -644,6 +657,7 @@ describe("bootstrapMainProcess", () => {
       sessionPaneCollapsed: true,
       singleClickFoldersExpand: true,
       singleClickProjectsExpand: false,
+      hideSessionsPaneInTreeView: null,
       projectProviders: ["claude", "codex"],
       historyCategories: ["assistant"],
       expandedByDefaultCategories: ["assistant", "tool_use"],
@@ -701,7 +715,8 @@ describe("bootstrapMainProcess", () => {
     expect(getRequiredHandler(handlers, "ui:setPaneState")(updated)).toEqual({
       ok: true,
     });
-    expect(setPaneState).toHaveBeenCalledWith(updated);
+    expect(setPaneStateRuntimeOnly).toHaveBeenCalledWith(updated);
+    expect(setPaneState).not.toHaveBeenCalled();
   });
 
   it("filters queries and watcher roots to enabled providers and runs a full incremental refresh on provider changes", async () => {
@@ -714,13 +729,11 @@ describe("bootstrapMainProcess", () => {
       enabledProviders: ["claude", "cursor"] as Provider[],
       removeMissingSessionsDuringIncrementalIndexing: false,
     };
-    const appStateStore: Pick<
-      AppStateStore,
-      "getFilePath" | "getPaneState" | "setPaneState" | "getIndexingState" | "setIndexingState"
-    > = {
+    const appStateStore: AppStateStoreMock = {
       getFilePath: () => "/tmp/state.json",
       getPaneState: () => currentPaneState,
       setPaneState: vi.fn(),
+      setPaneStateRuntimeOnly: vi.fn(),
       getIndexingState: () => currentIndexingState,
       setIndexingState: vi.fn((value) => {
         currentIndexingState = value;
@@ -771,6 +784,35 @@ describe("bootstrapMainProcess", () => {
     expect(mockEnqueue).toHaveBeenCalledWith({ force: false }, { source: "manual_incremental" });
   });
 
+  it("updates pane state in memory without scheduling persistence from ui:setPaneState", async () => {
+    const setPaneStatePersisted = vi.fn();
+    const appStateStore: AppStateStoreMock = {
+      getFilePath: () => "/tmp/state.json",
+      getPaneState: () => paneState,
+      getIndexingState: () => ({
+        enabledProviders: ["claude", "codex", "gemini", "cursor", "copilot"],
+        removeMissingSessionsDuringIncrementalIndexing: false,
+      }),
+      setIndexingState: vi.fn(),
+      setPaneState: setPaneStatePersisted,
+      setPaneStateRuntimeOnly,
+    };
+
+    await bootstrapMainProcess({
+      appStateStore: appStateStore as AppStateStore,
+      runStartupIndexing: false,
+    });
+
+    const updated = {
+      ...paneState,
+      projectPaneWidth: 300,
+      sessionPaneWidth: 520,
+    };
+    expect(getRequiredHandler(handlers, "ui:setPaneState")(updated)).toEqual({ ok: true });
+    expect(setPaneStateRuntimeOnly).toHaveBeenCalledWith(updated);
+    expect(setPaneStatePersisted).not.toHaveBeenCalled();
+  });
+
   it("purges disabled providers and then runs a full incremental refresh", async () => {
     const currentPaneState: PaneState = {
       ...paneState,
@@ -781,13 +823,11 @@ describe("bootstrapMainProcess", () => {
       enabledProviders: ["claude", "codex", "cursor"] as Provider[],
       removeMissingSessionsDuringIncrementalIndexing: false,
     };
-    const appStateStore: Pick<
-      AppStateStore,
-      "getFilePath" | "getPaneState" | "setPaneState" | "getIndexingState" | "setIndexingState"
-    > = {
+    const appStateStore: AppStateStoreMock = {
       getFilePath: () => "/tmp/state.json",
       getPaneState: () => currentPaneState,
       setPaneState: vi.fn(),
+      setPaneStateRuntimeOnly: vi.fn(),
       getIndexingState: () => currentIndexingState,
       setIndexingState: vi.fn((value) => {
         currentIndexingState = value;
