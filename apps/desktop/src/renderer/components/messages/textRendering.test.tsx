@@ -486,7 +486,13 @@ describe("theme-aware Shiki rendering", () => {
     document.documentElement.dataset.defaultDiffViewMode = "split";
     render(
       <DiffBlock
-        codeValue={["diff --git a/a.ts b/a.ts", "--- a/a.ts", "+++ b/a.ts", "@@ -1,2000 +1,2000 @@", ...lines].join("\n")}
+        codeValue={[
+          "diff --git a/a.ts b/a.ts",
+          "--- a/a.ts",
+          "+++ b/a.ts",
+          "@@ -1,2000 +1,2000 @@",
+          ...lines,
+        ].join("\n")}
         filePath="/Users/acme/repo/a.ts"
       />,
     );

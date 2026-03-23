@@ -4,12 +4,12 @@ import type { ProjectSummary, SessionSummary } from "../../app/types";
 import { useVirtualListWindow } from "../../hooks/useVirtualListWindow";
 import { getProjectGroupId } from "../../lib/projectTree";
 import { SEARCH_PLACEHOLDERS } from "../../lib/searchLabels";
+import { compactPath, deriveSessionTitle, formatDate, prettyProvider } from "../../lib/viewUtils";
 import {
   SIDEBAR_LIST_OVERSCAN,
   SIDEBAR_LIST_ROW_HEIGHT,
   SIDEBAR_LIST_VIRTUALIZATION_THRESHOLD,
 } from "../../lib/virtualList";
-import { compactPath, deriveSessionTitle, formatDate, prettyProvider } from "../../lib/viewUtils";
 import { ToolbarIcon } from "../ToolbarIcon";
 import { HistoryListContextMenu } from "./HistoryListContextMenu";
 import type { ProjectPaneContextMenuState, ProjectPaneProps } from "./ProjectPane.types";

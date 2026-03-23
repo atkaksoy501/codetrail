@@ -191,7 +191,7 @@ export function useHistoryDerivedState({
     historyMode === "bookmarks"
       ? bookmarksResponse.totalCount
       : historyMode === "session"
-      ? (selectedSession?.bookmarkCount ?? 0)
+        ? (selectedSession?.bookmarkCount ?? 0)
         : selectedProjectBookmarkCount;
 
   const sessionPaneNavigationItems = useMemo<SessionPaneNavigationItem[]>(() => {
@@ -228,8 +228,8 @@ export function useHistoryDerivedState({
       historyMode === "bookmarks"
         ? bookmarksResponse.filteredCount
         : historyMode === "project_all"
-        ? (projectCombinedDetail?.totalCount ?? 0)
-        : (sessionDetail?.totalCount ?? 0);
+          ? (projectCombinedDetail?.totalCount ?? 0)
+          : (sessionDetail?.totalCount ?? 0);
     if (totalCount === 0) {
       return 1;
     }

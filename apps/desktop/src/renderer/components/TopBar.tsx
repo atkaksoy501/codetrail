@@ -47,6 +47,8 @@ function useToolbarDropdownKeyboardNavigation({
 }) {
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const itemRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const navigationModeRef = useRef<"pointer" | "keyboard">("pointer");
+  const hoveredIndexRef = useRef<number | null>(null);
   const [focusedIndex, setFocusedIndex] = useState<number | null>(null);
 
   const resolveInitialIndex = useCallback(
@@ -79,6 +81,8 @@ function useToolbarDropdownKeyboardNavigation({
 
   const openDropdown = useCallback(
     (preferredIndex?: number) => {
+      navigationModeRef.current = "pointer";
+      hoveredIndexRef.current = null;
       setFocusedIndex(resolveInitialIndex(preferredIndex));
       setOpen(true);
     },
@@ -86,6 +90,8 @@ function useToolbarDropdownKeyboardNavigation({
   );
 
   const closeDropdownMenu = useCallback(() => {
+    navigationModeRef.current = "pointer";
+    hoveredIndexRef.current = null;
     setFocusedIndex(null);
     closeDropdown();
   }, [closeDropdown]);
@@ -103,7 +109,9 @@ function useToolbarDropdownKeyboardNavigation({
         return;
       }
       setFocusedIndex((current) => {
-        const startIndex = current ?? resolveInitialIndex() ?? 0;
+        navigationModeRef.current = "keyboard";
+        const startIndex = current ?? hoveredIndexRef.current ?? resolveInitialIndex() ?? 0;
+        hoveredIndexRef.current = null;
         return wrapMenuIndex(startIndex + delta, itemCount);
       });
     },
@@ -144,24 +152,34 @@ function useToolbarDropdownKeyboardNavigation({
     (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
       if (event.key === "ArrowDown") {
         event.preventDefault();
-        setFocusedIndex(wrapMenuIndex(index + 1, itemCount));
+        navigationModeRef.current = "keyboard";
+        const startIndex = hoveredIndexRef.current ?? index;
+        hoveredIndexRef.current = null;
+        setFocusedIndex(wrapMenuIndex(startIndex + 1, itemCount));
         return;
       }
 
       if (event.key === "ArrowUp") {
         event.preventDefault();
-        setFocusedIndex(wrapMenuIndex(index - 1, itemCount));
+        navigationModeRef.current = "keyboard";
+        const startIndex = hoveredIndexRef.current ?? index;
+        hoveredIndexRef.current = null;
+        setFocusedIndex(wrapMenuIndex(startIndex - 1, itemCount));
         return;
       }
 
       if (event.key === "Home") {
         event.preventDefault();
+        navigationModeRef.current = "keyboard";
+        hoveredIndexRef.current = null;
         setFocusedIndex(0);
         return;
       }
 
       if (event.key === "End") {
         event.preventDefault();
+        navigationModeRef.current = "keyboard";
+        hoveredIndexRef.current = null;
         setFocusedIndex(itemCount - 1);
         return;
       }
@@ -183,6 +201,17 @@ function useToolbarDropdownKeyboardNavigation({
     itemRefs.current[index] = node;
   }, []);
 
+  const setHoveredIndex = useCallback((index: number | null) => {
+    hoveredIndexRef.current = index;
+  }, []);
+
+  const activatePointerIndex = useCallback((index: number) => {
+    const changed = navigationModeRef.current !== "pointer" || hoveredIndexRef.current !== index;
+    navigationModeRef.current = "pointer";
+    hoveredIndexRef.current = index;
+    return changed;
+  }, []);
+
   return {
     triggerRef,
     openDropdown,
@@ -190,6 +219,8 @@ function useToolbarDropdownKeyboardNavigation({
     handleTriggerKeyDown,
     handleItemKeyDown,
     setItemRef,
+    activatePointerIndex,
+    setHoveredIndex,
   };
 }
 
@@ -296,6 +327,8 @@ function ThemeDropdown({
     handleTriggerKeyDown,
     handleItemKeyDown,
     setItemRef,
+    activatePointerIndex,
+    setHoveredIndex,
   } = useToolbarDropdownKeyboardNavigation({
     open,
     setOpen,
@@ -330,7 +363,10 @@ function ThemeDropdown({
         <div
           className="tb-dropdown-menu tb-dropdown-menu-wide tb-dropdown-menu-right tb-dropdown-menu-scrollable"
           aria-label="Theme"
-          onMouseLeave={restorePreview}
+          onMouseLeave={() => {
+            setHoveredIndex(null);
+            restorePreview();
+          }}
         >
           {THEME_GROUPS.map((group, groupIndex) => (
             <Fragment key={group.value}>
@@ -350,6 +386,7 @@ function ThemeDropdown({
                       option.value === value ? " selected" : ""
                     }`}
                     onFocus={() => {
+                      setHoveredIndex(null);
                       if (option.value === value) {
                         restorePreview();
                         return;
@@ -357,7 +394,10 @@ function ThemeDropdown({
                       previewActiveRef.current = true;
                       onPreview(option.value);
                     }}
-                    onMouseEnter={() => {
+                    onMouseMove={() => {
+                      if (!activatePointerIndex(optionIndex)) {
+                        return;
+                      }
                       if (option.value === value) {
                         restorePreview();
                         return;
@@ -369,6 +409,7 @@ function ThemeDropdown({
                       handleItemKeyDown(event, optionIndex);
                     }}
                     onClick={() => {
+                      setHoveredIndex(null);
                       previewActiveRef.current = false;
                       onChange(option.value);
                       setOpen(false);
@@ -423,6 +464,8 @@ function ShikiThemeDropdown({
     handleTriggerKeyDown,
     handleItemKeyDown,
     setItemRef,
+    activatePointerIndex,
+    setHoveredIndex,
   } = useToolbarDropdownKeyboardNavigation({
     open,
     setOpen,
@@ -457,7 +500,10 @@ function ShikiThemeDropdown({
         <div
           className="tb-dropdown-menu tb-dropdown-menu-wide tb-dropdown-menu-right tb-dropdown-menu-scrollable"
           aria-label="Text viewer theme"
-          onMouseLeave={restorePreview}
+          onMouseLeave={() => {
+            setHoveredIndex(null);
+            restorePreview();
+          }}
         >
           <div className="tb-dropdown-group-label">{shikiThemeGroup.label}</div>
           {shikiThemeGroup.options.map((option) => (
@@ -475,6 +521,7 @@ function ShikiThemeDropdown({
                 option.value === value ? " selected" : ""
               }`}
               onFocus={() => {
+                setHoveredIndex(null);
                 if (option.value === value) {
                   restorePreview();
                   return;
@@ -482,7 +529,13 @@ function ShikiThemeDropdown({
                 previewActiveRef.current = true;
                 onPreview(option.value);
               }}
-              onMouseEnter={() => {
+              onMouseMove={() => {
+                const optionIndex = shikiThemeGroup.options.findIndex(
+                  (item) => item.value === option.value,
+                );
+                if (!activatePointerIndex(optionIndex)) {
+                  return;
+                }
                 if (option.value === value) {
                   restorePreview();
                   return;
@@ -497,6 +550,7 @@ function ShikiThemeDropdown({
                 handleItemKeyDown(event, optionIndex);
               }}
               onClick={() => {
+                setHoveredIndex(null);
                 previewActiveRef.current = false;
                 onChange(option.value);
                 setOpen(false);

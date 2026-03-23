@@ -202,7 +202,9 @@ export function HistoryLayout({
       />
 
       <div
-        className={history.projectPaneCollapsed ? "pane-resizer pane-resizer-disabled" : "pane-resizer"}
+        className={
+          history.projectPaneCollapsed ? "pane-resizer pane-resizer-disabled" : "pane-resizer"
+        }
         onPointerDown={history.projectPaneCollapsed ? undefined : history.beginResize("project")}
       />
 
@@ -222,7 +224,8 @@ export function HistoryLayout({
             // moves ahead during keyboard debounce.
             canCopySession={history.historyMode === "session" && !!history.selectedSession}
             canOpenSessionLocation={
-              history.historyMode === "session" && Boolean(history.selectedSession?.filePath?.trim())
+              history.historyMode === "session" &&
+              Boolean(history.selectedSession?.filePath?.trim())
             }
             canDeleteSession={history.historyMode === "session" && !!history.selectedSession}
             onToggleCollapsed={() => history.setSessionPaneCollapsed((value) => !value)}

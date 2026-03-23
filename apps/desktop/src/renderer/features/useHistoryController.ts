@@ -510,7 +510,11 @@ export function useHistoryController({
       pendingProjectPaneFocusWaitForKeyboardIdleRef.current = false;
       queueSelectionNoopCommit(commitMode, waitForKeyboardIdle);
     },
-    [queueSelectionNoopCommit],
+    [
+      pendingProjectPaneFocusCommitModeRef,
+      pendingProjectPaneFocusWaitForKeyboardIdleRef,
+      queueSelectionNoopCommit,
+    ],
   );
 
   useEffect(() => {
@@ -989,6 +993,9 @@ export function useHistoryController({
   });
 
   useEffect(() => {
+    const bookmarkStateRefreshKey = `${bookmarkStatesRefreshNonce}:${refreshCounter}`;
+    void bookmarkStateRefreshKey;
+
     if (!selectedProjectId) {
       setVisibleBookmarkedMessageIds([]);
       return;

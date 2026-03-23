@@ -124,9 +124,7 @@ export type QueryService = {
   ) => IpcResponse<"projects:getCombinedDetail">;
   deleteProject: (request: IpcRequest<"projects:delete">) => IpcResponse<"projects:delete">;
   listSessions: (request: IpcRequest<"sessions:list">) => IpcResponse<"sessions:list">;
-  listSessionsMany: (
-    request: IpcRequest<"sessions:listMany">,
-  ) => IpcResponse<"sessions:listMany">;
+  listSessionsMany: (request: IpcRequest<"sessions:listMany">) => IpcResponse<"sessions:listMany">;
   getSessionDetail: (
     request: IpcRequest<"sessions:getDetail">,
   ) => IpcResponse<"sessions:getDetail">;
@@ -1081,7 +1079,7 @@ function loadMessageDetailOverview(args: {
         args.focusTarget.created_at,
         args.focusTarget.id,
       ]
-    : [-9223372036854775808, -9223372036854775808, "", "", ""];
+    : [0, 0, "", "", ""];
   const overviewRow = args.db
     .prepare(
       `SELECT
@@ -1093,11 +1091,7 @@ function loadMessageDetailOverview(args: {
       ${args.fromSql}
       WHERE ${args.whereClause}`,
     )
-    .get(
-      args.focusTarget ? 1 : 0,
-      ...focusParams,
-      ...args.params,
-    ) as
+    .get(args.focusTarget ? 1 : 0, ...focusParams, ...args.params) as
     | {
         total_count: number;
         focus_index: number | null;

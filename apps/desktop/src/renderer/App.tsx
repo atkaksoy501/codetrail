@@ -719,7 +719,8 @@ export function App({
             mainView === "search" ? "search-layout" : ""
           }${history.projectPaneCollapsed ? " projects-collapsed" : ""}${
             history.sessionPaneCollapsed ? " sessions-collapsed" : ""
-          }${history.hideSessionsPaneForTreeView ? " tree-sessions-hidden" : ""
+          }${
+            history.hideSessionsPaneForTreeView ? " tree-sessions-hidden" : ""
           }${isHistoryLayout && !history.paneStateHydrated ? " pane-layout-hydrating" : ""}`}
           style={history.workspaceStyle}
           aria-busy={isHistoryLayout && !history.paneStateHydrated}

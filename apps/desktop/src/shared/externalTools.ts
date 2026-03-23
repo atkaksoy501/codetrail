@@ -1,7 +1,4 @@
-import {
-  KNOWN_EXTERNAL_APP_VALUES,
-  type KnownExternalAppId,
-} from "@codetrail/core/browser";
+import { KNOWN_EXTERNAL_APP_VALUES, type KnownExternalAppId } from "@codetrail/core/browser";
 
 export { KNOWN_EXTERNAL_APP_VALUES };
 export type ExternalToolId = string;

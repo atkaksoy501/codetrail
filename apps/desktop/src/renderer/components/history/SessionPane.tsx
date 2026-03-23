@@ -3,12 +3,12 @@ import { type Ref, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import type { SessionSummary } from "../../app/types";
 import { useClickOutside } from "../../hooks/useClickOutside";
 import { useVirtualListWindow } from "../../hooks/useVirtualListWindow";
+import { deriveSessionTitle, formatDate, sessionActivityOf } from "../../lib/viewUtils";
 import {
   SIDEBAR_LIST_OVERSCAN,
   SIDEBAR_LIST_ROW_HEIGHT,
   SIDEBAR_LIST_VIRTUALIZATION_THRESHOLD,
 } from "../../lib/virtualList";
-import { deriveSessionTitle, formatDate, sessionActivityOf } from "../../lib/viewUtils";
 import { ToolbarIcon } from "../ToolbarIcon";
 import { HistoryListContextMenu } from "./HistoryListContextMenu";
 import { scheduleSelectedSessionScroll } from "./sessionAutoScroll";

@@ -156,7 +156,12 @@ export function useHistoryViewportEffects({
 
     messageListRef.current.focus({ preventScroll: true });
     setPendingMessageAreaFocus(false);
-  }, [messageListRef, pendingMessageAreaFocus, setPendingMessageAreaFocus, visibleFocusedMessageId]);
+  }, [
+    messageListRef,
+    pendingMessageAreaFocus,
+    setPendingMessageAreaFocus,
+    visibleFocusedMessageId,
+  ]);
 
   useEffect(() => {
     if (!pendingMessagePageNavigation) {

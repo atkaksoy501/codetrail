@@ -466,7 +466,11 @@ function tableExists(db: SqliteDatabase, tableName: string): boolean {
   return row?.found === 1;
 }
 
-function tableHasColumns(db: SqliteDatabase, tableName: string, requiredColumns: string[]): boolean {
+function tableHasColumns(
+  db: SqliteDatabase,
+  tableName: string,
+  requiredColumns: string[],
+): boolean {
   const columns = new Set(
     (
       db.prepare(`PRAGMA table_xinfo(${JSON.stringify(tableName)})`).all() as Array<{

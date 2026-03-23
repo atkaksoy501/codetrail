@@ -21,8 +21,8 @@ import type {
   HistorySelectionCommitMode,
   PendingMessagePageNavigation,
   PendingRevealTarget,
-  ProjectViewMode,
   ProjectSummary,
+  ProjectViewMode,
   SessionPaneNavigationItem,
   SessionSummary,
 } from "../app/types";
@@ -37,8 +37,8 @@ import {
   getProjectNavigationTargetFromElement,
   getProjectParentFolderTarget,
 } from "../lib/historyNavigation";
-import { SIDEBAR_LIST_ROW_HEIGHT, scrollVirtualListIndexIntoView } from "../lib/virtualList";
 import { toggleValue } from "../lib/viewUtils";
+import { SIDEBAR_LIST_ROW_HEIGHT, scrollVirtualListIndexIntoView } from "../lib/virtualList";
 import { focusHistoryList } from "./historyControllerShared";
 import { formatProjectDetails, formatSessionDetails } from "./historyCopyFormat";
 

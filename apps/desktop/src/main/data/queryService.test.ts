@@ -616,9 +616,7 @@ describe("queryService in-memory", () => {
       })),
       listProjectBookmarks: vi.fn((projectId: string, options?: unknown) => {
         const typedOptions =
-          typeof options === "object" && options !== null
-            ? (options as { offset?: number })
-            : {};
+          typeof options === "object" && options !== null ? (options as { offset?: number }) : {};
         if (projectId !== "project_1") {
           return [];
         }
@@ -693,9 +691,7 @@ describe("queryService in-memory", () => {
     const bookmarkStore = createBookmarkStoreMock({
       countProjectBookmarks: vi.fn((projectId: string, options?: unknown) => {
         const typedOptions =
-          typeof options === "object" && options !== null
-            ? (options as { query?: string })
-            : {};
+          typeof options === "object" && options !== null ? (options as { query?: string }) : {};
         if (projectId !== "project_1") {
           return 0;
         }

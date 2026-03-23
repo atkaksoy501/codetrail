@@ -250,6 +250,7 @@ export function useHistoryDataEffects({
     selectedProjectId,
     setBookmarksLoadedProjectId,
     setBookmarksResponse,
+    setSessionPage,
   ]);
 
   const refreshInvalidationKey = useMemo(
