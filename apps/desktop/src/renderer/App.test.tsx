@@ -746,6 +746,78 @@ describe("App shell", () => {
     expect(screen.queryByRole("button", { name: /Switch to All Sessions/i })).toBeNull();
   });
 
+  it("does not start resizing the Sessions pane while it is collapsed", async () => {
+    installScrollIntoViewMock();
+    const client = createAppClient();
+    const { container } = renderWithClient(
+      <App
+        initialPaneState={
+          {
+            selectedProjectId: "project_1",
+            historyMode: "project_all",
+          } as PaneStateSnapshot
+        }
+      />,
+      client,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Project One/i })).toBeInTheDocument();
+    });
+
+    const resizers = Array.from(container.querySelectorAll<HTMLElement>(".pane-resizer"));
+    expect(resizers).toHaveLength(2);
+    const sessionResizer = resizers[1];
+    expect(sessionResizer).toBeDefined();
+    if (!sessionResizer) {
+      throw new Error("Expected session resizer");
+    }
+    expect(sessionResizer.classList.contains("pane-resizer-disabled")).toBe(true);
+
+    fireEvent.pointerDown(sessionResizer, { clientX: 500 });
+    window.dispatchEvent(new PointerEvent("pointermove", { clientX: 620 }));
+
+    expect(document.body.classList.contains("resizing-panels")).toBe(false);
+
+    const workspace = container.querySelector<HTMLElement>(".workspace.history-layout");
+    expect(workspace?.style.getPropertyValue("--session-pane-width")).toBe("36px");
+  });
+
+  it("hides the Sessions pane in tree view when toggled from project options", async () => {
+    installScrollIntoViewMock();
+    const user = userEvent.setup();
+    const client = createAppClient();
+    const { container } = renderWithClient(
+      <App
+        initialPaneState={
+          {
+            projectViewMode: "tree",
+            selectedProjectId: "project_1",
+            historyMode: "project_all",
+          } as PaneStateSnapshot
+        }
+      />,
+      client,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Project One/i })).toBeInTheDocument();
+    });
+
+    expect(container.querySelector(".session-pane")).not.toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Project options" }));
+    await user.click(screen.getByRole("button", { name: "Hide Sessions pane in tree view" }));
+
+    await waitFor(() => {
+      expect(container.querySelector(".session-pane")).toBeNull();
+    });
+
+    const workspace = container.querySelector<HTMLElement>(".workspace.history-layout");
+    expect(workspace?.classList.contains("tree-sessions-hidden")).toBe(true);
+    expect(container.querySelectorAll(".pane-resizer")).toHaveLength(1);
+  });
+
   it("opens the project delete dialog with JSONL-specific guidance and invokes project deletion", async () => {
     installScrollIntoViewMock();
     installDialogMock();

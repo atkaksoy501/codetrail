@@ -73,7 +73,11 @@ export function ProjectPane({
     listRef,
   } = data;
   const { sortField, sortDirection, sessionSortDirection = "desc" } = sorting;
-  const { singleClickFoldersExpand = true, singleClickProjectsExpand = false } = preferences;
+  const {
+    singleClickFoldersExpand = true,
+    singleClickProjectsExpand = false,
+    hideSessionsPaneInTreeView = false,
+  } = preferences;
   const { canCopyProjectDetails, canOpenProjectLocation, canDeleteProject } = capabilities;
   const {
     onToggleCollapsed,
@@ -83,6 +87,7 @@ export function ProjectPane({
     onToggleSortDirection,
     onToggleSessionSortDirection = () => {},
     onToggleViewMode,
+    onToggleHideSessionsPaneInTreeView,
     onToggleSingleClickFoldersExpand,
     onToggleSingleClickProjectsExpand,
     onCopyProjectDetails,
@@ -493,6 +498,7 @@ export function ProjectPane({
         viewMode={viewMode}
         singleClickFoldersExpand={singleClickFoldersExpand}
         singleClickProjectsExpand={singleClickProjectsExpand}
+        hideSessionsPaneInTreeView={hideSessionsPaneInTreeView}
         allVisibleFoldersExpanded={allVisibleFoldersExpanded}
         canCopyProjectDetails={canCopyProjectDetails}
         canOpenProjectLocation={canOpenProjectLocation}
@@ -502,6 +508,7 @@ export function ProjectPane({
         onToggleSortDirection={onToggleSortDirection}
         onToggleSessionSortDirection={onToggleSessionSortDirection}
         onToggleViewMode={onToggleViewMode}
+        onToggleHideSessionsPaneInTreeView={onToggleHideSessionsPaneInTreeView}
         onToggleAllFolders={handleToggleAllFolders}
         onToggleSingleClickFoldersExpand={onToggleSingleClickFoldersExpand}
         onToggleSingleClickProjectsExpand={onToggleSingleClickProjectsExpand}

@@ -85,6 +85,7 @@ function createProjectPaneProps(
     onSetSortField: vi.fn(),
     onToggleSortDirection: vi.fn(),
     onToggleViewMode: vi.fn(),
+    onToggleHideSessionsPaneInTreeView: vi.fn(),
     onToggleSingleClickFoldersExpand: vi.fn(),
     onToggleSingleClickProjectsExpand: vi.fn(),
     onCopyProjectDetails: vi.fn(),
@@ -136,6 +137,7 @@ describe("ProjectPane", () => {
     const onSetSortField = vi.fn();
     const onToggleSortDirection = vi.fn();
     const onToggleViewMode = vi.fn();
+    const onToggleHideSessionsPaneInTreeView = vi.fn();
     const onProjectQueryChange = vi.fn();
     const onToggleProvider = vi.fn();
     const onSelectProject = vi.fn();
@@ -148,6 +150,7 @@ describe("ProjectPane", () => {
         onSetSortField,
         onToggleSortDirection,
         onToggleViewMode,
+        onToggleHideSessionsPaneInTreeView,
         onProjectQueryChange,
         onToggleProvider,
         onSelectProject,
@@ -183,6 +186,7 @@ describe("ProjectPane", () => {
     expect(onSetSortField).toHaveBeenCalledWith("name");
     expect(onToggleSortDirection).toHaveBeenCalledTimes(1);
     expect(onToggleViewMode).toHaveBeenCalledTimes(1);
+    expect(onToggleHideSessionsPaneInTreeView).not.toHaveBeenCalled();
     expect(onProjectQueryChange).toHaveBeenCalled();
     expect(onToggleProvider).toHaveBeenCalledWith("gemini");
     expect(onSelectProject).toHaveBeenCalledWith("project_2");
@@ -265,6 +269,25 @@ describe("ProjectPane", () => {
 
     expect(screen.queryByRole("button", { name: "Expand all folders" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Collapse all folders" })).toBeNull();
+  });
+
+  it("offers a tree-view toggle to hide the Sessions pane from the project overflow menu", async () => {
+    const user = userEvent.setup();
+    const onToggleHideSessionsPaneInTreeView = vi.fn();
+
+    renderProjectPane({
+      data: {
+        viewMode: "tree",
+      },
+      actions: {
+        onToggleHideSessionsPaneInTreeView,
+      },
+    });
+
+    await user.click(screen.getByRole("button", { name: "Project options" }));
+    await user.click(screen.getByRole("button", { name: "Hide Sessions pane in tree view" }));
+
+    expect(onToggleHideSessionsPaneInTreeView).toHaveBeenCalledTimes(1);
   });
 
   it("resets seen folders when switching away from tree view and back", async () => {

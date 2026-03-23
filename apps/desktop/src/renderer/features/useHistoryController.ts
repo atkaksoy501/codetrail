@@ -310,6 +310,9 @@ export function useHistoryController({
   const [singleClickProjectsExpand, setSingleClickProjectsExpand] = useState(
     initialPaneState?.singleClickProjectsExpand ?? false,
   );
+  const [hideSessionsPaneInTreeView, setHideSessionsPaneInTreeView] = useState(
+    initialPaneState?.hideSessionsPaneInTreeView ?? false,
+  );
   const [bookmarkReturnSelection, setBookmarkReturnSelection] = useState<HistorySelection | null>(
     null,
   );
@@ -629,6 +632,7 @@ export function useHistoryController({
       sessionPaneCollapsed,
       singleClickFoldersExpand,
       singleClickProjectsExpand,
+      hideSessionsPaneInTreeView,
       sessionScrollTop,
       projectViewMode,
     }),
@@ -641,6 +645,7 @@ export function useHistoryController({
       sessionScrollTop,
       singleClickFoldersExpand,
       singleClickProjectsExpand,
+      hideSessionsPaneInTreeView,
     ],
   );
 
@@ -758,6 +763,7 @@ export function useHistoryController({
     setSessionPaneCollapsed,
     setSingleClickFoldersExpand,
     setSingleClickProjectsExpand,
+    setHideSessionsPaneInTreeView,
     setProjectProviders,
     setHistoryCategories,
     setExpandedByDefaultCategories,
@@ -800,6 +806,8 @@ export function useHistoryController({
   });
 
   useReconcileProviderSelection(enabledProviders, setProjectProviders);
+
+  const hideSessionsPaneForTreeView = hideSessionsPaneInTreeView && projectViewMode === "tree";
 
   const registerAutoProjectUpdates = useCallback((deltas: Record<string, number>) => {
     const entries = Object.entries(deltas).filter(([, delta]) => delta > 0);
@@ -1326,6 +1334,9 @@ export function useHistoryController({
     setSingleClickFoldersExpand,
     singleClickProjectsExpand,
     setSingleClickProjectsExpand,
+    hideSessionsPaneInTreeView,
+    setHideSessionsPaneInTreeView,
+    hideSessionsPaneForTreeView,
     beginResize,
     workspaceStyle,
     sessionPaneNavigationItems,

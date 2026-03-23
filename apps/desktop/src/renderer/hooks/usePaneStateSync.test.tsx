@@ -82,6 +82,7 @@ function Harness({ logError }: { logError: (context: string, error: unknown) => 
   const [sessionPaneCollapsed, setSessionPaneCollapsed] = useState(false);
   const [singleClickFoldersExpand, setSingleClickFoldersExpand] = useState(true);
   const [singleClickProjectsExpand, setSingleClickProjectsExpand] = useState(false);
+  const [hideSessionsPaneInTreeView, setHideSessionsPaneInTreeView] = useState(false);
   const [projectProviders, setProjectProviders] = useState<Provider[]>(["claude"]);
   const [historyCategories, setHistoryCategories] = useState<MessageCategory[]>(["assistant"]);
   const [expandedByDefaultCategories, setExpandedByDefaultCategories] = useState<MessageCategory[]>(
@@ -154,6 +155,7 @@ function Harness({ logError }: { logError: (context: string, error: unknown) => 
       sessionPaneCollapsed,
       singleClickFoldersExpand,
       singleClickProjectsExpand,
+      hideSessionsPaneInTreeView,
       projectProviders,
       historyCategories,
       expandedByDefaultCategories,
@@ -198,6 +200,7 @@ function Harness({ logError }: { logError: (context: string, error: unknown) => 
     setSessionPaneCollapsed,
     setSingleClickFoldersExpand,
     setSingleClickProjectsExpand,
+    setHideSessionsPaneInTreeView,
     setProjectProviders,
     setHistoryCategories,
     setExpandedByDefaultCategories,
@@ -275,6 +278,7 @@ describe("usePaneStateSync", () => {
             sessionPaneCollapsed: false,
             singleClickFoldersExpand: false,
             singleClickProjectsExpand: true,
+            hideSessionsPaneInTreeView: true,
             projectProviders: ["claude", "codex"],
             historyCategories: ["assistant", "user"],
             expandedByDefaultCategories: ["assistant"],
@@ -348,6 +352,7 @@ describe("usePaneStateSync", () => {
         projectSortField: "name",
         singleClickFoldersExpand: false,
         singleClickProjectsExpand: true,
+        hideSessionsPaneInTreeView: true,
         preferredAutoRefreshStrategy: "scan-10s",
         darkShikiTheme: "vesper",
         lightShikiTheme: "github-light-default",
@@ -418,6 +423,7 @@ describe("usePaneStateSync", () => {
             sessionPaneCollapsed: null,
             singleClickFoldersExpand: null,
             singleClickProjectsExpand: null,
+            hideSessionsPaneInTreeView: null,
             projectProviders: null,
             historyCategories: null,
             expandedByDefaultCategories: null,

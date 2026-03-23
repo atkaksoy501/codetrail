@@ -298,9 +298,11 @@ export function useHistoryDerivedState({
         "--project-pane-width": `${
           projectPaneCollapsed ? COLLAPSED_PANE_WIDTH : projectPaneWidth
         }px`,
+        "--project-pane-min-width": `${projectPaneCollapsed ? COLLAPSED_PANE_WIDTH : 230}px`,
         "--session-pane-width": `${
           sessionPaneCollapsed ? COLLAPSED_PANE_WIDTH : sessionPaneWidth
         }px`,
+        "--session-pane-min-width": `${sessionPaneCollapsed ? COLLAPSED_PANE_WIDTH : 250}px`,
       } as CSSProperties)
     : undefined;
 

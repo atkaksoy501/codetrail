@@ -196,6 +196,7 @@ export const paneStateBaseSchema = z.object({
   sessionPaneCollapsed: z.boolean(),
   singleClickFoldersExpand: z.boolean(),
   singleClickProjectsExpand: z.boolean(),
+  hideSessionsPaneInTreeView: z.boolean(),
   projectProviders: z.array(providerSchema),
   historyCategories: z.array(messageCategorySchema),
   expandedByDefaultCategories: z.array(messageCategorySchema),

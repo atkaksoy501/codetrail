@@ -49,6 +49,7 @@ type ProjectPaneHeaderProps = {
   viewMode: ProjectViewMode;
   singleClickFoldersExpand: boolean;
   singleClickProjectsExpand: boolean;
+  hideSessionsPaneInTreeView: boolean;
   allVisibleFoldersExpanded: boolean;
   canCopyProjectDetails: boolean;
   canOpenProjectLocation: boolean;
@@ -58,6 +59,7 @@ type ProjectPaneHeaderProps = {
   onToggleSortDirection: () => void;
   onToggleSessionSortDirection: () => void;
   onToggleViewMode: () => void;
+  onToggleHideSessionsPaneInTreeView: () => void;
   onToggleAllFolders: () => void;
   onToggleSingleClickFoldersExpand: () => void;
   onToggleSingleClickProjectsExpand: () => void;
@@ -74,6 +76,7 @@ export function ProjectPaneHeader({
   viewMode,
   singleClickFoldersExpand,
   singleClickProjectsExpand,
+  hideSessionsPaneInTreeView,
   allVisibleFoldersExpanded,
   canCopyProjectDetails,
   canOpenProjectLocation,
@@ -83,6 +86,7 @@ export function ProjectPaneHeader({
   onToggleSortDirection,
   onToggleSessionSortDirection,
   onToggleViewMode,
+  onToggleHideSessionsPaneInTreeView,
   onToggleAllFolders,
   onToggleSingleClickFoldersExpand,
   onToggleSingleClickProjectsExpand,
@@ -109,6 +113,23 @@ export function ProjectPaneHeader({
       <div className="pane-head-controls">
         {!collapsed ? (
           <>
+            {viewMode === "tree" ? (
+              <button
+                type="button"
+                className="collapse-btn"
+                onClick={onToggleAllFolders}
+                aria-label={
+                  allVisibleFoldersExpanded ? "Collapse all folders" : "Expand all folders"
+                }
+                title={
+                  allVisibleFoldersExpanded
+                    ? "Collapse all visible folders"
+                    : "Expand all visible folders"
+                }
+              >
+                <ToolbarIcon name={allVisibleFoldersExpanded ? "collapseAll" : "expandAll"} />
+              </button>
+            ) : null}
             <div className="project-pane-sort-group" ref={sortMenuRef}>
               <button
                 type="button"
@@ -172,23 +193,6 @@ export function ProjectPaneHeader({
             >
               {viewMode === "list" ? <ProjectPaneListIcon /> : <ProjectPaneFolderIcon />}
             </button>
-            {viewMode === "tree" ? (
-              <button
-                type="button"
-                className="collapse-btn"
-                onClick={onToggleAllFolders}
-                aria-label={
-                  allVisibleFoldersExpanded ? "Collapse all folders" : "Expand all folders"
-                }
-                title={
-                  allVisibleFoldersExpanded
-                    ? "Collapse all visible folders"
-                    : "Expand all visible folders"
-                }
-              >
-                <ToolbarIcon name={allVisibleFoldersExpanded ? "collapseAll" : "expandAll"} />
-              </button>
-            ) : null}
             <div className="tb-dropdown project-pane-overflow-dropdown" ref={overflowMenuRef}>
               <button
                 type="button"
@@ -209,6 +213,22 @@ export function ProjectPaneHeader({
                 >
                   {viewMode === "tree" ? (
                     <>
+                      <button
+                        type="button"
+                        className={`tb-dropdown-item tb-dropdown-item-checkable${
+                          hideSessionsPaneInTreeView ? " selected" : ""
+                        }`}
+                        onClick={() => {
+                          onToggleHideSessionsPaneInTreeView();
+                          setOverflowMenuOpen(false);
+                        }}
+                      >
+                        <span>Hide Sessions pane in tree view</span>
+                        {hideSessionsPaneInTreeView ? (
+                          <span className="tb-dropdown-check">✓</span>
+                        ) : null}
+                      </button>
+                      <div className="tb-dropdown-separator" />
                       <button
                         type="button"
                         className={`tb-dropdown-item tb-dropdown-item-checkable${

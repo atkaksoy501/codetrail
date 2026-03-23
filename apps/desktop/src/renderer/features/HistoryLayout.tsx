@@ -150,6 +150,7 @@ export function HistoryLayout({
           sessionSortDirection: history.sessionSortDirection,
         }}
         preferences={{
+          hideSessionsPaneInTreeView: history.hideSessionsPaneInTreeView,
           singleClickFoldersExpand: history.singleClickFoldersExpand,
           singleClickProjectsExpand: history.singleClickProjectsExpand,
         }}
@@ -170,6 +171,8 @@ export function HistoryLayout({
             history.setSessionSortDirection((value) => (value === "asc" ? "desc" : "asc")),
           onToggleViewMode: () =>
             history.setProjectViewMode((value) => (value === "list" ? "tree" : "list")),
+          onToggleHideSessionsPaneInTreeView: () =>
+            history.setHideSessionsPaneInTreeView((value) => !value),
           onToggleSingleClickFoldersExpand: () =>
             history.setSingleClickFoldersExpand((value) => !value),
           onToggleSingleClickProjectsExpand: () =>
@@ -198,40 +201,56 @@ export function HistoryLayout({
         }}
       />
 
-      <div className="pane-resizer" onPointerDown={history.beginResize("project")} />
-
-      <SessionPane
-        sortedSessions={history.visibleSessionPaneSessions}
-        selectedSessionId={history.uiSelectedSessionId}
-        listRef={history.refs.sessionListRef}
-        sortDirection={history.sessionSortDirection}
-        allSessionsCount={history.visibleSessionPaneAllSessionsCount}
-        allSessionsSelected={history.uiHistoryMode === "project_all"}
-        bookmarksCount={history.visibleSessionPaneBookmarksCount}
-        bookmarksSelected={history.uiHistoryMode === "bookmarks"}
-        collapsed={history.sessionPaneCollapsed}
-        // Session actions should only operate on committed data, even while the list highlight
-        // moves ahead during keyboard debounce.
-        canCopySession={history.historyMode === "session" && !!history.selectedSession}
-        canOpenSessionLocation={
-          history.historyMode === "session" && Boolean(history.selectedSession?.filePath?.trim())
-        }
-        canDeleteSession={history.historyMode === "session" && !!history.selectedSession}
-        onToggleCollapsed={() => history.setSessionPaneCollapsed((value) => !value)}
-        onToggleSortDirection={() =>
-          history.setSessionSortDirection((value) => (value === "asc" ? "desc" : "asc"))
-        }
-        onCopySession={(sessionId) => copySessionDetailsById(history, logError, sessionId)}
-        onDeleteSession={onDeleteSession}
-        onOpenSessionLocation={(sessionId) => openSessionLocationById(history, logError, sessionId)}
-        onSelectAllSessions={() => {
-          history.selectProjectAllMessages(history.selectedProjectId);
-        }}
-        onSelectBookmarks={history.selectBookmarksView}
-        onSelectSession={history.selectSessionView}
+      <div
+        className={history.projectPaneCollapsed ? "pane-resizer pane-resizer-disabled" : "pane-resizer"}
+        onPointerDown={history.projectPaneCollapsed ? undefined : history.beginResize("project")}
       />
 
-      <div className="pane-resizer" onPointerDown={history.beginResize("session")} />
+      {history.hideSessionsPaneForTreeView ? null : (
+        <>
+          <SessionPane
+            sortedSessions={history.visibleSessionPaneSessions}
+            selectedSessionId={history.uiSelectedSessionId}
+            listRef={history.refs.sessionListRef}
+            sortDirection={history.sessionSortDirection}
+            allSessionsCount={history.visibleSessionPaneAllSessionsCount}
+            allSessionsSelected={history.uiHistoryMode === "project_all"}
+            bookmarksCount={history.visibleSessionPaneBookmarksCount}
+            bookmarksSelected={history.uiHistoryMode === "bookmarks"}
+            collapsed={history.sessionPaneCollapsed}
+            // Session actions should only operate on committed data, even while the list highlight
+            // moves ahead during keyboard debounce.
+            canCopySession={history.historyMode === "session" && !!history.selectedSession}
+            canOpenSessionLocation={
+              history.historyMode === "session" && Boolean(history.selectedSession?.filePath?.trim())
+            }
+            canDeleteSession={history.historyMode === "session" && !!history.selectedSession}
+            onToggleCollapsed={() => history.setSessionPaneCollapsed((value) => !value)}
+            onToggleSortDirection={() =>
+              history.setSessionSortDirection((value) => (value === "asc" ? "desc" : "asc"))
+            }
+            onCopySession={(sessionId) => copySessionDetailsById(history, logError, sessionId)}
+            onDeleteSession={onDeleteSession}
+            onOpenSessionLocation={(sessionId) =>
+              openSessionLocationById(history, logError, sessionId)
+            }
+            onSelectAllSessions={() => {
+              history.selectProjectAllMessages(history.selectedProjectId);
+            }}
+            onSelectBookmarks={history.selectBookmarksView}
+            onSelectSession={history.selectSessionView}
+          />
+
+          <div
+            className={
+              history.sessionPaneCollapsed ? "pane-resizer pane-resizer-disabled" : "pane-resizer"
+            }
+            onPointerDown={
+              history.sessionPaneCollapsed ? undefined : history.beginResize("session")
+            }
+          />
+        </>
+      )}
 
       <section className="pane content-pane history-focus-pane">
         <HistoryDetailPane

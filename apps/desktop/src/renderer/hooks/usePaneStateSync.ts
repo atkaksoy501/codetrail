@@ -64,6 +64,7 @@ export function usePaneStateSync(args: {
   setSessionPaneCollapsed: Dispatch<SetStateAction<boolean>>;
   setSingleClickFoldersExpand: Dispatch<SetStateAction<boolean>>;
   setSingleClickProjectsExpand: Dispatch<SetStateAction<boolean>>;
+  setHideSessionsPaneInTreeView: Dispatch<SetStateAction<boolean>>;
   setProjectProviders: Dispatch<SetStateAction<Provider[]>>;
   setHistoryCategories: Dispatch<SetStateAction<MessageCategory[]>>;
   setExpandedByDefaultCategories: Dispatch<SetStateAction<MessageCategory[]>>;
@@ -115,6 +116,7 @@ export function usePaneStateSync(args: {
     setSessionPaneCollapsed,
     setSingleClickFoldersExpand,
     setSingleClickProjectsExpand,
+    setHideSessionsPaneInTreeView,
     setProjectProviders,
     setHistoryCategories,
     setExpandedByDefaultCategories,
@@ -210,6 +212,7 @@ export function usePaneStateSync(args: {
         hydrateIfPresent(paneResponse.sessionPaneCollapsed, setSessionPaneCollapsed);
         hydrateIfPresent(paneResponse.singleClickFoldersExpand, setSingleClickFoldersExpand);
         hydrateIfPresent(paneResponse.singleClickProjectsExpand, setSingleClickProjectsExpand);
+        hydrateIfPresent(paneResponse.hideSessionsPaneInTreeView, setHideSessionsPaneInTreeView);
         hydrateIfPresent(paneResponse.projectProviders, setProjectProviders);
         hydrateIfPresent(paneResponse.historyCategories, setHistoryCategories);
         hydrateIfPresent(paneResponse.expandedByDefaultCategories, setExpandedByDefaultCategories);
@@ -319,6 +322,7 @@ export function usePaneStateSync(args: {
     setProjectPaneCollapsed,
     setSingleClickFoldersExpand,
     setSingleClickProjectsExpand,
+    setHideSessionsPaneInTreeView,
     setExpandedByDefaultCategories,
     setSearchProviders,
     setPreferredAutoRefreshStrategy,
@@ -365,6 +369,7 @@ export function usePaneStateSync(args: {
       sessionPaneCollapsed: paneState.sessionPaneCollapsed,
       singleClickFoldersExpand: paneState.singleClickFoldersExpand,
       singleClickProjectsExpand: paneState.singleClickProjectsExpand,
+      hideSessionsPaneInTreeView: paneState.hideSessionsPaneInTreeView,
       projectProviders: paneState.projectProviders,
       historyCategories: paneState.historyCategories,
       expandedByDefaultCategories: paneState.expandedByDefaultCategories,

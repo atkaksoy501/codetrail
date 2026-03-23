@@ -372,6 +372,7 @@ const channelExamples: Record<IpcChannel, ChannelExample> = {
       historyMode: "session",
       singleClickFoldersExpand: true,
       singleClickProjectsExpand: false,
+      hideSessionsPaneInTreeView: false,
       projectViewMode: "tree",
       projectSortField: "last_active",
       projectSortDirection: "desc",

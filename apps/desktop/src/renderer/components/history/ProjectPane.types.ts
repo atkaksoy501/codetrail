@@ -59,6 +59,7 @@ export type ProjectPaneSorting = {
 export type ProjectPanePreferences = {
   singleClickFoldersExpand?: boolean;
   singleClickProjectsExpand?: boolean;
+  hideSessionsPaneInTreeView?: boolean;
 };
 
 export type ProjectPaneSelectionOptions = {
@@ -80,6 +81,7 @@ export type ProjectPaneActions = {
   onToggleSortDirection: () => void;
   onToggleSessionSortDirection?: () => void;
   onToggleViewMode: () => void;
+  onToggleHideSessionsPaneInTreeView: () => void;
   onToggleSingleClickFoldersExpand: () => void;
   onToggleSingleClickProjectsExpand: () => void;
   onCopyProjectDetails: (projectId?: string) => void;

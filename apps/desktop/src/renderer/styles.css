@@ -1222,12 +1222,19 @@ body.platform-macos .titlebar-left {
 
 .history-layout {
   grid-template-columns:
-    var(--project-pane-width, 260px)
-    1px
-    var(--session-pane-width, 300px)
-    1px
+    minmax(var(--project-pane-min-width, 230px), var(--project-pane-width, 260px))
+    var(--pane-resizer-width, 2px)
+    minmax(var(--session-pane-min-width, 250px), var(--session-pane-width, 300px))
+    var(--pane-resizer-width, 2px)
     minmax(420px, 1fr);
   transition: grid-template-columns 0.3s ease;
+}
+
+.history-layout.tree-sessions-hidden {
+  grid-template-columns:
+    minmax(var(--project-pane-min-width, 230px), var(--project-pane-width, 260px))
+    var(--pane-resizer-width, 2px)
+    minmax(420px, 1fr);
 }
 
 .history-layout.pane-layout-hydrating {
@@ -1240,12 +1247,24 @@ body.platform-macos .titlebar-left {
 }
 
 .pane-resizer {
+  width: var(--pane-resizer-width, 2px);
   background: var(--border);
   cursor: col-resize;
+  position: relative;
+  z-index: 3;
+  will-change: transform;
 }
 
 .pane-resizer:hover {
   background: var(--border-active);
+}
+
+.pane-resizer-disabled {
+  cursor: default;
+}
+
+.pane-resizer-disabled:hover {
+  background: var(--border);
 }
 
 .resizing-panels,
@@ -6582,10 +6601,17 @@ mark {
 @media (max-width: 1450px) {
   .history-layout {
     grid-template-columns:
-      min(var(--project-pane-width, 240px), 240px)
-      1px
-      min(var(--session-pane-width, 280px), 280px)
-      1px
+      minmax(var(--project-pane-min-width, 230px), var(--project-pane-width, 240px))
+      var(--pane-resizer-width, 2px)
+      minmax(var(--session-pane-min-width, 250px), var(--session-pane-width, 280px))
+      var(--pane-resizer-width, 2px)
+      minmax(360px, 1fr);
+  }
+
+  .history-layout.tree-sessions-hidden {
+    grid-template-columns:
+      minmax(var(--project-pane-min-width, 230px), var(--project-pane-width, 240px))
+      var(--pane-resizer-width, 2px)
       minmax(360px, 1fr);
   }
 }

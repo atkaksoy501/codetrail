@@ -282,6 +282,7 @@ function sanitizePaneState(
   const sessionPaneCollapsed = sanitizeOptionalBoolean(record.sessionPaneCollapsed);
   const singleClickFoldersExpand = sanitizeOptionalBoolean(record.singleClickFoldersExpand);
   const singleClickProjectsExpand = sanitizeOptionalBoolean(record.singleClickProjectsExpand);
+  const hideSessionsPaneInTreeView = sanitizeOptionalBoolean(record.hideSessionsPaneInTreeView);
   // Provider arrays are healed to include newly-added providers so older settings files do not hide
   // data just because they were saved before a provider existed.
   const enabledProviders = enabledProviderScope ?? PROVIDER_VALUES;
@@ -371,6 +372,7 @@ function sanitizePaneState(
     ...(sessionPaneCollapsed === null ? {} : { sessionPaneCollapsed }),
     ...(singleClickFoldersExpand === null ? {} : { singleClickFoldersExpand }),
     ...(singleClickProjectsExpand === null ? {} : { singleClickProjectsExpand }),
+    ...(hideSessionsPaneInTreeView === null ? {} : { hideSessionsPaneInTreeView }),
     ...(projectProviders ? { projectProviders } : {}),
     ...(historyCategories ? { historyCategories } : {}),
     ...(expandedByDefaultCategories ? { expandedByDefaultCategories } : {}),
