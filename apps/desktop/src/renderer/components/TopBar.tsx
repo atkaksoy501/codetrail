@@ -12,6 +12,7 @@ import {
 import {
   type ShikiThemeId,
   THEME_GROUPS,
+  THEME_OPTIONS,
   type ThemeMode,
   getShikiThemeGroupForUiTheme,
   getShikiThemeLabel,
@@ -307,7 +308,7 @@ function ThemeDropdown({
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const previewActiveRef = useRef(false);
-  const themeOptions = THEME_GROUPS.flatMap((group) => group.options);
+  const themeOptions = THEME_OPTIONS;
   const selectedIndex = themeOptions.findIndex((option) => option.value === value);
   const restorePreview = useCallback(() => {
     if (!previewActiveRef.current) {

@@ -15,7 +15,6 @@ import { HistoryListContextMenu } from "./HistoryListContextMenu";
 import type { ProjectPaneContextMenuState, ProjectPaneProps } from "./ProjectPane.types";
 import { ProjectPaneHeader } from "./ProjectPaneHeader";
 import { ProjectPaneChevron, ProjectPaneFolderIcon } from "./ProjectPaneIcons";
-import { useProjectPaneTreeState } from "./useProjectPaneTreeState";
 
 function getProjectLabel(project: ProjectSummary): string {
   return project.name || project.path || "(no project path)";
@@ -64,9 +63,7 @@ export function ProjectPane({
   const {
     sortedProjects,
     selectedProjectId,
-    selectedSessionId = "",
     viewMode,
-    updateSource,
     historyMode = "project_all",
     collapsed,
     projectQueryInput,
@@ -76,7 +73,11 @@ export function ProjectPane({
     projectUpdates,
     treeProjectSessionsByProjectId = {},
     treeProjectSessionsLoadingByProjectId = {},
-    autoRevealSessionRequest = null,
+    folderGroups = [],
+    expandedFolderIdSet = new Set<string>(),
+    expandedProjectIds = [],
+    allVisibleFoldersExpanded = false,
+    treeFocusedRow = null,
     listRef,
   } = data;
   const { sortField, sortDirection, sessionSortDirection = "desc" } = sorting;
@@ -104,8 +105,10 @@ export function ProjectPane({
     onSelectProjectBookmarks = () => {},
     consumeFocusSelectionBehavior = () => ({ commitMode: "immediate", waitForKeyboardIdle: false }),
     onQueueProjectTreeNoopCommit = () => {},
-    onEnsureTreeProjectSessionsLoaded = () => {},
-    onConsumeAutoRevealSessionRequest = () => {},
+    onSetTreeFocusedRow = () => {},
+    onToggleFolder = () => {},
+    onToggleAllFolders = () => {},
+    onToggleProjectExpansion = () => {},
     onOpenProjectLocation,
     onOpenSessionLocation,
     onDeleteProject,
@@ -114,7 +117,6 @@ export function ProjectPane({
   const projectListContainerRef = useRef<HTMLDivElement | null>(null);
   const selectedProjectRef = useRef<HTMLButtonElement | null>(null);
   const [contextMenu, setContextMenu] = useState<ProjectPaneContextMenuState>(null);
-  const projectProviderKey = useMemo(() => projectProviders.join(","), [projectProviders]);
   const flatProjectActiveIndex = useMemo(
     () => sortedProjects.findIndex((project) => project.id === selectedProjectId),
     [selectedProjectId, sortedProjects],
@@ -157,45 +159,19 @@ export function ProjectPane({
     }
     selectedProjectRef.current?.scrollIntoView?.({ block: "nearest" });
   }, [selectedProjectId]);
-  const {
-    folderGroups,
-    expandedFolderIdSet,
-    expandedProjectIds,
-    allVisibleFoldersExpanded,
-    treeFocusedRow,
-    setTreeFocusedRow,
-    handleToggleFolder: toggleFolder,
-    handleToggleAllFolders: toggleAllFolders,
-    handleToggleProjectExpansion: toggleProjectExpansion,
-  } = useProjectPaneTreeState({
-    sortedProjects,
-    selectedProjectId,
-    selectedSessionId,
-    sortField,
-    sortDirection,
-    viewMode,
-    updateSource,
-    historyMode,
-    projectProvidersKey: projectProviderKey,
-    projectQueryInput,
-    onEnsureTreeProjectSessionsLoaded,
-    autoRevealSessionRequest,
-    onConsumeAutoRevealSessionRequest,
-  });
-
   const handleToggleFolder = (folderId: string) => {
     setContextMenu(null);
-    toggleFolder(folderId);
+    onToggleFolder(folderId);
   };
 
   const handleToggleAllFolders = () => {
     setContextMenu(null);
-    toggleAllFolders();
+    onToggleAllFolders();
   };
 
   const handleToggleProjectExpansion = (projectId: string) => {
     setContextMenu(null);
-    toggleProjectExpansion(projectId);
+    onToggleProjectExpansion(projectId);
   };
 
   const getFolderUpdateDelta = (projects: ProjectSummary[]): number =>
@@ -298,17 +274,17 @@ export function ProjectPane({
         data-project-id={project.id}
         className={`project-tree-session-row${isActive ? " active" : ""}`}
         onFocus={() => {
-          setTreeFocusedRow({ kind: "session", id: session.id, projectId: project.id });
+          onSetTreeFocusedRow({ kind: "session", id: session.id, projectId: project.id });
           handleSessionFocusSelection(project.id, session.id);
         }}
         onClick={() => {
           setContextMenu(null);
-          setTreeFocusedRow({ kind: "session", id: session.id, projectId: project.id });
+          onSetTreeFocusedRow({ kind: "session", id: session.id, projectId: project.id });
           onSelectProjectSession(project.id, session.id);
         }}
         onContextMenu={(event) => {
           event.preventDefault();
-          setTreeFocusedRow({ kind: "session", id: session.id, projectId: project.id });
+          onSetTreeFocusedRow({ kind: "session", id: session.id, projectId: project.id });
           onSelectProjectSession(project.id, session.id);
           setContextMenu({
             kind: "session",
@@ -346,7 +322,7 @@ export function ProjectPane({
     const bookmarkButtonActive = historyMode === "bookmarks" && selectedProjectId === project.id;
     const selectProjectRow = () => {
       setContextMenu(null);
-      setTreeFocusedRow({ kind: "project", id: project.id });
+      onSetTreeFocusedRow({ kind: "project", id: project.id });
       onSelectProject(project.id);
     };
     return (
@@ -421,7 +397,7 @@ export function ProjectPane({
             ref={project.id === selectedProjectId ? selectedProjectRef : null}
             className={`project-tree-select-btn${isActive ? " active" : ""}`}
             onFocus={() => {
-              setTreeFocusedRow({ kind: "project", id: project.id });
+              onSetTreeFocusedRow({ kind: "project", id: project.id });
               handleProjectFocusSelection(project.id);
             }}
             onClick={() => {
@@ -481,7 +457,7 @@ export function ProjectPane({
                 className={`project-tree-bookmark-btn${bookmarkButtonActive ? " active" : ""}`}
                 onClick={(event) => {
                   event.stopPropagation();
-                  setTreeFocusedRow({ kind: "project", id: project.id });
+                  onSetTreeFocusedRow({ kind: "project", id: project.id });
                   onSelectProjectBookmarks(project.id);
                 }}
                 title={
@@ -621,13 +597,13 @@ export function ProjectPane({
                     }${isExpanded && folderUpdateDelta > 0 ? " expanded-with-updates" : ""}`}
                     onFocus={() => {
                       handleFolderFocusSelection();
-                      setTreeFocusedRow({ kind: "folder", id: group.id });
+                      onSetTreeFocusedRow({ kind: "folder", id: group.id });
                     }}
                     onClick={(event) => {
                       // Mouse selection on folders should win immediately over any in-flight
                       // keyboard debounce so we never commit a stale project after a click.
                       onQueueProjectTreeNoopCommit();
-                      setTreeFocusedRow({ kind: "folder", id: group.id });
+                      onSetTreeFocusedRow({ kind: "folder", id: group.id });
                       if (
                         event.target instanceof HTMLElement &&
                         event.target.closest(".project-folder-toggle-hit")

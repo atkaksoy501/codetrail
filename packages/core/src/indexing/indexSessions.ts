@@ -69,6 +69,7 @@ export type IndexingDependencies = {
   ensureDatabaseSchema?: typeof ensureDatabaseSchema;
   clearIndexedData?: typeof clearIndexedData;
   readFileText?: ReadFileText;
+  prefetchedJsonlChunks?: PrefetchedJsonlChunk[];
   now?: () => Date;
   onFileIssue?: (issue: IndexingFileIssue) => void;
   onNotice?: (notice: IndexingNotice) => void;
@@ -80,9 +81,18 @@ type ResolvedIndexingDependencies = {
   ensureDatabaseSchema: typeof ensureDatabaseSchema;
   clearIndexedData: typeof clearIndexedData;
   readFileText: ReadFileText;
+  prefetchedJsonlChunkByPath: Map<string, PrefetchedJsonlChunk>;
   now: () => Date;
   onFileIssue: (issue: IndexingFileIssue) => void;
   onNotice: (notice: IndexingNotice) => void;
+};
+
+export type PrefetchedJsonlChunk = {
+  filePath: string;
+  fileSize: number;
+  fileMtimeMs: number;
+  startOffsetBytes: number;
+  bytes: Uint8Array;
 };
 
 type IndexedFileRow = {
@@ -1107,6 +1117,9 @@ function processDiscoveredFiles(args: {
                 args.compiledSystemMessageRules.compiledByProvider[discovered.provider],
               statements: args.statements,
               resumeCheckpoint,
+              prefetchedJsonlChunk:
+                args.resolvedDependencies.prefetchedJsonlChunkByPath.get(discovered.filePath) ??
+                null,
               onNotice: args.resolvedDependencies.onNotice,
             });
       accumulateParserDiagnostics(args.diagnostics, fileDiagnostics);
@@ -1131,6 +1144,9 @@ function resolveIndexingDependencies(
     ensureDatabaseSchema: dependencies.ensureDatabaseSchema ?? ensureDatabaseSchema,
     clearIndexedData: dependencies.clearIndexedData ?? clearIndexedData,
     readFileText: dependencies.readFileText ?? ((filePath) => readFileSync(filePath, "utf8")),
+    prefetchedJsonlChunkByPath: new Map(
+      (dependencies.prefetchedJsonlChunks ?? []).map((chunk) => [chunk.filePath, chunk]),
+    ),
     now: dependencies.now ?? (() => new Date()),
     onFileIssue: dependencies.onFileIssue ?? defaultOnFileIssue,
     onNotice: dependencies.onNotice ?? defaultOnNotice,
@@ -1321,6 +1337,7 @@ function indexStreamedJsonlSessionFile(args: {
   systemMessageRules: RegExp[];
   statements: IndexingStatements;
   resumeCheckpoint: ResumeCheckpoint | null;
+  prefetchedJsonlChunk: PrefetchedJsonlChunk | null;
   onNotice: (notice: IndexingNotice) => void;
 }): ParserDiagnostic[] {
   const adapter = getProviderAdapter(args.discovered.provider);
@@ -1356,6 +1373,7 @@ function indexStreamedJsonlSessionFile(args: {
         sourceMetaAccumulator,
         statements: args.statements,
         resumeCheckpoint: args.resumeCheckpoint,
+        prefetchedJsonlChunk: args.prefetchedJsonlChunk,
         onNotice: args.onNotice,
       });
 
@@ -1692,6 +1710,7 @@ function streamAndPersistJsonlEvents(args: {
   sourceMetaAccumulator: ProviderSourceMetadataAccumulator;
   statements: IndexingStatements;
   resumeCheckpoint: ResumeCheckpoint | null;
+  prefetchedJsonlChunk: PrefetchedJsonlChunk | null;
   onNotice: (notice: IndexingNotice) => void;
 }): { sequence: number; emittedEvents: number; streamResult: StreamJsonlResult } {
   let sequence = args.resumeCheckpoint?.nextMessageSequence ?? 0;
@@ -1702,6 +1721,14 @@ function streamAndPersistJsonlEvents(args: {
       startOffsetBytes: args.resumeCheckpoint?.lastOffsetBytes ?? 0,
       startLineNumber: args.resumeCheckpoint?.lastLineNumber ?? 0,
       startEventIndex: args.resumeCheckpoint?.lastEventIndex ?? 0,
+      prefetchedJsonlChunk:
+        args.prefetchedJsonlChunk &&
+        args.prefetchedJsonlChunk.startOffsetBytes ===
+          (args.resumeCheckpoint?.lastOffsetBytes ?? 0) &&
+        args.prefetchedJsonlChunk.fileSize === args.discovered.fileSize &&
+        args.prefetchedJsonlChunk.fileMtimeMs === args.discovered.fileMtimeMs
+          ? args.prefetchedJsonlChunk
+          : null,
       onEvent: (event, eventIndex, rescueNotice) => {
         emittedEvents += 1;
         if (rescueNotice) {
@@ -2646,6 +2673,7 @@ function streamJsonlEvents(
     startOffsetBytes?: number;
     startLineNumber?: number;
     startEventIndex?: number;
+    prefetchedJsonlChunk?: PrefetchedJsonlChunk | null;
     onEvent: (event: unknown, eventIndex: number, rescueNotice: JsonlRescueNotice | null) => void;
     onOmittedLine: (omitted: OmittedJsonlLine) => void;
     onInvalidLine: (lineNumber: number, error: unknown) => void;
@@ -2664,37 +2692,31 @@ function streamJsonlEvents(
   let readOffset = callbacks.startOffsetBytes ?? 0;
 
   try {
-    fd = openSync(filePath, "r");
-    while (true) {
-      const bytesRead = readSync(fd, buffer, 0, buffer.length, readOffset);
-      if (bytesRead <= 0) {
-        break;
-      }
+    if (callbacks.prefetchedJsonlChunk) {
+      readOffset = callbacks.startOffsetBytes ?? 0;
+      const prefetchedBuffer = Buffer.from(callbacks.prefetchedJsonlChunk.bytes);
+      const bytesRead = prefetchedBuffer.length;
       readOffset += bytesRead;
-      let cursor = 0;
-      while (cursor < bytesRead) {
-        const newlineIndex = buffer.indexOf(0x0a, cursor);
-        const segmentEnd = newlineIndex >= 0 ? newlineIndex : bytesRead;
-        const segment = buffer.subarray(cursor, segmentEnd);
-        if (!streamState.discardingHardOmittedLine) {
-          const nextLineBytes = streamState.pendingLineBytes + segment.length;
-          if (nextLineBytes > MAX_JSONL_RESCUE_LINE_BYTES) {
-            streamState.discardingHardOmittedLine = true;
-            streamState.lineChunks = [];
-          } else if (segment.length > 0) {
-            streamState.lineChunks.push(Buffer.from(segment));
-          }
-        }
-        streamState.pendingLineBytes += segment.length;
-
-        if (newlineIndex >= 0) {
+      processJsonlReadChunk(prefetchedBuffer, bytesRead, streamState, {
+        onFlushLine: () => {
           consumedOffset += streamState.pendingLineBytes + 1;
           flushStreamJsonlLine(streamState, callbacks);
-          cursor = newlineIndex + 1;
-          continue;
+        },
+      });
+    } else {
+      fd = openSync(filePath, "r");
+      while (true) {
+        const bytesRead = readSync(fd, buffer, 0, buffer.length, readOffset);
+        if (bytesRead <= 0) {
+          break;
         }
-
-        cursor = bytesRead;
+        readOffset += bytesRead;
+        processJsonlReadChunk(buffer, bytesRead, streamState, {
+          onFlushLine: () => {
+            consumedOffset += streamState.pendingLineBytes + 1;
+            flushStreamJsonlLine(streamState, callbacks);
+          },
+        });
       }
     }
     if (
@@ -2728,6 +2750,46 @@ function streamJsonlEvents(
     nextLineNumber: streamState.lineNumber,
     nextEventIndex: streamState.eventIndex,
   };
+}
+
+function processJsonlReadChunk(
+  buffer: Buffer,
+  bytesRead: number,
+  state: {
+    lineChunks: Buffer[];
+    pendingLineBytes: number;
+    discardingHardOmittedLine: boolean;
+    lineNumber: number;
+    eventIndex: number;
+  },
+  handlers: {
+    onFlushLine: () => void;
+  },
+): void {
+  let cursor = 0;
+  while (cursor < bytesRead) {
+    const newlineIndex = buffer.indexOf(0x0a, cursor);
+    const segmentEnd = newlineIndex >= 0 ? newlineIndex : bytesRead;
+    const segment = buffer.subarray(cursor, segmentEnd);
+    if (!state.discardingHardOmittedLine) {
+      const nextLineBytes = state.pendingLineBytes + segment.length;
+      if (nextLineBytes > MAX_JSONL_RESCUE_LINE_BYTES) {
+        state.discardingHardOmittedLine = true;
+        state.lineChunks = [];
+      } else if (segment.length > 0) {
+        state.lineChunks.push(Buffer.from(segment));
+      }
+    }
+    state.pendingLineBytes += segment.length;
+
+    if (newlineIndex >= 0) {
+      handlers.onFlushLine();
+      cursor = newlineIndex + 1;
+      continue;
+    }
+
+    cursor = bytesRead;
+  }
 }
 
 function flushStreamJsonlLine(

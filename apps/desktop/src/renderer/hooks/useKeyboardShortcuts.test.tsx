@@ -80,6 +80,10 @@ function createProps(
     selectNextSession: vi.fn(),
     selectPreviousProject: vi.fn(),
     selectNextProject: vi.fn(),
+    selectPreviousFocusedSession: vi.fn(),
+    selectNextFocusedSession: vi.fn(),
+    selectPreviousFocusedProject: vi.fn(),
+    selectNextFocusedProject: vi.fn(),
     handleProjectTreeArrow: vi.fn(),
     handleProjectTreeEnter: vi.fn(),
     pageHistoryMessagesUp: vi.fn(),
@@ -441,9 +445,9 @@ describe("useKeyboardShortcuts", () => {
     sessionList.focus();
     sessionList.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
 
-    expect(props.selectNextProject).toHaveBeenCalledTimes(1);
+    expect(props.selectNextFocusedProject).toHaveBeenCalledTimes(1);
     expect(props.handleProjectTreeArrow).toHaveBeenCalledWith("right");
-    expect(props.selectPreviousSession).toHaveBeenCalledTimes(1);
+    expect(props.selectPreviousFocusedSession).toHaveBeenCalledTimes(1);
 
     projectList.focus();
     projectList.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true }));

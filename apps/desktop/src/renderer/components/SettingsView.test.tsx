@@ -1,9 +1,13 @@
 // @vitest-environment jsdom
 
-import { useState } from "react";
+import { type ComponentProps, useState } from "react";
 
 import type { IpcResponse, MessageCategory, Provider } from "@codetrail/core/browser";
-import { createSettingsInfoFixture } from "@codetrail/core/testing";
+import {
+  createClaudeHookStateFixture,
+  createLiveStatusFixture,
+  createSettingsInfoFixture,
+} from "@codetrail/core/testing";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
@@ -90,7 +94,10 @@ const diagnostics = {
   },
 };
 
-function createBaseProps() {
+function createBaseProps(): Omit<
+  ComponentProps<typeof SettingsView>,
+  "info" | "loading" | "error"
+> {
   const externalTools: ExternalToolConfig[] = [
     ...createDefaultExternalTools().map((tool) =>
       tool.appId === "vscode"
@@ -118,6 +125,68 @@ function createBaseProps() {
     diagnostics,
     diagnosticsLoading: false,
     diagnosticsError: null,
+    liveStatus: createLiveStatusFixture({
+      enabled: true,
+      updatedAt: "2026-03-16T10:05:04.000Z",
+      providerCounts: {
+        claude: 1,
+        codex: 1,
+        gemini: 0,
+        cursor: 0,
+        copilot: 0,
+      },
+      sessions: [
+        {
+          provider: "claude",
+          sessionIdentity: "claude-session",
+          sourceSessionId: "claude-session",
+          filePath: "/workspace/.claude/projects/project-a/claude-session.jsonl",
+          projectName: "project-a",
+          projectPath: "/workspace/project-a",
+          cwd: "/workspace/project-a",
+          statusKind: "waiting_for_approval" as const,
+          statusText: "Waiting for approval",
+          detailText: "Read ~/.claude/settings.json",
+          sourcePrecision: "hook" as const,
+          lastActivityAt: "2026-03-16T10:05:02.000Z",
+          bestEffort: false,
+        },
+      ],
+      claudeHookState: createClaudeHookStateFixture({
+        installed: true,
+        managedEventNames: [
+          "SessionStart",
+          "UserPromptSubmit",
+          "PreToolUse",
+          "PostToolUse",
+          "Notification",
+          "Stop",
+          "SessionEnd",
+        ],
+        missingEventNames: [],
+      }),
+    }),
+    liveStatusError: null,
+    liveWatchEnabled: true,
+    liveWatchRowHasBackground: true,
+    onLiveWatchEnabledChange: vi.fn(),
+    onLiveWatchRowHasBackgroundChange: vi.fn(),
+    claudeHookState: createClaudeHookStateFixture({
+      installed: true,
+      managedEventNames: [
+        "SessionStart",
+        "UserPromptSubmit",
+        "PreToolUse",
+        "PostToolUse",
+        "Notification",
+        "Stop",
+        "SessionEnd",
+      ],
+      missingEventNames: [],
+    }),
+    claudeHookActionPending: null,
+    onInstallClaudeHooks: vi.fn(),
+    onRemoveClaudeHooks: vi.fn(),
     appearance: {
       theme: "dark" as const,
       shikiTheme: "github-dark-default" as ShikiThemeId,
@@ -272,6 +341,9 @@ describe("SettingsView", () => {
       sectionHeadings.indexOf("Providers"),
     );
     expect(sectionHeadings.indexOf("Providers")).toBeLessThan(
+      sectionHeadings.indexOf("Live Watch"),
+    );
+    expect(sectionHeadings.indexOf("Live Watch")).toBeLessThan(
       sectionHeadings.indexOf("External Tools"),
     );
     expect(sectionHeadings.indexOf("External Tools")).toBeLessThan(
@@ -348,6 +420,8 @@ describe("SettingsView", () => {
     await user.click(screen.getByRole("button", { name: "Remove Custom Tool 1" }));
     await user.click(screen.getByRole("button", { name: "Rescan System" }));
     await user.click(screen.getByRole("checkbox", { name: "Claude" }));
+    await user.click(screen.getByRole("checkbox", { name: "Enable live watch" }));
+    await user.click(screen.getByRole("checkbox", { name: "Use live row background" }));
     await user.click(screen.getByRole("button", { name: "Force reindex" }));
     await user.click(
       screen.getByRole("checkbox", {
@@ -381,7 +455,8 @@ describe("SettingsView", () => {
     expect(baseProps.appearance.onAutoHideViewerHeaderActionsChange).toHaveBeenCalledWith(true);
     expect(baseProps.appearance.onPreferredExternalEditorChange).toHaveBeenCalledWith("custom:1");
     expect(baseProps.appearance.onPreferredExternalDiffToolChange).toHaveBeenCalledWith("");
-    const externalToolCalls = baseProps.appearance.onExternalToolsChange.mock.calls.map(
+    const onExternalToolsChange = vi.mocked(baseProps.appearance.onExternalToolsChange);
+    const externalToolCalls = onExternalToolsChange.mock.calls.map(
       ([tools]) => tools as ExternalToolConfig[],
     );
     expect(
@@ -435,8 +510,10 @@ describe("SettingsView", () => {
     expect(externalToolCalls.some((tools) => !tools.some((tool) => tool.id === "custom:1"))).toBe(
       true,
     );
-    expect(baseProps.appearance.onRescanExternalTools).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(baseProps.appearance.onRescanExternalTools!)).toHaveBeenCalledTimes(1);
     expect(baseProps.indexing.onToggleProviderEnabled).toHaveBeenCalledWith("claude");
+    expect(baseProps.onLiveWatchEnabledChange).toHaveBeenCalledWith(false);
+    expect(baseProps.onLiveWatchRowHasBackgroundChange).toHaveBeenCalledWith(false);
     expect(baseProps.indexing.onForceReindex).toHaveBeenCalledTimes(1);
     expect(
       baseProps.indexing.onRemoveMissingSessionsDuringIncrementalIndexingChange,
@@ -487,7 +564,19 @@ describe("SettingsView", () => {
           diagnosticsError={initialProps.diagnosticsError}
           indexing={initialProps.indexing}
           messageRules={initialProps.messageRules}
-          onActionError={initialProps.onActionError}
+          liveStatus={initialProps.liveStatus ?? null}
+          liveStatusError={initialProps.liveStatusError ?? null}
+          claudeHookState={initialProps.claudeHookState ?? null}
+          claudeHookActionPending={initialProps.claudeHookActionPending ?? null}
+          onInstallClaudeHooks={initialProps.onInstallClaudeHooks ?? (() => undefined)}
+          onRemoveClaudeHooks={initialProps.onRemoveClaudeHooks ?? (() => undefined)}
+          liveWatchEnabled={initialProps.liveWatchEnabled ?? false}
+          liveWatchRowHasBackground={initialProps.liveWatchRowHasBackground ?? true}
+          onLiveWatchEnabledChange={initialProps.onLiveWatchEnabledChange ?? (() => undefined)}
+          onLiveWatchRowHasBackgroundChange={
+            initialProps.onLiveWatchRowHasBackgroundChange ?? (() => undefined)
+          }
+          {...(initialProps.onActionError ? { onActionError: initialProps.onActionError } : {})}
           appearance={{
             ...appearanceState,
             onThemeChange: initialProps.appearance.onThemeChange,
@@ -521,7 +610,9 @@ describe("SettingsView", () => {
               setAppearanceState((current) => ({ ...current, terminalAppCommand: value })),
             onExternalToolsChange: (tools) =>
               setAppearanceState((current) => ({ ...current, externalTools: tools })),
-            onRescanExternalTools: initialProps.appearance.onRescanExternalTools,
+            ...(initialProps.appearance.onRescanExternalTools
+              ? { onRescanExternalTools: initialProps.appearance.onRescanExternalTools }
+              : {}),
           }}
         />
       );
@@ -562,7 +653,7 @@ describe("SettingsView", () => {
 
     await user.click(screen.getByRole("button", { name: "Move Zed up" }));
 
-    const toolCalls = baseProps.appearance.onExternalToolsChange.mock.calls;
+    const toolCalls = vi.mocked(baseProps.appearance.onExternalToolsChange).mock.calls;
     expect(toolCalls.length).toBeGreaterThan(0);
     const reorderedTools = toolCalls.at(-1)?.[0] as ExternalToolConfig[];
     expect(reorderedTools.map((tool) => tool.id)).toEqual([
@@ -591,6 +682,26 @@ describe("SettingsView", () => {
     expect(screen.getByText("Trigger type")).toBeInTheDocument();
     expect(screen.getByText("Avg duration")).toBeInTheDocument();
     expect(screen.getByText("Max duration")).toBeInTheDocument();
+  });
+
+  it("forwards Claude hook install and remove actions", async () => {
+    const user = userEvent.setup();
+    const baseProps = createBaseProps();
+
+    render(<SettingsView info={info} loading={false} error={null} {...baseProps} />);
+
+    expect(screen.getByText("Live Watch")).toBeInTheDocument();
+    expect(screen.getByText("Claude hooks installed")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Live tracking only runs while Auto-refresh is using a watch strategy. Manual and scan refresh modes do not produce live session updates.",
+      ),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Install / Update" }));
+    await user.click(screen.getByRole("button", { name: "Remove" }));
+
+    expect(baseProps.onInstallClaudeHooks).toHaveBeenCalledTimes(1);
+    expect(baseProps.onRemoveClaudeHooks).toHaveBeenCalledTimes(1);
   });
 });
 

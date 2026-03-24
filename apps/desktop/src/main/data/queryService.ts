@@ -154,6 +154,15 @@ export type QueryService = {
   ) => IpcResponse<"bookmarks:getStates">;
   toggleBookmark: (request: IpcRequest<"bookmarks:toggle">) => IpcResponse<"bookmarks:toggle">;
   runSearchQuery: (request: IpcRequest<"search:query">) => IpcResponse<"search:query">;
+  listRecentLiveSessionFiles: (input: {
+    providers: Provider[];
+    minFileMtimeMs: number;
+    limit: number;
+  }) => Array<{
+    filePath: string;
+    provider: Provider;
+    fileMtimeMs: number;
+  }>;
   close: () => void;
 };
 
@@ -204,6 +213,7 @@ export function createQueryServiceFromDb(
     getBookmarkStates: (request) => getBookmarkStatesWithStore(bookmarkStore, request),
     toggleBookmark: (request) => toggleBookmarkWithStore(db, bookmarkStore, request),
     runSearchQuery: (request) => runSearchQueryWithDatabase(db, request),
+    listRecentLiveSessionFiles: (input) => listRecentLiveSessionFilesWithDatabase(db, input),
     close: () => {
       if (closed) {
         return;
@@ -215,6 +225,45 @@ export function createQueryServiceFromDb(
       }
     },
   };
+}
+
+function listRecentLiveSessionFilesWithDatabase(
+  db: DatabaseHandle,
+  input: {
+    providers: Provider[];
+    minFileMtimeMs: number;
+    limit: number;
+  },
+): Array<{
+  filePath: string;
+  provider: Provider;
+  fileMtimeMs: number;
+}> {
+  if (input.providers.length === 0 || input.limit <= 0) {
+    return [];
+  }
+
+  const placeholders = input.providers.map(() => "?").join(", ");
+  const rows = db
+    .prepare(
+      `SELECT file_path, provider, file_mtime_ms
+       FROM indexed_files
+       WHERE provider IN (${placeholders})
+         AND file_mtime_ms >= ?
+       ORDER BY file_mtime_ms DESC, file_path ASC
+       LIMIT ?`,
+    )
+    .all(...input.providers, input.minFileMtimeMs, input.limit) as Array<{
+    file_path: string;
+    provider: Provider;
+    file_mtime_ms: number;
+  }>;
+
+  return rows.map((row) => ({
+    filePath: row.file_path,
+    provider: row.provider,
+    fileMtimeMs: row.file_mtime_ms,
+  }));
 }
 
 export function listProjects(

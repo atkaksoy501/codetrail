@@ -64,6 +64,7 @@ describe("AppStateStore", () => {
       singleClickFoldersExpand: false,
       singleClickProjectsExpand: true,
       hideSessionsPaneInTreeView: true,
+      liveWatchRowHasBackground: false,
       theme: "ft-dark",
       darkShikiTheme: "vesper",
       lightShikiTheme: "github-light-default",
@@ -86,6 +87,7 @@ describe("AppStateStore", () => {
       historyMode: "bookmarks",
       projectViewMode: "tree",
       projectSortField: "name",
+      currentAutoRefreshStrategy: "watch-3s",
       preferredAutoRefreshStrategy: "scan-30s",
       projectSortDirection: "desc",
       sessionSortDirection: "desc",
@@ -116,6 +118,7 @@ describe("AppStateStore", () => {
       singleClickFoldersExpand: false,
       singleClickProjectsExpand: true,
       hideSessionsPaneInTreeView: true,
+      liveWatchRowHasBackground: false,
       theme: "ft-dark",
       darkShikiTheme: "vesper",
       lightShikiTheme: "github-light-default",
@@ -138,6 +141,7 @@ describe("AppStateStore", () => {
       historyMode: "bookmarks",
       projectViewMode: "tree",
       projectSortField: "name",
+      currentAutoRefreshStrategy: "watch-3s",
       preferredAutoRefreshStrategy: "scan-30s",
       projectSortDirection: "desc",
       sessionSortDirection: "desc",
@@ -238,6 +242,41 @@ describe("AppStateStore", () => {
 
     store.flush();
     expect(fs.writeFileSync).toHaveBeenCalledTimes(1);
+  });
+
+  it("merges runtime-only pane patches into existing pane state", () => {
+    const fs = createMemoryFs();
+    const filePath = "/tmp/codetrail-runtime-pane-patch.json";
+
+    const store = new AppStateStore(filePath, { fs });
+    store.setPaneState({ projectPaneWidth: 320, sessionPaneWidth: 390 });
+    store.setPaneStateRuntimeOnly({ currentAutoRefreshStrategy: "watch-3s" } as never);
+    store.flush();
+
+    expect(store.getPaneState()).toEqual({
+      projectPaneWidth: 320,
+      sessionPaneWidth: 390,
+      currentAutoRefreshStrategy: "watch-3s",
+      darkShikiTheme: "github-dark-default",
+      lightShikiTheme: "github-light-default",
+      messagePageSize: 50,
+      defaultViewerWrapMode: "nowrap",
+      defaultDiffViewMode: "unified",
+      externalTools: createDefaultExternalTools(),
+    });
+    expect(JSON.parse(fs.files.get(filePath) ?? "{}")).toEqual({
+      pane: {
+        projectPaneWidth: 320,
+        sessionPaneWidth: 390,
+        currentAutoRefreshStrategy: "watch-3s",
+        darkShikiTheme: "github-dark-default",
+        lightShikiTheme: "github-light-default",
+        messagePageSize: 50,
+        defaultViewerWrapMode: "nowrap",
+        defaultDiffViewMode: "unified",
+        externalTools: createDefaultExternalTools(),
+      },
+    });
   });
 
   it("falls back to empty state for malformed payloads", () => {

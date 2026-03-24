@@ -1,14 +1,19 @@
-import type { Dispatch, SetStateAction } from "react";
+import { type Dispatch, type SetStateAction, useEffect, useMemo, useState } from "react";
 
 import type { MessageCategory } from "@codetrail/core/browser";
 
 import { CATEGORIES } from "../app/constants";
-import type { BulkExpandScope } from "../app/types";
+import type { BulkExpandScope, WatchLiveStatusResponse } from "../app/types";
 import { AdvancedSearchToggleButton } from "../components/AdvancedSearchToggleButton";
 import { HistoryExportMenu } from "../components/HistoryExportMenu";
 import { ToolbarIcon } from "../components/ToolbarIcon";
 import { ZoomPercentInput } from "../components/ZoomPercentInput";
 import { MessageCard } from "../components/messages/MessagePresentation";
+import {
+  formatCompactLiveAge,
+  getNextCompactLiveAgeUpdateDelayMs,
+  selectRelevantLiveSession,
+} from "../lib/liveSessions";
 import {
   getAdvancedSearchToggleTitle,
   getSearchQueryPlaceholder,
@@ -69,6 +74,8 @@ export function HistoryDetailPane({
   canZoomOut,
   applyZoomAction,
   setZoomPercent,
+  liveSessions = [],
+  liveRowHasBackground = true,
 }: {
   history: HistoryController;
   advancedSearchEnabled: boolean;
@@ -78,6 +85,8 @@ export function HistoryDetailPane({
   canZoomOut: boolean;
   applyZoomAction: (action: "in" | "out" | "reset") => Promise<void>;
   setZoomPercent: (percent: number) => Promise<void>;
+  liveSessions?: WatchLiveStatusResponse["sessions"];
+  liveRowHasBackground?: boolean;
 }) {
   const exportAllPagesCount =
     history.historyMode === "bookmarks"
@@ -107,6 +116,53 @@ export function HistoryDetailPane({
       : `Newest first (${messageSortScopeSuffix}). Switch to oldest first`;
   const historySearchPlaceholder = getSearchQueryPlaceholder(advancedSearchEnabled);
   const historySearchTooltip = getSearchQueryTooltip(advancedSearchEnabled);
+  const [liveNowMs, setLiveNowMs] = useState(() => Date.now());
+  const liveSession = useMemo(
+    () =>
+      selectRelevantLiveSession({
+        sessions: liveSessions,
+        selectionMode: history.historyMode,
+        selectedProject: history.selectedProject,
+        selectedSession: history.selectedSession,
+      }),
+    [history.historyMode, history.selectedProject, history.selectedSession, liveSessions],
+  );
+
+  useEffect(() => {
+    if (!liveSession) {
+      return;
+    }
+
+    let cancelled = false;
+    const tick = () => {
+      if (cancelled) {
+        return;
+      }
+      const nextNowMs = Date.now();
+      setLiveNowMs(nextNowMs);
+      const nextDelayMs = getNextCompactLiveAgeUpdateDelayMs(liveSession.lastActivityAt, nextNowMs);
+      timeoutId = window.setTimeout(tick, nextDelayMs);
+    };
+
+    setLiveNowMs(Date.now());
+    let timeoutId = window.setTimeout(
+      tick,
+      getNextCompactLiveAgeUpdateDelayMs(liveSession.lastActivityAt),
+    );
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeoutId);
+    };
+  }, [liveSession]);
+
+  const liveTimer = liveSession
+    ? formatCompactLiveAge(liveSession.lastActivityAt, liveNowMs)
+    : null;
+  const liveDetailText = liveSession?.detailText?.trim() ?? "";
+  const liveSummary = liveSession
+    ? ["Live", liveTimer, liveSession.statusText, liveDetailText].filter(Boolean).join(" · ")
+    : null;
 
   return (
     <div className="history-view">
@@ -237,6 +293,32 @@ export function HistoryDetailPane({
             </div>
           </div>
         </div>
+        {liveSession && liveTimer ? (
+          <div
+            className={`msg-live-row${liveRowHasBackground ? "" : " is-flat"}`}
+            title={liveSummary ?? undefined}
+          >
+            <span className="msg-live-label">Live</span>
+            <span className="msg-live-separator" aria-hidden="true">
+              ·
+            </span>
+            <span className="msg-live-timer">{liveTimer}</span>
+            <span className="msg-live-separator" aria-hidden="true">
+              ·
+            </span>
+            <span className={`msg-live-status msg-live-status-${liveSession.statusKind}`}>
+              {liveSession.statusText}
+            </span>
+            {liveDetailText ? (
+              <>
+                <span className="msg-live-separator" aria-hidden="true">
+                  ·
+                </span>
+                <span className="msg-live-detail">{liveDetailText}</span>
+              </>
+            ) : null}
+          </div>
+        ) : null}
       </div>
 
       <div className="msg-filters">

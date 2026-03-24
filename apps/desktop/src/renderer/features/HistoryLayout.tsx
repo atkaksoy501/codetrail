@@ -1,5 +1,6 @@
 import type { Dispatch, SetStateAction } from "react";
 
+import type { WatchLiveStatusResponse } from "../app/types";
 import { ProjectPane } from "../components/history/ProjectPane";
 import { SessionPane } from "../components/history/SessionPane";
 import { copyTextToClipboard } from "../lib/clipboard";
@@ -111,6 +112,8 @@ export function HistoryLayout({
   logError,
   onDeleteProject,
   onDeleteSession,
+  liveSessions = [],
+  liveRowHasBackground = true,
 }: {
   history: HistoryController;
   advancedSearchEnabled: boolean;
@@ -123,6 +126,8 @@ export function HistoryLayout({
   logError: (context: string, error: unknown) => void;
   onDeleteProject: (projectId?: string) => void;
   onDeleteSession: (sessionId?: string) => void;
+  liveSessions?: WatchLiveStatusResponse["sessions"];
+  liveRowHasBackground?: boolean;
 }) {
   return (
     <>
@@ -143,7 +148,11 @@ export function HistoryLayout({
           projectUpdates: history.projectUpdates,
           treeProjectSessionsByProjectId: history.treeProjectSessionsByProjectId,
           treeProjectSessionsLoadingByProjectId: history.treeProjectSessionsLoadingByProjectId,
-          autoRevealSessionRequest: history.autoRevealSessionRequest,
+          folderGroups: history.folderGroups,
+          expandedFolderIdSet: history.expandedFolderIdSet,
+          expandedProjectIds: history.expandedProjectIds,
+          allVisibleFoldersExpanded: history.allVisibleFoldersExpanded,
+          treeFocusedRow: history.treeFocusedRow,
         }}
         sorting={{
           sortField: history.projectSortField,
@@ -187,8 +196,10 @@ export function HistoryLayout({
           onSelectProjectBookmarks: history.openProjectBookmarksView,
           consumeFocusSelectionBehavior: history.consumeProjectPaneFocusSelectionBehavior,
           onQueueProjectTreeNoopCommit: history.queueProjectTreeNoopCommit,
-          onEnsureTreeProjectSessionsLoaded: history.ensureTreeProjectSessionsLoaded,
-          onConsumeAutoRevealSessionRequest: history.consumeAutoRevealSessionRequest,
+          onSetTreeFocusedRow: history.setTreeFocusedRow,
+          onToggleFolder: history.handleToggleFolder,
+          onToggleAllFolders: history.handleToggleAllFolders,
+          onToggleProjectExpansion: history.handleToggleProjectExpansion,
           onDeleteProject,
           onOpenProjectLocation: (projectId) =>
             openProjectLocationById(history, logError, projectId),
@@ -267,6 +278,8 @@ export function HistoryLayout({
           canZoomOut={canZoomOut}
           applyZoomAction={applyZoomAction}
           setZoomPercent={setZoomPercent}
+          liveSessions={liveSessions}
+          liveRowHasBackground={liveRowHasBackground}
         />
       </section>
     </>

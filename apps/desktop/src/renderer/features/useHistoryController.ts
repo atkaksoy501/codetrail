@@ -39,6 +39,7 @@ import type {
   SortDirection,
   TreeAutoRevealSessionRequest,
 } from "../app/types";
+import { useProjectPaneTreeState } from "../components/history/useProjectPaneTreeState";
 import { useDebouncedValue } from "../hooks/useDebouncedValue";
 import { usePaneStateSync } from "../hooks/usePaneStateSync";
 import { useReconcileProviderSelection } from "../hooks/useReconcileProviderSelection";
@@ -304,6 +305,15 @@ export function useHistoryController({
   );
   const [expandedByDefaultCategories, setExpandedByDefaultCategories] = useState<MessageCategory[]>(
     initialPaneState?.expandedByDefaultCategories ?? [...DEFAULT_MESSAGE_CATEGORIES],
+  );
+  const [liveWatchEnabled, setLiveWatchEnabled] = useState(
+    initialPaneState?.liveWatchEnabled ?? true,
+  );
+  const [liveWatchRowHasBackground, setLiveWatchRowHasBackground] = useState(
+    initialPaneState?.liveWatchRowHasBackground ?? true,
+  );
+  const [claudeHooksPrompted, setClaudeHooksPrompted] = useState(
+    initialPaneState?.claudeHooksPrompted ?? false,
   );
   const [projectPaneCollapsed, setProjectPaneCollapsed] = useState(
     initialPaneState?.projectPaneCollapsed ?? false,
@@ -596,6 +606,34 @@ export function useHistoryController({
     }
   }, [codetrail, logError]);
 
+  const projectProviderKey = useMemo(() => projectProviders.join(","), [projectProviders]);
+  const {
+    folderGroups,
+    expandedFolderIdSet,
+    expandedProjectIds,
+    allVisibleFoldersExpanded,
+    treeFocusedRow,
+    setTreeFocusedRow,
+    handleToggleFolder,
+    handleToggleAllFolders,
+    handleToggleProjectExpansion,
+  } = useProjectPaneTreeState({
+    sortedProjects,
+    selectedProjectId: uiSelectedProjectId,
+    selectedSessionId: uiSelectedSessionId,
+    sortField: projectSortField,
+    sortDirection: projectSortDirection,
+    viewMode: projectViewMode,
+    updateSource: projectListUpdateSource,
+    historyMode: uiHistoryMode,
+    projectProvidersKey: projectProviderKey,
+    projectQueryInput,
+    onEnsureTreeProjectSessionsLoaded: ensureTreeProjectSessionsLoaded,
+    autoRevealSessionRequest,
+    onConsumeAutoRevealSessionRequest: () =>
+      clearAutoRevealSessionRequest(setAutoRevealSessionRequest),
+  });
+
   const paneAppearanceState = useMemo(
     () => ({
       theme: appearance.theme,
@@ -670,6 +708,9 @@ export function useHistoryController({
       historyCategories,
       expandedByDefaultCategories,
       searchProviders,
+      liveWatchEnabled,
+      liveWatchRowHasBackground,
+      claudeHooksPrompted,
       preferredAutoRefreshStrategy,
       systemMessageRegexRules,
     }),
@@ -677,6 +718,9 @@ export function useHistoryController({
       enabledProviders,
       expandedByDefaultCategories,
       historyCategories,
+      liveWatchEnabled,
+      liveWatchRowHasBackground,
+      claudeHooksPrompted,
       preferredAutoRefreshStrategy,
       projectProviders,
       removeMissingSessionsDuringIncrementalIndexing,
@@ -781,6 +825,9 @@ export function useHistoryController({
     setHistoryCategories,
     setExpandedByDefaultCategories,
     setSearchProviders,
+    setLiveWatchEnabled,
+    setLiveWatchRowHasBackground,
+    setClaudeHooksPrompted,
     setPreferredAutoRefreshStrategy,
     setRemoveMissingSessionsDuringIncrementalIndexing,
     setTheme: appearance.setTheme,
@@ -1179,6 +1226,9 @@ export function useHistoryController({
     refreshTreeProjectSessions,
     pendingProjectPaneFocusCommitModeRef,
     pendingProjectPaneFocusWaitForKeyboardIdleRef,
+    queueProjectTreeNoopCommit,
+    treeFocusedRow,
+    setTreeFocusedRow,
   });
 
   const pageHistoryMessages = useCallback(
@@ -1314,6 +1364,15 @@ export function useHistoryController({
     paneStateHydrated,
     sortedProjects,
     projectUpdates,
+    folderGroups,
+    expandedFolderIdSet,
+    expandedProjectIds,
+    allVisibleFoldersExpanded,
+    treeFocusedRow,
+    setTreeFocusedRow,
+    handleToggleFolder,
+    handleToggleAllFolders,
+    handleToggleProjectExpansion,
     sortedSessions,
     treeProjectSessionsByProjectId: sortedTreeProjectSessionsByProjectId,
     treeProjectSessionsLoadingByProjectId,
@@ -1346,6 +1405,12 @@ export function useHistoryController({
     setHistoryCategories,
     expandedByDefaultCategories,
     setExpandedByDefaultCategories,
+    liveWatchEnabled,
+    setLiveWatchEnabled,
+    liveWatchRowHasBackground,
+    setLiveWatchRowHasBackground,
+    claudeHooksPrompted,
+    setClaudeHooksPrompted,
     systemMessageRegexRules,
     setSystemMessageRegexRules,
     preferredAutoRefreshStrategy,
@@ -1441,9 +1506,6 @@ export function useHistoryController({
     navigateFromSearchResult,
     setPendingSearchNavigation,
     pendingSearchNavigation,
-    autoRevealSessionRequest,
-    consumeAutoRevealSessionRequest: () =>
-      clearAutoRevealSessionRequest(setAutoRevealSessionRequest),
     selectedSummaryMessageCount,
     historyCategoryExpandShortcutMap,
     historyCategoriesShortcutMap,

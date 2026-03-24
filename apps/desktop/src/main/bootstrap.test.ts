@@ -23,8 +23,10 @@ const {
   mockMkdtemp,
   mockReadFile,
   mockReaddir,
+  mockRename,
   mockRm,
   mockStat,
+  mockUnlink,
   mockWriteFile,
   mockRealpath,
   mockOpenPath,
@@ -97,10 +99,12 @@ const {
     mockMkdtemp: vi.fn(async () => "/tmp/codetrail-test"),
     mockReadFile: vi.fn(async () => ""),
     mockReaddir: vi.fn(async () => []),
+    mockRename: vi.fn(async () => undefined),
     mockRm: vi.fn(async () => undefined),
     mockStat: vi.fn<() => Promise<{ isFile: () => boolean }>>(async () => ({
       isFile: () => false,
     })),
+    mockUnlink: vi.fn(async () => undefined),
     mockWriteFile: vi.fn(async () => undefined),
     mockRealpath: vi.fn(async (pathValue: string) => pathValue),
     mockOpenPath: vi.fn(async () => ""),
@@ -221,8 +225,10 @@ vi.mock("node:fs/promises", () => ({
   readFile: mockReadFile,
   realpath: mockRealpath,
   readdir: mockReaddir,
+  rename: mockRename,
   rm: mockRm,
   stat: mockStat,
+  unlink: mockUnlink,
   writeFile: mockWriteFile,
 }));
 
@@ -285,6 +291,9 @@ describe("bootstrapMainProcess", () => {
     historyCategories: ["assistant"],
     expandedByDefaultCategories: ["assistant", "tool_use"],
     searchProviders: ["claude"],
+    liveWatchEnabled: true,
+    liveWatchRowHasBackground: true,
+    claudeHooksPrompted: false,
     theme: "dark",
     monoFontFamily: "droid_sans_mono",
     regularFontFamily: "inter",
@@ -338,6 +347,7 @@ describe("bootstrapMainProcess", () => {
       getBookmarkStates: vi.fn(),
       toggleBookmark: mockToggleBookmark,
       runSearchQuery: mockRunSearchQuery,
+      listRecentLiveSessionFiles: vi.fn(() => []),
       deleteProject: mockDeleteProject,
       deleteSession: mockDeleteSession,
       close: mockQueryServiceClose,
@@ -644,6 +654,7 @@ describe("bootstrapMainProcess", () => {
         enabledProviders: ["claude", "codex", "gemini", "cursor", "copilot"],
         removeMissingSessionsDuringIncrementalIndexing: false,
       }),
+      flush,
       setPaneState,
       setPaneStateRuntimeOnly,
       setIndexingState,
@@ -683,6 +694,10 @@ describe("bootstrapMainProcess", () => {
       preferredExternalDiffTool: null,
       terminalAppCommand: null,
       externalTools: null,
+      liveWatchEnabled: true,
+      liveWatchRowHasBackground: true,
+      claudeHooksPrompted: false,
+      currentAutoRefreshStrategy: null,
       preferredAutoRefreshStrategy: "watch-5s",
       selectedProjectId: "project-1",
       selectedSessionId: "session-1",
@@ -736,6 +751,7 @@ describe("bootstrapMainProcess", () => {
     const appStateStore: AppStateStoreMock = {
       getFilePath: () => "/tmp/state.json",
       getPaneState: () => currentPaneState,
+      flush,
       setPaneState: vi.fn(),
       setPaneStateRuntimeOnly: vi.fn(),
       getIndexingState: () => currentIndexingState,
@@ -816,6 +832,56 @@ describe("bootstrapMainProcess", () => {
     expect(getRequiredHandler(handlers, "ui:setPaneState")(updated)).toEqual({ ok: true });
     expect(setPaneStateRuntimeOnly).toHaveBeenCalledWith(updated);
     expect(setPaneStatePersisted).not.toHaveBeenCalled();
+  });
+
+  it("flushes immediately when durable live-watch flags change", async () => {
+    let currentPaneState: PaneState = {
+      ...paneState,
+      liveWatchEnabled: false,
+      liveWatchRowHasBackground: true,
+      claudeHooksPrompted: false,
+    };
+    const appStateStore: AppStateStoreMock = {
+      getFilePath: () => "/tmp/state.json",
+      getPaneState: () => currentPaneState,
+      getIndexingState: () => ({
+        enabledProviders: ["claude", "codex", "gemini", "cursor", "copilot"],
+        removeMissingSessionsDuringIncrementalIndexing: false,
+      }),
+      flush,
+      setIndexingState: vi.fn(),
+      setPaneState: vi.fn(),
+      setPaneStateRuntimeOnly: vi.fn((value: PaneState) => {
+        currentPaneState = value;
+      }),
+    };
+
+    await bootstrapMainProcess({
+      appStateStore: appStateStore as AppStateStore,
+      runStartupIndexing: false,
+    });
+
+    expect(
+      getRequiredHandler(
+        handlers,
+        "ui:setPaneState",
+      )({
+        ...currentPaneState,
+        liveWatchEnabled: true,
+      }),
+    ).toEqual({ ok: true });
+    expect(flush).toHaveBeenCalledTimes(1);
+
+    expect(
+      getRequiredHandler(
+        handlers,
+        "ui:setPaneState",
+      )({
+        ...currentPaneState,
+        claudeHooksPrompted: true,
+      }),
+    ).toEqual({ ok: true });
+    expect(flush).toHaveBeenCalledTimes(2);
   });
 
   it("flushes app state immediately from app:flushState", async () => {

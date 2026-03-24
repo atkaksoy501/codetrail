@@ -9,6 +9,7 @@ import { AdvancedSearchToggleButton } from "../components/AdvancedSearchToggleBu
 import { ToolbarIcon } from "../components/ToolbarIcon";
 import { HighlightedText } from "../components/messages/MessagePresentation";
 import { useClickOutside } from "../hooks/useClickOutside";
+import { formatInteger } from "../lib/numberFormatting";
 import {
   SEARCH_PLACEHOLDERS,
   getAdvancedSearchToggleTitle,
@@ -442,8 +443,7 @@ function getSearchResultProjectMeta(result: SearchResult): string {
 }
 
 function formatResultCount(value: number): string {
-  const formatted = new Intl.NumberFormat().format(value);
-  return `${formatted} ${value === 1 ? "match" : "matches"}`;
+  return `${formatInteger(value)} ${value === 1 ? "match" : "matches"}`;
 }
 
 function getSearchCategoryShortcutDigit(category: MessageCategory): string {

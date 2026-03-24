@@ -58,6 +58,10 @@ export function useKeyboardShortcuts(args: {
   selectNextSession: () => void;
   selectPreviousProject: () => void;
   selectNextProject: () => void;
+  selectPreviousFocusedSession: () => void;
+  selectNextFocusedSession: () => void;
+  selectPreviousFocusedProject: () => void;
+  selectNextFocusedProject: () => void;
   handleProjectTreeArrow: (direction: "left" | "right") => void;
   handleProjectTreeEnter: () => void;
   pageHistoryMessagesUp: (options?: MessagePageOptions) => void;
@@ -242,12 +246,12 @@ function handleFocusedPaneArrowShortcut(context: ShortcutContext): boolean {
   }
   if (context.focusedPane === "project" && context.event.key === "ArrowUp") {
     context.event.preventDefault();
-    context.selectPreviousProject();
+    context.selectPreviousFocusedProject();
     return true;
   }
   if (context.focusedPane === "project" && context.event.key === "ArrowDown") {
     context.event.preventDefault();
-    context.selectNextProject();
+    context.selectNextFocusedProject();
     return true;
   }
   if (context.focusedPane === "project" && context.event.key === "ArrowLeft") {
@@ -267,12 +271,12 @@ function handleFocusedPaneArrowShortcut(context: ShortcutContext): boolean {
   }
   if (context.focusedPane === "session" && context.event.key === "ArrowUp") {
     context.event.preventDefault();
-    context.selectPreviousSession();
+    context.selectPreviousFocusedSession();
     return true;
   }
   if (context.focusedPane === "session" && context.event.key === "ArrowDown") {
     context.event.preventDefault();
-    context.selectNextSession();
+    context.selectNextFocusedSession();
     return true;
   }
   return false;

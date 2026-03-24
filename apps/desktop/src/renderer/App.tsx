@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
+  type IpcRequest,
   type MessageCategory,
   PROVIDER_LIST,
   type Provider,
@@ -40,6 +41,7 @@ import {
   setTestHistorySelectionDebounceOverrides,
   useHistoryController,
 } from "./features/useHistoryController";
+import { useLiveWatchController } from "./features/useLiveWatchController";
 import { useSearchController } from "./features/useSearchController";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { useReconcileProviderSelection } from "./hooks/useReconcileProviderSelection";
@@ -121,7 +123,9 @@ export function App({
   );
   const [historyDeleteError, setHistoryDeleteError] = useState<string | null>(null);
   const [historyDeletePending, setHistoryDeletePending] = useState(false);
-  const [refreshStrategy, setRefreshStrategy] = useState<RefreshStrategy>("off");
+  const [refreshStrategy, setRefreshStrategy] = useState<RefreshStrategy>(
+    initialPaneState?.currentAutoRefreshStrategy ?? "off",
+  );
   const [watcherPendingPathCount, setWatcherPendingPathCount] = useState(0);
   const [autoRefreshScanInFlight, setAutoRefreshScanInFlight] = useState(false);
   const [watchStats, setWatchStats] = useState<WatchStatsResponse | null>(null);
@@ -172,6 +176,23 @@ export function App({
   });
   const preferredRefreshStrategy =
     history.preferredAutoRefreshStrategy ?? DEFAULT_PREFERRED_REFRESH_STRATEGY;
+  const {
+    liveStatus,
+    liveStatusError,
+    claudeHookActionPending,
+    showClaudeHooksPrompt,
+    setShowClaudeHooksPrompt,
+    installClaudeHooks,
+    removeClaudeHooks,
+  } = useLiveWatchController({
+    codetrail,
+    mainView,
+    refreshStrategy,
+    liveWatchEnabled: history.liveWatchEnabled,
+    claudeEnabled: enabledProviders.includes("claude"),
+    claudeHooksPrompted: history.claudeHooksPrompted,
+    logError,
+  });
 
   useEffect(() => {
     if (mainView !== "settings" || appearance.settingsInfo || appearance.settingsLoading) {
@@ -190,6 +211,22 @@ export function App({
       logError("Failed flushing app state after closing settings", error);
     });
   }, [codetrail, logError, mainView]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void codetrail
+        .invoke("ui:setPaneState", {
+          currentAutoRefreshStrategy: refreshStrategy,
+        } as IpcRequest<"ui:setPaneState">)
+        .catch((error: unknown) => {
+          logError("Failed saving current auto-refresh strategy", error);
+        });
+    }, 180);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [codetrail, logError, refreshStrategy]);
 
   useReconcileProviderSelection(enabledProviders, setSearchProviders);
 
@@ -499,6 +536,7 @@ export function App({
     await handleRefresh(true);
   }, [handleRefresh]);
   const indexing = refreshing || indexingInBackground;
+  const watchStrategyActive = isWatchRefreshStrategy(refreshStrategy);
   const handleToggleExpandedByDefault = useCallback(
     (category: MessageCategory) => {
       history.setExpandedByDefaultCategories((value) =>
@@ -559,6 +597,51 @@ export function App({
       });
     },
     [history.setPreferredAutoRefreshStrategy],
+  );
+
+  const selectAdjacentSessionWithoutFocus = useCallback(
+    (direction: "previous" | "next") => {
+      const sessionPaneVisible =
+        !history.sessionPaneCollapsed &&
+        !(history.projectViewMode === "tree" && history.hideSessionsPaneForTreeView);
+      if (!sessionPaneVisible) {
+        return;
+      }
+      const activeElement = document.activeElement;
+      const sessionPaneFocused =
+        activeElement instanceof HTMLElement &&
+        history.refs.sessionListRef.current?.contains(activeElement);
+      if (sessionPaneFocused) {
+        history.selectAdjacentSession(direction);
+        return;
+      }
+      history.selectAdjacentSession(direction, { preserveFocus: true });
+    },
+    [
+      history.projectViewMode,
+      history.hideSessionsPaneForTreeView,
+      history.sessionPaneCollapsed,
+      history.refs.sessionListRef,
+      history.selectAdjacentSession,
+    ],
+  );
+
+  const selectAdjacentProjectWithoutFocus = useCallback(
+    (direction: "previous" | "next") => {
+      if (history.projectPaneCollapsed) {
+        return;
+      }
+      const activeElement = document.activeElement;
+      const projectPaneFocused =
+        activeElement instanceof HTMLElement &&
+        history.refs.projectListRef.current?.contains(activeElement);
+      if (projectPaneFocused) {
+        history.selectAdjacentProject(direction);
+        return;
+      }
+      history.selectAdjacentProject(direction, { preserveFocus: true });
+    },
+    [history.projectPaneCollapsed, history.refs.projectListRef, history.selectAdjacentProject],
   );
 
   const refreshingRef = useRef(false);
@@ -627,14 +710,20 @@ export function App({
     toggleHistoryCategoryExpanded: history.handleToggleCategoryMessagesExpanded,
     toggleProjectPaneCollapsed: () => history.setProjectPaneCollapsed((value) => !value),
     toggleSessionPaneCollapsed: () => history.setSessionPaneCollapsed((value) => !value),
-    focusPreviousHistoryMessage: () => history.focusAdjacentHistoryMessage("previous"),
-    focusNextHistoryMessage: () => history.focusAdjacentHistoryMessage("next"),
+    focusPreviousHistoryMessage: () =>
+      history.focusAdjacentHistoryMessage("previous", { preserveFocus: true }),
+    focusNextHistoryMessage: () =>
+      history.focusAdjacentHistoryMessage("next", { preserveFocus: true }),
     focusPreviousSearchResult: () => search.focusAdjacentSearchResult("previous"),
     focusNextSearchResult: () => search.focusAdjacentSearchResult("next"),
-    selectPreviousSession: () => history.selectAdjacentSession("previous"),
-    selectNextSession: () => history.selectAdjacentSession("next"),
-    selectPreviousProject: () => history.selectAdjacentProject("previous"),
-    selectNextProject: () => history.selectAdjacentProject("next"),
+    selectPreviousSession: () => selectAdjacentSessionWithoutFocus("previous"),
+    selectNextSession: () => selectAdjacentSessionWithoutFocus("next"),
+    selectPreviousProject: () => selectAdjacentProjectWithoutFocus("previous"),
+    selectNextProject: () => selectAdjacentProjectWithoutFocus("next"),
+    selectPreviousFocusedSession: () => history.selectAdjacentSession("previous"),
+    selectNextFocusedSession: () => history.selectAdjacentSession("next"),
+    selectPreviousFocusedProject: () => history.selectAdjacentProject("previous"),
+    selectNextFocusedProject: () => history.selectAdjacentProject("next"),
     handleProjectTreeArrow: history.handleProjectTreeArrow,
     handleProjectTreeEnter: history.handleProjectTreeEnter,
     pageHistoryMessagesUp: history.pageHistoryMessagesUp,
@@ -651,21 +740,21 @@ export function App({
       updateRefreshStrategy((value) => (value !== "off" ? "off" : preferredRefreshStrategy)),
   });
 
-  const autoRefreshStatusLabel = isWatchRefreshStrategy(refreshStrategy)
+  const autoRefreshStatusLabel = watchStrategyActive
     ? `${watcherPendingPathCount}`
     : isScanRefreshStrategy(refreshStrategy)
       ? autoRefreshScanInFlight
         ? "Refreshing..."
         : "Auto"
       : null;
-  const autoRefreshStatusTone = isWatchRefreshStrategy(refreshStrategy)
+  const autoRefreshStatusTone = watchStrategyActive
     ? ("queued" as const)
     : isScanRefreshStrategy(refreshStrategy)
       ? autoRefreshScanInFlight
         ? ("running" as const)
         : ("queued" as const)
       : null;
-  const autoRefreshStatusTooltip = isWatchRefreshStrategy(refreshStrategy)
+  const autoRefreshStatusTooltip = watchStrategyActive
     ? "Number of changed files currently queued by the watcher before auto-refresh runs."
     : isScanRefreshStrategy(refreshStrategy)
       ? autoRefreshScanInFlight
@@ -751,6 +840,8 @@ export function App({
                 logError={logError}
                 onDeleteProject={handleOpenProjectDelete}
                 onDeleteSession={handleOpenSessionDelete}
+                liveSessions={liveStatus?.sessions ?? []}
+                liveRowHasBackground={history.liveWatchRowHasBackground}
               />
             ) : (
               <section className="pane content-pane history-focus-pane">
@@ -763,6 +854,8 @@ export function App({
                   canZoomOut={appearance.canZoomOut}
                   applyZoomAction={appearance.applyZoomAction}
                   setZoomPercent={appearance.setZoomPercent}
+                  liveSessions={liveStatus?.sessions ?? []}
+                  liveRowHasBackground={history.liveWatchRowHasBackground}
                 />
               </section>
             )
@@ -801,6 +894,16 @@ export function App({
                 diagnostics={watchStats}
                 diagnosticsLoading={watchStatsLoading}
                 diagnosticsError={watchStatsError}
+                liveStatus={liveStatus}
+                liveStatusError={liveStatusError}
+                claudeHookState={liveStatus?.claudeHookState ?? null}
+                claudeHookActionPending={claudeHookActionPending}
+                onInstallClaudeHooks={() => void installClaudeHooks()}
+                onRemoveClaudeHooks={() => void removeClaudeHooks()}
+                liveWatchEnabled={history.liveWatchEnabled}
+                liveWatchRowHasBackground={history.liveWatchRowHasBackground}
+                onLiveWatchEnabledChange={history.setLiveWatchEnabled}
+                onLiveWatchRowHasBackgroundChange={history.setLiveWatchRowHasBackground}
                 appearance={{
                   theme: appearance.theme,
                   shikiTheme: appearance.shikiTheme,
@@ -863,6 +966,22 @@ export function App({
             </section>
           )}
         </div>
+        <ConfirmDialog
+          open={showClaudeHooksPrompt}
+          title="Install Claude Hooks?"
+          message="Claude can report precise waiting-for-input, approval, and tool states only when Codetrail-managed Claude hooks are installed. Install them now?"
+          confirmLabel="Install Hooks"
+          cancelLabel="Not Now"
+          onConfirm={() => {
+            history.setClaudeHooksPrompted(true);
+            setShowClaudeHooksPrompt(false);
+            void installClaudeHooks();
+          }}
+          onCancel={() => {
+            history.setClaudeHooksPrompted(true);
+            setShowClaudeHooksPrompt(false);
+          }}
+        />
         <ConfirmDialog
           open={showReindexConfirm}
           title="Force Reindex"

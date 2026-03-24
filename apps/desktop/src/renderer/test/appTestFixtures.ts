@@ -1,5 +1,9 @@
 import { indexerConfigBaseSchema, paneStateBaseSchema } from "@codetrail/core/browser";
-import { createSettingsInfoFixture } from "@codetrail/core/testing";
+import {
+  createClaudeHookStateFixture,
+  createLiveStatusFixture,
+  createSettingsInfoFixture,
+} from "@codetrail/core/testing";
 
 import { createMockCodetrailClient } from "./mockCodetrailClient";
 
@@ -83,6 +87,18 @@ function createRendererClient(handlers: Record<string, ChannelHandler>) {
     }
     if (channel === "watcher:getStatus") {
       return { running: false, processing: false, pendingPathCount: 0 };
+    }
+    if (channel === "watcher:getLiveStatus") {
+      return createLiveStatusFixture({
+        updatedAt: "2026-03-16T10:05:03.000Z",
+        claudeHookState: createClaudeHookStateFixture(),
+      });
+    }
+    if (channel === "claudeHooks:install" || channel === "claudeHooks:remove") {
+      return {
+        ok: true,
+        state: createClaudeHookStateFixture({ installed: channel === "claudeHooks:install" }),
+      };
     }
     if (channel === "editor:listAvailable") {
       return {

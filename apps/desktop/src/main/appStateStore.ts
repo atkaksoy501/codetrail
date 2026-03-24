@@ -39,9 +39,11 @@ import {
   normalizeExternalTools,
 } from "../shared/uiPreferences";
 
-type PaneStateFull = IpcRequest<"ui:setPaneState">;
-export type PaneState = Partial<PaneStateFull> &
-  Pick<PaneStateFull, "projectPaneWidth" | "sessionPaneWidth">;
+type PaneStateFull = Required<IpcRequest<"ui:setPaneState">>;
+type PaneStateResolved = { [K in keyof PaneStateFull]-?: Exclude<PaneStateFull[K], undefined> };
+type PaneStatePatch = { [K in keyof PaneStateResolved]?: PaneStateResolved[K] | undefined };
+export type PaneState = Partial<PaneStateResolved> &
+  Pick<PaneStateResolved, "projectPaneWidth" | "sessionPaneWidth">;
 type IndexingConfigState = Partial<IpcRequest<"indexer:setConfig">>;
 
 export type WindowState = {
@@ -110,6 +112,7 @@ const AUTO_REFRESH_STRATEGY_VALUES = [
   "scan-1min",
   "scan-5min",
 ] as const;
+const CURRENT_AUTO_REFRESH_STRATEGY_VALUES = ["off", ...AUTO_REFRESH_STRATEGY_VALUES] as const;
 const DEFAULT_FILE_SYSTEM: AppStateStoreFileSystem = {
   existsSync: (path) => existsSync(path),
   mkdirSync: (path, options) => mkdirSync(path, options),
@@ -155,12 +158,18 @@ export class AppStateStore {
     this.updatePaneState(value, true);
   }
 
-  setPaneStateRuntimeOnly(value: PaneState): void {
+  setPaneStateRuntimeOnly(value: PaneStatePatch): void {
     this.updatePaneState(value, false);
   }
 
-  private updatePaneState(value: PaneState, persist: boolean): void {
-    const pane = sanitizePaneState(value, this.state.indexing?.enabledProviders);
+  private updatePaneState(value: PaneStatePatch, persist: boolean): void {
+    const pane = sanitizePaneState(
+      {
+        ...(this.state.pane ?? {}),
+        ...value,
+      },
+      this.state.indexing?.enabledProviders,
+    );
     if (!pane) {
       return;
     }
@@ -309,6 +318,9 @@ function sanitizePaneState(
     sanitizeStringArray(record.searchProviders, enabledProviders),
     enabledProviders,
   );
+  const liveWatchEnabled = sanitizeOptionalBoolean(record.liveWatchEnabled);
+  const liveWatchRowHasBackground = sanitizeOptionalBoolean(record.liveWatchRowHasBackground);
+  const claudeHooksPrompted = sanitizeOptionalBoolean(record.claudeHooksPrompted);
   const theme = sanitizeStringValue(record.theme, THEME_VALUES);
   const darkShikiTheme = sanitizeFamilyShikiTheme(record.darkShikiTheme, "dark");
   const lightShikiTheme = sanitizeFamilyShikiTheme(record.lightShikiTheme, "light");
@@ -373,6 +385,10 @@ function sanitizePaneState(
     record.preferredAutoRefreshStrategy,
     AUTO_REFRESH_STRATEGY_VALUES,
   );
+  const currentAutoRefreshStrategy = sanitizeStringValue(
+    record.currentAutoRefreshStrategy,
+    CURRENT_AUTO_REFRESH_STRATEGY_VALUES,
+  );
   const systemMessageRegexRules = sanitizeSystemMessageRegexRules(record.systemMessageRegexRules);
 
   return {
@@ -387,6 +403,9 @@ function sanitizePaneState(
     ...(historyCategories ? { historyCategories } : {}),
     ...(expandedByDefaultCategories ? { expandedByDefaultCategories } : {}),
     ...(searchProviders ? { searchProviders } : {}),
+    ...(liveWatchEnabled === null ? {} : { liveWatchEnabled }),
+    ...(liveWatchRowHasBackground === null ? {} : { liveWatchRowHasBackground }),
+    ...(claudeHooksPrompted === null ? {} : { claudeHooksPrompted }),
     ...(theme ? { theme } : {}),
     darkShikiTheme,
     lightShikiTheme,
@@ -416,6 +435,7 @@ function sanitizePaneState(
     ...(projectAllSortDirection ? { projectAllSortDirection } : {}),
     ...(sessionPage === null ? {} : { sessionPage }),
     ...(sessionScrollTop === null ? {} : { sessionScrollTop }),
+    ...(currentAutoRefreshStrategy ? { currentAutoRefreshStrategy } : {}),
     ...(preferredAutoRefreshStrategy ? { preferredAutoRefreshStrategy } : {}),
     ...(systemMessageRegexRules ? { systemMessageRegexRules } : {}),
   };

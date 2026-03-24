@@ -7,8 +7,8 @@ import type {
   ProjectSummary,
   ProjectViewMode,
   SessionSummary,
-  TreeAutoRevealSessionRequest,
 } from "../../app/types";
+import type { ProjectFolderGroup } from "../../lib/projectTree";
 
 export type ProjectPaneHistoryMode = "session" | "bookmarks" | "project_all";
 
@@ -48,7 +48,11 @@ export type ProjectPaneData = {
   projectUpdates: Record<string, { messageDelta: number; updatedAt: number }>;
   treeProjectSessionsByProjectId?: Record<string, SessionSummary[]>;
   treeProjectSessionsLoadingByProjectId?: Record<string, boolean>;
-  autoRevealSessionRequest?: TreeAutoRevealSessionRequest | null;
+  folderGroups?: ProjectFolderGroup[];
+  expandedFolderIdSet?: Set<string>;
+  expandedProjectIds?: string[];
+  allVisibleFoldersExpanded?: boolean;
+  treeFocusedRow?: ProjectPaneTreeFocusedRow | null;
   listRef?: Ref<HTMLDivElement>;
 };
 
@@ -97,8 +101,10 @@ export type ProjectPaneActions = {
   onSelectProjectBookmarks?: (projectId: string) => void;
   consumeFocusSelectionBehavior?: () => ProjectPaneSelectionOptions;
   onQueueProjectTreeNoopCommit?: (options?: ProjectPaneSelectionOptions) => void;
-  onEnsureTreeProjectSessionsLoaded?: (projectId: string) => void;
-  onConsumeAutoRevealSessionRequest?: () => void;
+  onSetTreeFocusedRow?: (row: ProjectPaneTreeFocusedRow | null) => void;
+  onToggleFolder?: (folderId: string) => void;
+  onToggleAllFolders?: () => void;
+  onToggleProjectExpansion?: (projectId: string) => void;
   onOpenProjectLocation: (projectId?: string) => void;
   onOpenSessionLocation: (sessionId?: string) => void;
   onDeleteProject: (projectId?: string) => void;

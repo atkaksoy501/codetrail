@@ -41,7 +41,17 @@ type RestoredScrollTarget = {
   scrollTop: number;
 };
 
-type PaneStatePersistRequest = IpcRequest<"ui:setPaneState">;
+type PaneStatePersistRequest = {
+  [K in Exclude<keyof IpcRequest<"ui:setPaneState">, "currentAutoRefreshStrategy">]-?: Exclude<
+    IpcRequest<"ui:setPaneState">[K],
+    undefined
+  >;
+} & {
+  currentAutoRefreshStrategy?: Exclude<
+    IpcRequest<"ui:setPaneState">["currentAutoRefreshStrategy"],
+    undefined
+  >;
+};
 type IndexingConfigPersistRequest = IpcRequest<"indexer:setConfig">;
 
 function hydrateIfPresent<T>(value: T | null, setter: (value: T) => void): void {
@@ -69,6 +79,9 @@ export function usePaneStateSync(args: {
   setHistoryCategories: Dispatch<SetStateAction<MessageCategory[]>>;
   setExpandedByDefaultCategories: Dispatch<SetStateAction<MessageCategory[]>>;
   setSearchProviders: Dispatch<SetStateAction<Provider[]>>;
+  setLiveWatchEnabled: Dispatch<SetStateAction<boolean>>;
+  setLiveWatchRowHasBackground: Dispatch<SetStateAction<boolean>>;
+  setClaudeHooksPrompted: Dispatch<SetStateAction<boolean>>;
   setPreferredAutoRefreshStrategy: Dispatch<SetStateAction<NonOffRefreshStrategy>>;
   setTheme: Dispatch<SetStateAction<ThemeMode>>;
   setDarkShikiTheme: Dispatch<SetStateAction<ShikiThemeId>>;
@@ -121,6 +134,9 @@ export function usePaneStateSync(args: {
     setHistoryCategories,
     setExpandedByDefaultCategories,
     setSearchProviders,
+    setLiveWatchEnabled,
+    setLiveWatchRowHasBackground,
+    setClaudeHooksPrompted,
     setPreferredAutoRefreshStrategy,
     setTheme,
     setDarkShikiTheme,
@@ -217,6 +233,9 @@ export function usePaneStateSync(args: {
         hydrateIfPresent(paneResponse.historyCategories, setHistoryCategories);
         hydrateIfPresent(paneResponse.expandedByDefaultCategories, setExpandedByDefaultCategories);
         hydrateIfPresent(paneResponse.searchProviders, setSearchProviders);
+        hydrateIfPresent(paneResponse.liveWatchEnabled, setLiveWatchEnabled);
+        hydrateIfPresent(paneResponse.liveWatchRowHasBackground, setLiveWatchRowHasBackground);
+        hydrateIfPresent(paneResponse.claudeHooksPrompted, setClaudeHooksPrompted);
         hydrateIfPresent(
           paneResponse.preferredAutoRefreshStrategy,
           setPreferredAutoRefreshStrategy,
@@ -325,6 +344,9 @@ export function usePaneStateSync(args: {
     setHideSessionsPaneInTreeView,
     setExpandedByDefaultCategories,
     setSearchProviders,
+    setLiveWatchEnabled,
+    setLiveWatchRowHasBackground,
+    setClaudeHooksPrompted,
     setPreferredAutoRefreshStrategy,
     setSelectedProjectId,
     setSelectedSessionId,
@@ -374,6 +396,9 @@ export function usePaneStateSync(args: {
       historyCategories: paneState.historyCategories,
       expandedByDefaultCategories: paneState.expandedByDefaultCategories,
       searchProviders: paneState.searchProviders,
+      liveWatchEnabled: paneState.liveWatchEnabled,
+      liveWatchRowHasBackground: paneState.liveWatchRowHasBackground,
+      claudeHooksPrompted: paneState.claudeHooksPrompted,
       preferredAutoRefreshStrategy: paneState.preferredAutoRefreshStrategy,
       theme: paneState.theme,
       darkShikiTheme: paneState.darkShikiTheme,
@@ -405,6 +430,9 @@ export function usePaneStateSync(args: {
       sessionPage: paneState.sessionPage,
       sessionScrollTop: Math.round(paneState.sessionScrollTop),
       systemMessageRegexRules: paneState.systemMessageRegexRules,
+      ...(paneState.currentAutoRefreshStrategy
+        ? { currentAutoRefreshStrategy: paneState.currentAutoRefreshStrategy }
+        : {}),
     }),
     [paneState],
   );
@@ -417,9 +445,11 @@ export function usePaneStateSync(args: {
     // Persist on a short debounce so drag-resize and scroll updates do not cause synchronous IPC
     // chatter on every animation frame.
     const timer = window.setTimeout(() => {
-      void codetrail.invoke("ui:setPaneState", paneStateToPersist).catch((error: unknown) => {
-        logError("Failed saving UI state", error);
-      });
+      void codetrail
+        .invoke("ui:setPaneState", paneStateToPersist as IpcRequest<"ui:setPaneState">)
+        .catch((error: unknown) => {
+          logError("Failed saving UI state", error);
+        });
     }, 180);
 
     return () => {

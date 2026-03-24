@@ -112,10 +112,10 @@ async function bootRenderer(): Promise<void> {
         console.error("[codetrail] failed loading initial ui state", error);
         return null;
       });
-    const [{ App }, { AppErrorBoundary }, initialPaneState] = await Promise.all([
-      import("./App"),
+    const [{ AppErrorBoundary }, initialPaneState, { App }] = await Promise.all([
       import("./AppErrorBoundary"),
       initialPaneStatePromise,
+      import("./App"),
     ]);
     applyInitialTheme(
       initialPaneState?.theme ?? "light",

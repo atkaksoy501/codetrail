@@ -89,6 +89,9 @@ function Harness({ logError }: { logError: (context: string, error: unknown) => 
     ["assistant"],
   );
   const [searchProviders, setSearchProviders] = useState<Provider[]>(["claude"]);
+  const [liveWatchEnabled, setLiveWatchEnabled] = useState(true);
+  const [liveWatchRowHasBackground, setLiveWatchRowHasBackground] = useState(true);
+  const [claudeHooksPrompted, setClaudeHooksPrompted] = useState(false);
   const [preferredAutoRefreshStrategy, setPreferredAutoRefreshStrategy] =
     useState<NonOffRefreshStrategy>("watch-1s");
   const [theme, setTheme] = useState<ThemeMode>("light");
@@ -160,6 +163,9 @@ function Harness({ logError }: { logError: (context: string, error: unknown) => 
       historyCategories,
       expandedByDefaultCategories,
       searchProviders,
+      liveWatchEnabled,
+      liveWatchRowHasBackground,
+      claudeHooksPrompted,
       preferredAutoRefreshStrategy,
       theme,
       darkShikiTheme,
@@ -205,6 +211,9 @@ function Harness({ logError }: { logError: (context: string, error: unknown) => 
     setHistoryCategories,
     setExpandedByDefaultCategories,
     setSearchProviders,
+    setLiveWatchEnabled,
+    setLiveWatchRowHasBackground,
+    setClaudeHooksPrompted,
     setPreferredAutoRefreshStrategy,
     setTheme,
     setDarkShikiTheme,
@@ -283,6 +292,10 @@ describe("usePaneStateSync", () => {
             historyCategories: ["assistant", "user"],
             expandedByDefaultCategories: ["assistant"],
             searchProviders: ["claude"],
+            liveWatchEnabled: false,
+            liveWatchRowHasBackground: false,
+            claudeHooksPrompted: true,
+            currentAutoRefreshStrategy: null,
             preferredAutoRefreshStrategy: "scan-10s",
             theme: "dark",
             darkShikiTheme: "vesper",
@@ -353,6 +366,7 @@ describe("usePaneStateSync", () => {
         singleClickFoldersExpand: false,
         singleClickProjectsExpand: true,
         hideSessionsPaneInTreeView: true,
+        liveWatchRowHasBackground: false,
         preferredAutoRefreshStrategy: "scan-10s",
         darkShikiTheme: "vesper",
         lightShikiTheme: "github-light-default",
@@ -428,6 +442,10 @@ describe("usePaneStateSync", () => {
             historyCategories: null,
             expandedByDefaultCategories: null,
             searchProviders: null,
+            liveWatchEnabled: null,
+            liveWatchRowHasBackground: null,
+            claudeHooksPrompted: null,
+            currentAutoRefreshStrategy: null,
             preferredAutoRefreshStrategy: null,
             theme: null,
             darkShikiTheme: null,

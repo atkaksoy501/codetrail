@@ -33,13 +33,26 @@ import {
   getShikiThemeGroupForUiTheme,
   isShikiThemeId,
 } from "../../shared/uiPreferences";
-import type { SettingsInfoResponse, WatchStatsResponse } from "../app/types";
+import type {
+  ClaudeHookStateResponse,
+  SettingsInfoResponse,
+  WatchLiveStatusResponse,
+  WatchStatsResponse,
+} from "../app/types";
 import { copyTextToClipboard } from "../lib/clipboard";
+import { formatInteger } from "../lib/numberFormatting";
 import { openPath } from "../lib/pathActions";
 import { compactPath, prettyCategory, toErrorMessage } from "../lib/viewUtils";
 import { ToolbarIcon } from "./ToolbarIcon";
 import { ZoomPercentInput } from "./ZoomPercentInput";
 import { ExternalToolsSection } from "./settings/ExternalToolsSection";
+import { LiveWatchSection } from "./settings/LiveWatchSection";
+import {
+  InlineSwitchRow,
+  SectionCard,
+  SectionHeader,
+  SettingsSwitch,
+} from "./settings/SettingsSectionPrimitives";
 
 type SettingsAppearanceProps = {
   theme: ThemeMode;
@@ -182,6 +195,16 @@ export function SettingsView({
   diagnostics,
   diagnosticsLoading,
   diagnosticsError,
+  liveStatus,
+  liveStatusError,
+  claudeHookState,
+  claudeHookActionPending,
+  onInstallClaudeHooks,
+  onRemoveClaudeHooks,
+  liveWatchEnabled,
+  liveWatchRowHasBackground,
+  onLiveWatchEnabledChange,
+  onLiveWatchRowHasBackgroundChange,
   appearance,
   indexing,
   messageRules,
@@ -193,6 +216,16 @@ export function SettingsView({
   diagnostics: WatchStatsResponse | null;
   diagnosticsLoading: boolean;
   diagnosticsError: string | null;
+  liveStatus: WatchLiveStatusResponse | null;
+  liveStatusError: string | null;
+  claudeHookState: ClaudeHookStateResponse | null;
+  claudeHookActionPending: "install" | "remove" | null;
+  onInstallClaudeHooks: () => void;
+  onRemoveClaudeHooks: () => void;
+  liveWatchEnabled: boolean;
+  liveWatchRowHasBackground: boolean;
+  onLiveWatchEnabledChange: (enabled: boolean) => void;
+  onLiveWatchRowHasBackgroundChange: (enabled: boolean) => void;
   appearance: SettingsAppearanceProps;
   indexing: SettingsIndexingProps;
   messageRules: SettingsMessageRulesProps;
@@ -689,6 +722,19 @@ export function SettingsView({
                 </div>
               </SectionCard>
 
+              <LiveWatchSection
+                liveStatus={liveStatus}
+                liveStatusError={liveStatusError}
+                claudeHookState={claudeHookState}
+                claudeHookActionPending={claudeHookActionPending}
+                onInstallClaudeHooks={onInstallClaudeHooks}
+                onRemoveClaudeHooks={onRemoveClaudeHooks}
+                liveWatchEnabled={liveWatchEnabled}
+                liveWatchRowHasBackground={liveWatchRowHasBackground}
+                onLiveWatchEnabledChange={onLiveWatchEnabledChange}
+                onLiveWatchRowHasBackgroundChange={onLiveWatchRowHasBackgroundChange}
+              />
+
               <SectionCard>
                 <SectionHeader
                   tone="theme"
@@ -905,91 +951,12 @@ export function SettingsView({
   );
 }
 
-function SectionCard({
-  children,
-  padded = true,
-}: {
-  children: ReactNode;
-  padded?: boolean;
-}) {
-  return <section className={`settings-section${padded ? "" : " no-padding"}`}>{children}</section>;
-}
-
-function SectionHeader({
-  icon,
-  title,
-  subtitle,
-  tone,
-}: {
-  icon: string;
-  title: string;
-  subtitle: string;
-  tone:
-    | "theme"
-    | "fonts"
-    | "provider"
-    | "expansion"
-    | "warning"
-    | "rules"
-    | "storage"
-    | "discovery"
-    | "diagnostics"
-    | "breakdown";
-}) {
-  return (
-    <div className="settings-section-header">
-      <div className={`settings-section-icon settings-section-icon-${tone}`} aria-hidden>
-        {icon}
-      </div>
-      <div className="settings-section-heading">
-        <h3>{title}</h3>
-        <p>{subtitle}</p>
-      </div>
-    </div>
-  );
-}
-
 function SettingsField({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="settings-field">
       <span className="settings-field-label">{label}</span>
       {children}
     </div>
-  );
-}
-
-function InlineSwitchRow({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="settings-inline-switch-row">
-      <span>{label}</span>
-      {children}
-    </div>
-  );
-}
-
-function SettingsSwitch({
-  checked,
-  onChange,
-  ariaLabel,
-  tone,
-}: {
-  checked: boolean;
-  onChange: (checked: boolean) => void;
-  ariaLabel: string;
-  tone?: Provider;
-}) {
-  return (
-    <label className={`settings-switch${tone ? ` settings-switch-${tone}` : ""}`}>
-      <input
-        type="checkbox"
-        checked={checked}
-        onChange={(event) => onChange(event.target.checked)}
-        aria-label={ariaLabel}
-      />
-      <span className="settings-switch-track" aria-hidden>
-        <span className="settings-switch-thumb" />
-      </span>
-    </label>
   );
 }
 
@@ -1337,7 +1304,7 @@ function RuntimeStat({ label, value }: { label: string; value: string }) {
 }
 
 function formatCount(value: number): string {
-  return new Intl.NumberFormat().format(value);
+  return formatInteger(value);
 }
 
 function formatUnitCount(value: number, singular: string, plural = `${singular}s`): string {

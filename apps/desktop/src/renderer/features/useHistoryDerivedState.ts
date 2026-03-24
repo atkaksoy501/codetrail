@@ -22,6 +22,7 @@ import type {
   SessionSummary,
   SortDirection,
 } from "../app/types";
+import { formatInteger } from "../lib/numberFormatting";
 import {
   compareRecent,
   countProviders,
@@ -29,6 +30,14 @@ import {
   prettyCategory,
   prettyProvider,
 } from "../lib/viewUtils";
+
+export function formatSelectedSummaryMessageCount(
+  filteredCount: number,
+  totalCount: number,
+  label: "messages" | "bookmarked messages",
+): string {
+  return `${formatInteger(filteredCount)} of ${formatInteger(totalCount)} ${label}`;
+}
 
 // Pure derived state for the history screen lives here so sorting, counts, labels, and layout math
 // remain memoized and testable without mixing them into fetch/interaction code.
@@ -353,8 +362,12 @@ export function useHistoryDerivedState({
     workspaceStyle,
     selectedSummaryMessageCount:
       historyMode === "bookmarks"
-        ? `${bookmarksResponse.filteredCount} of ${bookmarksResponse.totalCount} bookmarked messages`
-        : `${filteredMessageCount} of ${totalMessageCount} messages`,
+        ? formatSelectedSummaryMessageCount(
+            bookmarksResponse.filteredCount,
+            bookmarksResponse.totalCount,
+            "bookmarked messages",
+          )
+        : formatSelectedSummaryMessageCount(filteredMessageCount, totalMessageCount, "messages"),
     historyCategoryExpandShortcutMap: HISTORY_CATEGORY_EXPAND_SHORTCUTS,
     historyCategoriesShortcutMap: HISTORY_CATEGORY_SHORTCUTS,
     prettyCategory,

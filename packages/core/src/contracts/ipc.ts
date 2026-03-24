@@ -1,6 +1,11 @@
 import { z } from "zod";
 
 import {
+  CLAUDE_HOOK_EVENT_NAME_VALUES,
+  LIVE_SESSION_STATUS_KIND_VALUES,
+  LIVE_SOURCE_PRECISION_VALUES,
+} from "../live/types";
+import {
   type Provider,
   messageCategorySchema,
   operationDurationConfidenceSchema,
@@ -193,6 +198,13 @@ const preferredAutoRefreshStrategySchema = z.enum([
   "scan-1min",
   "scan-5min",
 ]);
+const currentAutoRefreshStrategySchema = z.union([
+  z.literal("off"),
+  preferredAutoRefreshStrategySchema,
+]);
+const liveSessionStatusKindSchema = z.enum(LIVE_SESSION_STATUS_KIND_VALUES);
+const liveSourcePrecisionSchema = z.enum(LIVE_SOURCE_PRECISION_VALUES);
+const claudeHookEventNameSchema = z.enum(CLAUDE_HOOK_EVENT_NAME_VALUES);
 function buildSystemMessageRegexRulesSchema() {
   return z.object(createProviderZodShape(() => z.array(z.string())));
 }
@@ -204,6 +216,33 @@ function createProviderZodShape<T extends z.ZodTypeAny>(
 }
 
 const systemMessageRegexRulesSchema = buildSystemMessageRegexRulesSchema();
+const liveProviderCountsSchema = z.object(
+  createProviderZodShape(() => z.number().int().nonnegative()),
+);
+const claudeHookStateSchema = z.object({
+  settingsPath: z.string(),
+  logPath: z.string(),
+  installed: z.boolean(),
+  managed: z.boolean(),
+  managedEventNames: z.array(claudeHookEventNameSchema),
+  missingEventNames: z.array(claudeHookEventNameSchema),
+  lastError: z.string().nullable(),
+});
+const liveSessionEntrySchema = z.object({
+  provider: providerSchema,
+  sessionIdentity: z.string().min(1),
+  sourceSessionId: z.string().min(1),
+  filePath: z.string().min(1),
+  projectName: z.string().nullable(),
+  projectPath: z.string().nullable(),
+  cwd: z.string().nullable(),
+  statusKind: liveSessionStatusKindSchema,
+  statusText: z.string().min(1),
+  detailText: z.string().nullable(),
+  sourcePrecision: liveSourcePrecisionSchema,
+  lastActivityAt: z.string(),
+  bestEffort: z.boolean(),
+});
 
 // Single source of truth for pane state fields. The non-nullable base schema is used
 // directly as the ui:setPaneState request. The nullable variant (for ui:getPaneState responses
@@ -220,6 +259,9 @@ export const paneStateBaseSchema = z.object({
   historyCategories: z.array(messageCategorySchema),
   expandedByDefaultCategories: z.array(messageCategorySchema),
   searchProviders: z.array(providerSchema),
+  liveWatchEnabled: z.boolean(),
+  liveWatchRowHasBackground: z.boolean(),
+  claudeHooksPrompted: z.boolean(),
   theme: themeModeSchema,
   darkShikiTheme: shikiThemeSchema,
   lightShikiTheme: shikiThemeSchema,
@@ -249,9 +291,11 @@ export const paneStateBaseSchema = z.object({
   projectAllSortDirection: sortDirectionSchema,
   sessionPage: z.number().int().nonnegative(),
   sessionScrollTop: z.number().int().nonnegative(),
+  currentAutoRefreshStrategy: currentAutoRefreshStrategySchema,
   preferredAutoRefreshStrategy: preferredAutoRefreshStrategySchema,
   systemMessageRegexRules: systemMessageRegexRulesSchema,
 });
+export const paneStatePatchSchema = paneStateBaseSchema.partial();
 
 function makeAllNullable<T extends z.ZodRawShape>(shape: T) {
   return Object.fromEntries(
@@ -690,7 +734,7 @@ export const ipcContractSchemas = {
     response: paneStateSchema,
   },
   "ui:setPaneState": {
-    request: paneStateBaseSchema,
+    request: paneStatePatchSchema,
     response: z.object({
       ok: z.literal(true),
     }),
@@ -742,10 +786,35 @@ export const ipcContractSchemas = {
     request: z.object({}),
     response: watcherStatsResponseSchema,
   },
+  "watcher:getLiveStatus": {
+    request: z.object({}),
+    response: z.object({
+      enabled: z.boolean(),
+      revision: z.number().int().nonnegative(),
+      updatedAt: z.string(),
+      providerCounts: liveProviderCountsSchema,
+      sessions: z.array(liveSessionEntrySchema),
+      claudeHookState: claudeHookStateSchema,
+    }),
+  },
   "watcher:stop": {
     request: z.object({}),
     response: z.object({
       ok: z.boolean(),
+    }),
+  },
+  "claudeHooks:install": {
+    request: z.object({}),
+    response: z.object({
+      ok: z.literal(true),
+      state: claudeHookStateSchema,
+    }),
+  },
+  "claudeHooks:remove": {
+    request: z.object({}),
+    response: z.object({
+      ok: z.literal(true),
+      state: claudeHookStateSchema,
     }),
   },
 } as const;

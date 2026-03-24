@@ -2481,6 +2481,80 @@ body.platform-macos .titlebar-left {
   gap: 16px;
 }
 
+.msg-live-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin-top: 8px;
+  padding: 4px 8px;
+  border: 1px solid color-mix(in srgb, var(--danger) 10%, var(--border));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--danger) 3%, var(--bg-elevated));
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  line-height: 1.35;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.msg-live-row.is-flat {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.msg-live-label {
+  flex-shrink: 0;
+  color: var(--danger);
+  font-weight: 700;
+}
+
+.msg-live-separator {
+  flex-shrink: 0;
+  color: var(--text-tertiary);
+}
+
+.msg-live-timer {
+  flex: 0 0 7ch;
+  min-width: 7ch;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.msg-live-status {
+  flex-shrink: 0;
+  font-weight: 600;
+  min-width: 0;
+}
+
+.msg-live-status-working,
+.msg-live-status-thinking,
+.msg-live-status-running_tool {
+  color: var(--accent-blue);
+}
+
+.msg-live-status-waiting_for_input,
+.msg-live-status-idle,
+.msg-live-status-active_recently,
+.msg-live-status-unknown {
+  color: var(--text-secondary);
+}
+
+.msg-live-status-waiting_for_approval {
+  color: var(--accent-orange);
+}
+
+.msg-live-detail {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .msg-toolbar {
   display: flex;
   align-items: center;
@@ -5724,6 +5798,42 @@ mark {
   max-width: 64ch;
 }
 
+.settings-callout-row-hooks {
+  align-items: flex-start;
+}
+
+.settings-hook-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-left: auto;
+  justify-content: flex-end;
+  align-self: flex-start;
+}
+
+.settings-hook-actions > .settings-primary-button,
+.settings-hook-actions > .settings-rule-button {
+  min-width: 148px;
+}
+
+.settings-hook-actions > .settings-rule-button {
+  min-height: 36px;
+  padding: 0 16px;
+  font-size: 12px;
+}
+
+.settings-hook-meta {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.settings-hook-meta-row {
+  display: grid;
+  gap: 4px;
+}
+
 .settings-primary-button {
   min-width: 122px;
   height: 36px;
@@ -6156,6 +6266,10 @@ mark {
   .settings-provider-row-state,
   .settings-switch {
     justify-self: start;
+  }
+
+  .settings-hook-actions {
+    width: 100%;
   }
 
   .settings-path-row,

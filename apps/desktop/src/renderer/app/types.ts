@@ -16,6 +16,8 @@ export type SearchQueryResponse = IpcResponse<"search:query">;
 export type SearchResult = SearchQueryResponse["results"][number];
 export type SettingsInfoResponse = IpcResponse<"app:getSettingsInfo">;
 export type WatchStatsResponse = IpcResponse<"watcher:getStats">;
+export type WatchLiveStatusResponse = IpcResponse<"watcher:getLiveStatus">;
+export type ClaudeHookStateResponse = WatchLiveStatusResponse["claudeHookState"];
 export type PaneStateSnapshot = IpcResponse<"ui:getPaneState"> & IpcResponse<"indexer:getConfig">;
 
 export type HistoryMessage =

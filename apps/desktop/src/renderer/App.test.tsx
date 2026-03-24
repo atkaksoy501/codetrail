@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import { createClaudeHookStateFixture, createLiveStatusFixture } from "@codetrail/core/testing";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
@@ -58,7 +59,7 @@ describe("App shell", () => {
     const user = userEvent.setup();
     const client = createAppClient();
 
-    renderWithClient(
+    const { container } = renderWithClient(
       <App
         initialPaneState={
           {
@@ -94,6 +95,216 @@ describe("App shell", () => {
     await user.click(screen.getByRole("button", { name: "Open settings" }));
     await waitFor(() => {
       expect(screen.getByText("Discovery Roots")).toBeInTheDocument();
+    });
+  });
+
+  it("shows a compact live session row in the message pane for the selected session", async () => {
+    installScrollIntoViewMock();
+
+    const user = userEvent.setup();
+    const client = createAppClient({
+      "watcher:getLiveStatus": () =>
+        createLiveStatusFixture({
+          enabled: true,
+          providerCounts: {
+            claude: 1,
+            codex: 0,
+            gemini: 0,
+            cursor: 0,
+            copilot: 0,
+          },
+          sessions: [
+            {
+              provider: "claude",
+              sessionIdentity: "live-session-1",
+              sourceSessionId: "provider-session-1",
+              filePath: "/workspace/project-one/session-1.jsonl",
+              projectName: "Project One",
+              projectPath: "/workspace/project-one",
+              cwd: "/workspace/project-one",
+              statusKind: "waiting_for_input",
+              statusText: "Waiting for input",
+              detailText: "updating topbar layout",
+              sourcePrecision: "hook",
+              lastActivityAt: new Date(Date.now() - 12_000).toISOString(),
+              bestEffort: false,
+            },
+          ],
+          claudeHookState: createClaudeHookStateFixture({
+            logPath: "/tmp/claude-hooks.jsonl",
+            installed: true,
+            managedEventNames: [],
+            missingEventNames: [],
+          }),
+        }),
+    });
+
+    const { container } = renderWithClient(
+      <App
+        initialPaneState={
+          {
+            selectedProjectId: "project_1",
+            selectedSessionId: "session_1",
+            historyMode: "session",
+            liveWatchEnabled: true,
+            preferredAutoRefreshStrategy: "watch-1s",
+          } as PaneStateSnapshot
+        }
+      />,
+      client,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Please review markdown table rendering")).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: "Auto-refresh strategy" }));
+    await user.click(screen.getByRole("button", { name: "Watch (1s debounce)" }));
+
+    await waitFor(() => {
+      const liveRow = container.querySelector<HTMLElement>(".msg-live-row");
+      expect(liveRow).not.toBeNull();
+      expect(liveRow).toHaveTextContent("Live");
+      expect(liveRow).toHaveTextContent("Waiting for input");
+      expect(liveRow).toHaveTextContent("updating topbar layout");
+      expect(liveRow).toHaveTextContent(/\d{2}s ago/);
+    });
+  });
+
+  it("renders the flat live row style when the background preference is disabled", async () => {
+    installScrollIntoViewMock();
+
+    const user = userEvent.setup();
+    const client = createAppClient({
+      "watcher:getLiveStatus": () =>
+        createLiveStatusFixture({
+          enabled: true,
+          providerCounts: {
+            claude: 1,
+            codex: 0,
+            gemini: 0,
+            cursor: 0,
+            copilot: 0,
+          },
+          sessions: [
+            {
+              provider: "claude",
+              sessionIdentity: "live-session-1",
+              sourceSessionId: "provider-session-1",
+              filePath: "/workspace/project-one/session-1.jsonl",
+              projectName: "Project One",
+              projectPath: "/workspace/project-one",
+              cwd: "/workspace/project-one",
+              statusKind: "working",
+              statusText: "Working",
+              detailText: "updating styles",
+              sourcePrecision: "hook",
+              lastActivityAt: new Date(Date.now() - 12_000).toISOString(),
+              bestEffort: false,
+            },
+          ],
+          claudeHookState: createClaudeHookStateFixture({
+            logPath: "/tmp/claude-hooks.jsonl",
+            installed: true,
+            managedEventNames: [],
+            missingEventNames: [],
+          }),
+        }),
+    });
+
+    const { container } = renderWithClient(
+      <App
+        initialPaneState={
+          {
+            selectedProjectId: "project_1",
+            selectedSessionId: "session_1",
+            historyMode: "session",
+            liveWatchEnabled: true,
+            liveWatchRowHasBackground: false,
+            preferredAutoRefreshStrategy: "watch-1s",
+          } as PaneStateSnapshot
+        }
+      />,
+      client,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Please review markdown table rendering")).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: "Auto-refresh strategy" }));
+    await user.click(screen.getByRole("button", { name: "Watch (1s debounce)" }));
+
+    await waitFor(() => {
+      expect(container.querySelector(".msg-live-row.is-flat")).not.toBeNull();
+    });
+  });
+
+  it("does not show a project-level live row while viewing a different session", async () => {
+    installScrollIntoViewMock();
+
+    const user = userEvent.setup();
+    const client = createAppClient({
+      "watcher:getLiveStatus": () =>
+        createLiveStatusFixture({
+          enabled: true,
+          providerCounts: {
+            claude: 1,
+            codex: 0,
+            gemini: 0,
+            cursor: 0,
+            copilot: 0,
+          },
+          sessions: [
+            {
+              provider: "claude",
+              sessionIdentity: "other-live-session",
+              sourceSessionId: "provider-session-2",
+              filePath: "/workspace/project-one/session-2.jsonl",
+              projectName: "Project One",
+              projectPath: "/workspace/project-one",
+              cwd: "/workspace/project-one",
+              statusKind: "working",
+              statusText: "Responding",
+              detailText: "working in another session",
+              sourcePrecision: "hook",
+              lastActivityAt: new Date(Date.now() - 12_000).toISOString(),
+              bestEffort: false,
+            },
+          ],
+          claudeHookState: createClaudeHookStateFixture({
+            logPath: "/tmp/claude-hooks.jsonl",
+            installed: true,
+            managedEventNames: [],
+            missingEventNames: [],
+          }),
+        }),
+    });
+
+    const { container } = renderWithClient(
+      <App
+        initialPaneState={
+          {
+            selectedProjectId: "project_1",
+            selectedSessionId: "session_1",
+            historyMode: "session",
+            liveWatchEnabled: true,
+            preferredAutoRefreshStrategy: "watch-1s",
+          } as PaneStateSnapshot
+        }
+      />,
+      client,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Please review markdown table rendering")).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: "Auto-refresh strategy" }));
+    await user.click(screen.getByRole("button", { name: "Watch (1s debounce)" }));
+
+    await waitFor(() => {
+      expect(container.querySelector(".msg-live-row")).toBeNull();
     });
   });
 
@@ -230,7 +441,7 @@ describe("App shell", () => {
       }),
     });
 
-    renderWithClient(
+    const { container } = renderWithClient(
       <App
         initialPaneState={
           {
@@ -256,7 +467,7 @@ describe("App shell", () => {
     const user = userEvent.setup();
     const client = createAppClient();
 
-    renderWithClient(
+    const { container } = renderWithClient(
       <App
         initialPaneState={
           {
@@ -535,6 +746,32 @@ describe("App shell", () => {
     });
   });
 
+  it("restores active watch auto-refresh on startup", async () => {
+    const client = createAppClient();
+
+    renderWithClient(
+      <App
+        initialPaneState={
+          {
+            projectPaneWidth: 300,
+            sessionPaneWidth: 320,
+            currentAutoRefreshStrategy: "watch-3s",
+            preferredAutoRefreshStrategy: "watch-3s",
+          } as PaneStateSnapshot
+        }
+      />,
+      client,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Project One")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Auto-refresh strategy" }).textContent).toContain(
+        "Watch (3s debounce)",
+      );
+      expect(client.invoke).toHaveBeenCalledWith("watcher:start", { debounceMs: 3000 });
+    });
+  });
+
   it("shows the watcher queue count on the auto-refresh control", async () => {
     const user = userEvent.setup();
     const client = createAppClient({
@@ -697,7 +934,7 @@ describe("App shell", () => {
       }),
     });
 
-    renderWithClient(
+    const { container } = renderWithClient(
       <App
         initialPaneState={
           {
