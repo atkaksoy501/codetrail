@@ -25,6 +25,7 @@ import type {
   ProjectViewMode,
   SessionPaneNavigationItem,
   SessionSummary,
+  TreeAutoRevealSessionRequest,
 } from "../app/types";
 import { copyTextToClipboard } from "../lib/clipboard";
 import type { CodetrailClient } from "../lib/codetrailClient";
@@ -107,6 +108,12 @@ export function useHistoryInteractions({
   sessionDetailTotalCount,
   allSessionsCount,
   sessionSearchInputRef,
+  projectPaneCollapsed,
+  setProjectPaneCollapsed,
+  sessionPaneCollapsed,
+  hideSessionsPaneForTreeView,
+  setProjectViewMode,
+  setAutoRevealSessionRequest,
   loadProjects,
   loadSessions,
   refreshVisibleBookmarkStates,
@@ -172,6 +179,12 @@ export function useHistoryInteractions({
   sessionDetailTotalCount: number | null | undefined;
   allSessionsCount: number;
   sessionSearchInputRef: RefObject<HTMLInputElement | null>;
+  projectPaneCollapsed: boolean;
+  setProjectPaneCollapsed: Dispatch<SetStateAction<boolean>>;
+  sessionPaneCollapsed: boolean;
+  hideSessionsPaneForTreeView: boolean;
+  setProjectViewMode: Dispatch<SetStateAction<ProjectViewMode>>;
+  setAutoRevealSessionRequest: Dispatch<SetStateAction<TreeAutoRevealSessionRequest | null>>;
   loadProjects: (source?: "auto" | "resort") => Promise<void>;
   loadSessions: () => Promise<void>;
   refreshVisibleBookmarkStates: () => void;
@@ -259,6 +272,20 @@ export function useHistoryInteractions({
 
   const handleRevealInSession = useCallback(
     (messageId: string, sourceId: string) => {
+      const shouldRevealViaProjectTree = sessionPaneCollapsed || hideSessionsPaneForTreeView;
+      const requestTreeReveal = (projectId: string, sessionId: string) => {
+        if (!shouldRevealViaProjectTree) {
+          return;
+        }
+        if (projectPaneCollapsed) {
+          setProjectPaneCollapsed(false);
+        }
+        if (projectViewMode !== "tree") {
+          setProjectViewMode("tree");
+        }
+        setAutoRevealSessionRequest({ projectId, sessionId });
+      };
+
       // Bookmarks/project-wide views route through pending search navigation because the controller
       // may need to switch projects or sessions before the message can be focused.
       if (historyMode === "bookmarks") {
@@ -266,6 +293,7 @@ export function useHistoryInteractions({
         if (!bookmarked) {
           return;
         }
+        requestTreeReveal(bookmarked.projectId, bookmarked.sessionId);
         setPendingSearchNavigation({
           projectId: bookmarked.projectId,
           sessionId: bookmarked.sessionId,
@@ -281,6 +309,7 @@ export function useHistoryInteractions({
         if (!projectMessage || !selectedProjectId) {
           return;
         }
+        requestTreeReveal(selectedProjectId, projectMessage.sessionId);
         setPendingSearchNavigation({
           projectId: selectedProjectId,
           sessionId: projectMessage.sessionId,
@@ -291,6 +320,9 @@ export function useHistoryInteractions({
         return;
       }
 
+      if (selectedProjectId && selectedSessionId) {
+        requestTreeReveal(selectedProjectId, selectedSessionId);
+      }
       setSessionQueryInput("");
       setFocusMessageId(messageId);
       setPendingRevealTarget({ messageId, sourceId });
@@ -298,12 +330,20 @@ export function useHistoryInteractions({
     [
       bookmarksByMessageId,
       historyCategories,
+      hideSessionsPaneForTreeView,
       historyMode,
+      projectPaneCollapsed,
       projectMessagesById,
+      projectViewMode,
+      sessionPaneCollapsed,
+      selectedSessionId,
       selectedProjectId,
+      setAutoRevealSessionRequest,
       setFocusMessageId,
       setPendingRevealTarget,
       setPendingSearchNavigation,
+      setProjectPaneCollapsed,
+      setProjectViewMode,
       setSessionQueryInput,
     ],
   );

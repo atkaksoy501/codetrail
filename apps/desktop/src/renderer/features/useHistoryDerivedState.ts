@@ -264,6 +264,18 @@ export function useHistoryDerivedState({
       : historyMode === "project_all"
         ? (projectCombinedDetail?.highlightPatterns ?? [])
         : (sessionDetail?.highlightPatterns ?? []);
+  const filteredMessageCount =
+    historyMode === "bookmarks"
+      ? bookmarksResponse.filteredCount
+      : historyMode === "project_all"
+        ? (projectCombinedDetail?.totalCount ?? 0)
+        : (sessionDetail?.totalCount ?? 0);
+  const totalMessageCount =
+    historyMode === "bookmarks"
+      ? bookmarksResponse.totalCount
+      : historyMode === "project_all"
+        ? (selectedProject?.messageCount ?? 0)
+        : (selectedSession?.messageCount ?? sessionDetail?.session?.messageCount ?? 0);
 
   const isExpandedByDefault = useCallback(
     (category: MessageCategory) => expandedByDefaultCategories.includes(category),
@@ -342,9 +354,7 @@ export function useHistoryDerivedState({
     selectedSummaryMessageCount:
       historyMode === "bookmarks"
         ? `${bookmarksResponse.filteredCount} of ${bookmarksResponse.totalCount} bookmarked messages`
-        : historyMode === "project_all"
-          ? `${projectCombinedDetail?.totalCount ?? 0} messages`
-          : `${sessionDetail?.totalCount ?? 0} messages`,
+        : `${filteredMessageCount} of ${totalMessageCount} messages`,
     historyCategoryExpandShortcutMap: HISTORY_CATEGORY_EXPAND_SHORTCUTS,
     historyCategoriesShortcutMap: HISTORY_CATEGORY_SHORTCUTS,
     prettyCategory,

@@ -53,6 +53,11 @@ export type PendingRevealTarget = {
   messageId: string;
 };
 
+export type TreeAutoRevealSessionRequest = {
+  projectId: string;
+  sessionId: string;
+};
+
 export type PendingMessagePageNavigation = {
   direction: "previous" | "next";
   targetPage: number;

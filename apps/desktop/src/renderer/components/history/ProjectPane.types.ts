@@ -7,6 +7,7 @@ import type {
   ProjectSummary,
   ProjectViewMode,
   SessionSummary,
+  TreeAutoRevealSessionRequest,
 } from "../../app/types";
 
 export type ProjectPaneHistoryMode = "session" | "bookmarks" | "project_all";
@@ -47,6 +48,7 @@ export type ProjectPaneData = {
   projectUpdates: Record<string, { messageDelta: number; updatedAt: number }>;
   treeProjectSessionsByProjectId?: Record<string, SessionSummary[]>;
   treeProjectSessionsLoadingByProjectId?: Record<string, boolean>;
+  autoRevealSessionRequest?: TreeAutoRevealSessionRequest | null;
   listRef?: Ref<HTMLDivElement>;
 };
 
@@ -96,6 +98,7 @@ export type ProjectPaneActions = {
   consumeFocusSelectionBehavior?: () => ProjectPaneSelectionOptions;
   onQueueProjectTreeNoopCommit?: (options?: ProjectPaneSelectionOptions) => void;
   onEnsureTreeProjectSessionsLoaded?: (projectId: string) => void;
+  onConsumeAutoRevealSessionRequest?: () => void;
   onOpenProjectLocation: (projectId?: string) => void;
   onOpenSessionLocation: (sessionId?: string) => void;
   onDeleteProject: (projectId?: string) => void;

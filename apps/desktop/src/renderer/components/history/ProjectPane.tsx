@@ -76,6 +76,7 @@ export function ProjectPane({
     projectUpdates,
     treeProjectSessionsByProjectId = {},
     treeProjectSessionsLoadingByProjectId = {},
+    autoRevealSessionRequest = null,
     listRef,
   } = data;
   const { sortField, sortDirection, sessionSortDirection = "desc" } = sorting;
@@ -104,6 +105,7 @@ export function ProjectPane({
     consumeFocusSelectionBehavior = () => ({ commitMode: "immediate", waitForKeyboardIdle: false }),
     onQueueProjectTreeNoopCommit = () => {},
     onEnsureTreeProjectSessionsLoaded = () => {},
+    onConsumeAutoRevealSessionRequest = () => {},
     onOpenProjectLocation,
     onOpenSessionLocation,
     onDeleteProject,
@@ -177,6 +179,8 @@ export function ProjectPane({
     projectProvidersKey: projectProviderKey,
     projectQueryInput,
     onEnsureTreeProjectSessionsLoaded,
+    autoRevealSessionRequest,
+    onConsumeAutoRevealSessionRequest,
   });
 
   const handleToggleFolder = (folderId: string) => {

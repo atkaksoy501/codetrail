@@ -14,12 +14,32 @@ describe("historyCopyFormat", () => {
         repositoryUrl: "https://example.com/codetrail.git",
         resolutionState: "resolved",
         resolutionSource: "git_live",
+        metadataJson: '{"workspaceId":"workspace-key","resolutionSource":"git_live"}',
         sessionCount: 3,
         messageCount: 42,
         bookmarkCount: 0,
         lastActivity: "2026-03-24T10:00:00.000Z",
       }),
     ).toContain("Provider Project Key: workspace-key");
+    expect(
+      formatProjectDetails({
+        id: "project_1",
+        provider: "codex",
+        name: "codetrail",
+        path: "/workspace/codetrail",
+        providerProjectKey: "workspace-key",
+        repositoryUrl: "https://example.com/codetrail.git",
+        resolutionState: "resolved",
+        resolutionSource: "git_live",
+        metadataJson: '{"workspaceId":"workspace-key","resolutionSource":"git_live"}',
+        sessionCount: 3,
+        messageCount: 42,
+        bookmarkCount: 0,
+        lastActivity: "2026-03-24T10:00:00.000Z",
+      }),
+    ).toContain(
+      'Project Metadata JSON: {"workspaceId":"workspace-key","resolutionSource":"git_live"}',
+    );
   });
 
   it("includes session metadata when available", () => {
@@ -48,6 +68,7 @@ describe("historyCopyFormat", () => {
       resolutionSource: "codex_fork",
       worktreeLabel: "c5dd",
       worktreeSource: "codex_fork",
+      metadataJson: '{"modelProvider":"openai","dynamicToolsCount":12}',
       messageCount: 12,
       bookmarkCount: 0,
       tokenInputTotal: 100,
@@ -59,5 +80,8 @@ describe("historyCopyFormat", () => {
     expect(output).toContain("Provider Session ID: abc");
     expect(output).toContain("Worktree Source: codex_fork");
     expect(output).toContain("Git Commit: deadbeef");
+    expect(output).toContain(
+      'Session Metadata JSON: {"modelProvider":"openai","dynamicToolsCount":12}',
+    );
   });
 });

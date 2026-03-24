@@ -550,12 +550,44 @@ describe("queryService in-memory", () => {
     const now = "2026-03-01T10:00:00.000Z";
 
     db.prepare(
-      `INSERT INTO projects (id, provider, name, path, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-    ).run("project_cursor", "cursor", "Cursor Project", "/workspace/cursor-project", now, now);
+      `INSERT INTO projects (id, provider, name, path, metadata_json, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      "project_cursor",
+      "cursor",
+      "Cursor Project",
+      "/workspace/cursor-project",
+      '{"workspaceId":"cursor-workspace"}',
+      now,
+      now,
+    );
+    db.prepare(
+      `INSERT INTO sessions (
+        id,
+        project_id,
+        provider,
+        file_path,
+        model_names,
+        metadata_json,
+        message_count,
+        token_input_total,
+        token_output_total
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      "session_cursor",
+      "project_cursor",
+      "cursor",
+      "/workspace/cursor-project/session-1.jsonl",
+      "",
+      '{"composerId":"composer-1"}',
+      0,
+      0,
+      0,
+    );
 
     const service = createQueryServiceFromDb(db);
     const projects = service.listProjects({ providers: undefined, query: "" });
+    const sessions = service.listSessions({ projectId: "project_cursor" });
     expect(projects.projects).toEqual([
       {
         id: "project_cursor",
@@ -566,12 +598,14 @@ describe("queryService in-memory", () => {
         repositoryUrl: null,
         resolutionState: null,
         resolutionSource: null,
-        sessionCount: 0,
+        metadataJson: '{"workspaceId":"cursor-workspace"}',
+        sessionCount: 1,
         messageCount: 0,
         bookmarkCount: 0,
         lastActivity: null,
       },
     ]);
+    expect(sessions.sessions[0]?.metadataJson).toBe('{"composerId":"composer-1"}');
   });
 
   it("includes bookmark counts in project and session listings", () => {

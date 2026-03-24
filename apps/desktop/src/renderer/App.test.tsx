@@ -731,6 +731,218 @@ describe("App shell", () => {
     expect(screen.getByText("Please review markdown table rendering")).toBeInTheDocument();
   });
 
+  it("shows filtered and total message counts for session and all-sessions views", async () => {
+    const user = userEvent.setup();
+    const client = createAppClient({
+      "projects:list": () => ({
+        projects: [
+          {
+            id: "project_1",
+            provider: "claude",
+            name: "Project One",
+            path: "/workspace/project-one",
+            sessionCount: 1,
+            messageCount: 7,
+            bookmarkCount: 0,
+            lastActivity: "2026-03-01T10:00:05.000Z",
+          },
+        ],
+      }),
+      "sessions:list": () => ({
+        sessions: [
+          {
+            id: "session_1",
+            projectId: "project_1",
+            provider: "claude",
+            filePath: "/workspace/project-one/session-1.jsonl",
+            title: "Investigate markdown rendering",
+            modelNames: "claude-opus-4-1",
+            startedAt: "2026-03-01T10:00:00.000Z",
+            endedAt: "2026-03-01T10:00:05.000Z",
+            durationMs: 5000,
+            gitBranch: "main",
+            cwd: "/workspace/project-one",
+            messageCount: 3,
+            bookmarkCount: 0,
+            tokenInputTotal: 14,
+            tokenOutputTotal: 8,
+          },
+        ],
+      }),
+      "sessions:getDetail": () => ({
+        session: {
+          id: "session_1",
+          projectId: "project_1",
+          provider: "claude",
+          filePath: "/workspace/project-one/session-1.jsonl",
+          title: "Investigate markdown rendering",
+          modelNames: "claude-opus-4-1",
+          startedAt: "2026-03-01T10:00:00.000Z",
+          endedAt: "2026-03-01T10:00:05.000Z",
+          durationMs: 5000,
+          gitBranch: "main",
+          cwd: "/workspace/project-one",
+          messageCount: 3,
+          tokenInputTotal: 14,
+          tokenOutputTotal: 8,
+        },
+        totalCount: 1,
+        categoryCounts: {
+          user: 1,
+          assistant: 0,
+          tool_use: 0,
+          tool_edit: 0,
+          tool_result: 0,
+          thinking: 0,
+          system: 0,
+        },
+        page: 0,
+        pageSize: 100,
+        focusIndex: null,
+        messages: [
+          {
+            id: "m1",
+            sourceId: "src1",
+            sessionId: "session_1",
+            provider: "claude",
+            category: "user",
+            content: "Please review markdown table rendering",
+            createdAt: "2026-03-01T10:00:00.000Z",
+            tokenInput: null,
+            tokenOutput: null,
+            operationDurationMs: null,
+            operationDurationSource: null,
+            operationDurationConfidence: null,
+          },
+        ],
+      }),
+      "projects:getCombinedDetail": () => ({
+        projectId: "project_1",
+        totalCount: 2,
+        categoryCounts: {
+          user: 1,
+          assistant: 1,
+          tool_use: 0,
+          tool_edit: 0,
+          tool_result: 0,
+          thinking: 0,
+          system: 0,
+        },
+        page: 0,
+        pageSize: 100,
+        focusIndex: null,
+        messages: [
+          {
+            id: "m1",
+            sourceId: "src1",
+            sessionId: "session_1",
+            provider: "claude",
+            category: "user",
+            content: "Please review markdown table rendering",
+            createdAt: "2026-03-01T10:00:00.000Z",
+            tokenInput: null,
+            tokenOutput: null,
+            operationDurationMs: null,
+            operationDurationSource: null,
+            operationDurationConfidence: null,
+            sessionTitle: "Investigate markdown rendering",
+            sessionActivity: "2026-03-01T10:00:05.000Z",
+            sessionStartedAt: "2026-03-01T10:00:00.000Z",
+            sessionEndedAt: "2026-03-01T10:00:05.000Z",
+            sessionGitBranch: "main",
+            sessionCwd: "/workspace/project-one",
+          },
+          {
+            id: "m2",
+            sourceId: "src2",
+            sessionId: "session_1",
+            provider: "claude",
+            category: "assistant",
+            content: "Everything checks out.",
+            createdAt: "2026-03-01T10:00:05.000Z",
+            tokenInput: null,
+            tokenOutput: null,
+            operationDurationMs: null,
+            operationDurationSource: null,
+            operationDurationConfidence: null,
+            sessionTitle: "Investigate markdown rendering",
+            sessionActivity: "2026-03-01T10:00:05.000Z",
+            sessionStartedAt: "2026-03-01T10:00:00.000Z",
+            sessionEndedAt: "2026-03-01T10:00:05.000Z",
+            sessionGitBranch: "main",
+            sessionCwd: "/workspace/project-one",
+          },
+        ],
+      }),
+    });
+
+    renderWithClient(
+      <App
+        initialPaneState={
+          {
+            selectedProjectId: "project_1",
+            selectedSessionId: "session_1",
+            historyMode: "session",
+          } as PaneStateSnapshot
+        }
+      />,
+      client,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("1 of 3 messages")).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: /All Sessions/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText("2 of 7 messages")).toBeInTheDocument();
+    });
+  });
+
+  it("reveals messages in the project tree when the Sessions pane is collapsed", async () => {
+    installScrollIntoViewMock();
+    const user = userEvent.setup();
+    const client = createAppClient();
+    const { container } = renderWithClient(
+      <App
+        initialPaneState={
+          {
+            projectPaneCollapsed: true,
+            projectViewMode: "list",
+            sessionPaneCollapsed: true,
+            selectedProjectId: "project_1",
+            historyMode: "project_all",
+          } as PaneStateSnapshot
+        }
+      />,
+      client,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Please review markdown table rendering")).toBeInTheDocument();
+    });
+    const [revealButton] = screen.getAllByRole("button", {
+      name: "Reveal this message in session",
+    });
+    expect(revealButton).toBeDefined();
+    if (!revealButton) {
+      throw new Error("Expected reveal button");
+    }
+
+    await user.click(revealButton);
+
+    await waitFor(() => {
+      const treeSessionButton = container.querySelector<HTMLButtonElement>(
+        '.project-tree-session-row[data-session-id="session_1"]',
+      );
+      expect(treeSessionButton).not.toBeNull();
+      expect(treeSessionButton?.classList.contains("active")).toBe(true);
+    });
+
+    expect(screen.getByRole("button", { name: /Project One/i })).toBeInTheDocument();
+  });
+
   it("reveals session leaves in the project tree and keeps the Sessions pane collapsed", async () => {
     installScrollIntoViewMock();
     const user = userEvent.setup();
@@ -770,7 +982,7 @@ describe("App shell", () => {
     await user.click(treeSessionButton);
 
     await waitFor(() => {
-      expect(screen.getByText("2 messages")).toBeInTheDocument();
+      expect(screen.getByText("2 of 2 messages")).toBeInTheDocument();
     });
 
     const workspace = container.querySelector<HTMLElement>(".workspace.history-layout");

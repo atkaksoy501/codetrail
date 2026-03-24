@@ -143,6 +143,7 @@ export function HistoryLayout({
           projectUpdates: history.projectUpdates,
           treeProjectSessionsByProjectId: history.treeProjectSessionsByProjectId,
           treeProjectSessionsLoadingByProjectId: history.treeProjectSessionsLoadingByProjectId,
+          autoRevealSessionRequest: history.autoRevealSessionRequest,
         }}
         sorting={{
           sortField: history.projectSortField,
@@ -187,6 +188,7 @@ export function HistoryLayout({
           consumeFocusSelectionBehavior: history.consumeProjectPaneFocusSelectionBehavior,
           onQueueProjectTreeNoopCommit: history.queueProjectTreeNoopCommit,
           onEnsureTreeProjectSessionsLoaded: history.ensureTreeProjectSessionsLoaded,
+          onConsumeAutoRevealSessionRequest: history.consumeAutoRevealSessionRequest,
           onDeleteProject,
           onOpenProjectLocation: (projectId) =>
             openProjectLocationById(history, logError, projectId),

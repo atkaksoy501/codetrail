@@ -59,6 +59,7 @@ type SessionSummaryRow = {
   resolution_source: string | null;
   worktree_label: string | null;
   worktree_source: string | null;
+  metadata_json: string | null;
   activity_at: string | null;
   message_count: number;
   token_input_total: number;
@@ -74,6 +75,7 @@ type ProjectSummaryRow = {
   repository_url: string | null;
   resolution_state: string | null;
   resolution_source: string | null;
+  metadata_json: string | null;
   session_count: number;
   message_count: number;
   last_activity: string | null;
@@ -381,6 +383,7 @@ function listProjectsWithDatabase(
          p.repository_url,
          p.resolution_state,
          p.resolution_source,
+         p.metadata_json,
          COALESCE(ps.session_count, 0) as session_count,
          COALESCE(ps.message_count, 0) as message_count,
          ps.last_activity as last_activity
@@ -403,6 +406,7 @@ function listProjectsWithDatabase(
       repositoryUrl: row.repository_url,
       resolutionState: row.resolution_state,
       resolutionSource: row.resolution_source,
+      metadataJson: row.metadata_json,
       sessionCount: row.session_count,
       messageCount: row.message_count,
       bookmarkCount: bookmarkCounts[row.id] ?? bookmarkStore.countProjectBookmarks(row.id),
@@ -450,6 +454,7 @@ function listSessionsWithDatabase(
          s.resolution_source,
          s.worktree_label,
          s.worktree_source,
+         s.metadata_json,
          s.message_count,
          s.token_input_total,
          s.token_output_total
@@ -1535,6 +1540,7 @@ function mapSessionSummaryRow(
     resolutionSource: row.resolution_source,
     worktreeLabel: row.worktree_label,
     worktreeSource: row.worktree_source,
+    metadataJson: row.metadata_json,
     messageCount: row.message_count,
     bookmarkCount,
     tokenInputTotal: row.token_input_total,

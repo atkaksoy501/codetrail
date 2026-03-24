@@ -120,6 +120,7 @@ function createProjectPaneProps(
     providers: ["claude", "codex", "gemini", "cursor"],
     projectProviderCounts: { claude: 1, codex: 1, gemini: 1, cursor: 0, copilot: 0 },
     projectUpdates: { project_2: { messageDelta: 3, updatedAt: Date.now() } },
+    autoRevealSessionRequest: null,
   };
   const sorting: ComponentProps<typeof ProjectPane>["sorting"] = {
     sortField: "last_active" as const,
@@ -147,6 +148,7 @@ function createProjectPaneProps(
     onCopyProjectDetails: vi.fn(),
     onCopySession: vi.fn(),
     onSelectProject: vi.fn(),
+    onConsumeAutoRevealSessionRequest: vi.fn(),
     onOpenProjectLocation: vi.fn(),
     onOpenSessionLocation: vi.fn(),
     onDeleteProject: vi.fn(),
@@ -516,6 +518,61 @@ describe("ProjectPane", () => {
     );
 
     expect(screen.getByRole("button", { name: /Session Two/i })).toBeInTheDocument();
+    expect(scrollIntoView).toHaveBeenCalled();
+  });
+
+  it("auto-expands and reveals a session only for explicit tree reveal requests", async () => {
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+      value: scrollIntoView,
+      configurable: true,
+    });
+    const onEnsureTreeProjectSessionsLoaded = vi.fn();
+    const onConsumeAutoRevealSessionRequest = vi.fn();
+
+    renderProjectPane({
+      data: {
+        viewMode: "tree",
+        historyMode: "project_all",
+        selectedProjectId: "project_1",
+        autoRevealSessionRequest: {
+          projectId: "project_1",
+          sessionId: "session_2",
+        },
+        treeProjectSessionsByProjectId: {
+          project_1: [
+            createSessionSummary({
+              id: "session_1",
+              projectId: "project_1",
+              filePath: "/tmp/session-1.jsonl",
+              title: "Session One",
+              messageCount: 3,
+              tokenInputTotal: 10,
+              tokenOutputTotal: 8,
+            }),
+            createSessionSummary({
+              id: "session_2",
+              projectId: "project_1",
+              filePath: "/tmp/session-2.jsonl",
+              title: "Session Two",
+              startedAt: "2026-03-01T11:00:00.000Z",
+              endedAt: "2026-03-01T11:00:05.000Z",
+              messageCount: 4,
+              tokenInputTotal: 12,
+              tokenOutputTotal: 9,
+            }),
+          ],
+        },
+      },
+      actions: {
+        onEnsureTreeProjectSessionsLoaded,
+        onConsumeAutoRevealSessionRequest,
+      },
+    });
+
+    expect(await screen.findByRole("button", { name: /Session Two/i })).toBeInTheDocument();
+    expect(onEnsureTreeProjectSessionsLoaded).toHaveBeenCalledWith("project_1");
+    expect(onConsumeAutoRevealSessionRequest).toHaveBeenCalled();
     expect(scrollIntoView).toHaveBeenCalled();
   });
 

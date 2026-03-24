@@ -85,6 +85,9 @@
   --session-pane-preview-text: #4f5468;
   --session-pane-meta-text: #72788d;
   --session-pane-count-text: #2563eb;
+  --project-tree-folder-text: var(--text-tertiary);
+  --project-tree-folder-hover-text: var(--text-secondary);
+  --project-tree-project-text: var(--text-secondary);
   --message-heading-text: #1a1c24;
   --message-focus-border: rgba(37, 99, 235, 0.44);
   --message-focus-ring: rgba(37, 99, 235, 0.2);
@@ -1893,7 +1896,7 @@ body.platform-macos .titlebar-left {
   font-size: 12px;
   font-weight: 600;
   letter-spacing: -0.01em;
-  color: var(--text-secondary);
+  color: var(--project-tree-folder-text);
 }
 
 .project-folder-label-text {
@@ -1910,7 +1913,7 @@ body.platform-macos .titlebar-left {
 }
 
 .project-folder-row:hover .project-folder-label {
-  color: var(--text-primary);
+  color: var(--project-tree-folder-hover-text);
 }
 
 .project-folder-row.active .project-folder-label {
@@ -2112,7 +2115,7 @@ body.platform-macos .titlebar-left {
   white-space: nowrap;
   font-size: 12.5px;
   font-weight: 600;
-  color: var(--text-secondary);
+  color: var(--project-tree-project-text);
 }
 
 .project-tree-project-row-main.active .project-tree-name,

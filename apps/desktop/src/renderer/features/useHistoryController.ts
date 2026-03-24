@@ -37,6 +37,7 @@ import type {
   SessionDetail,
   SessionSummary,
   SortDirection,
+  TreeAutoRevealSessionRequest,
 } from "../app/types";
 import { useDebouncedValue } from "../hooks/useDebouncedValue";
 import { usePaneStateSync } from "../hooks/usePaneStateSync";
@@ -77,6 +78,12 @@ export type HistoryExportState = {
   phase: HistoryExportPhase;
   message: string;
 };
+
+function clearAutoRevealSessionRequest(
+  setAutoRevealSessionRequest: Dispatch<SetStateAction<TreeAutoRevealSessionRequest | null>>,
+) {
+  setAutoRevealSessionRequest(null);
+}
 
 type ProjectUpdateState = {
   messageDelta: number;
@@ -320,6 +327,8 @@ export function useHistoryController({
   const [messageExpanded, setMessageExpanded] = useState<Record<string, boolean>>({});
   const [focusMessageId, setFocusMessageId] = useState("");
   const [pendingRevealTarget, setPendingRevealTarget] = useState<PendingRevealTarget | null>(null);
+  const [autoRevealSessionRequest, setAutoRevealSessionRequest] =
+    useState<TreeAutoRevealSessionRequest | null>(null);
   const [pendingMessageAreaFocus, setPendingMessageAreaFocus] = useState(false);
   const [pendingMessagePageNavigation, setPendingMessagePageNavigation] =
     useState<PendingMessagePageNavigation | null>(null);
@@ -1155,6 +1164,12 @@ export function useHistoryController({
     sessionDetailTotalCount: sessionDetail?.totalCount,
     allSessionsCount,
     sessionSearchInputRef,
+    projectPaneCollapsed,
+    setProjectPaneCollapsed,
+    sessionPaneCollapsed,
+    hideSessionsPaneForTreeView,
+    setProjectViewMode,
+    setAutoRevealSessionRequest,
     loadProjects,
     loadSessions,
     refreshVisibleBookmarkStates,
@@ -1426,6 +1441,9 @@ export function useHistoryController({
     navigateFromSearchResult,
     setPendingSearchNavigation,
     pendingSearchNavigation,
+    autoRevealSessionRequest,
+    consumeAutoRevealSessionRequest: () =>
+      clearAutoRevealSessionRequest(setAutoRevealSessionRequest),
     selectedSummaryMessageCount,
     historyCategoryExpandShortcutMap,
     historyCategoriesShortcutMap,

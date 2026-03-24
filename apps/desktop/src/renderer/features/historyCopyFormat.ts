@@ -23,6 +23,7 @@ export function formatProjectDetails(
   pushIfValue(lines, "Repository URL", project.repositoryUrl);
   pushIfValue(lines, "Resolution State", project.resolutionState);
   pushIfValue(lines, "Resolution Source", project.resolutionSource);
+  pushIfValue(lines, "Project Metadata JSON", project.metadataJson);
 
   return lines.join("\n");
 }
@@ -67,6 +68,7 @@ export function formatSessionDetails(
   pushIfValue(lines, "Resolution Source", session.resolutionSource);
   pushIfValue(lines, "Worktree Label", session.worktreeLabel);
   pushIfValue(lines, "Worktree Source", session.worktreeSource);
+  pushIfValue(lines, "Session Metadata JSON", session.metadataJson);
 
   if (options.page) {
     lines.push(`Page: ${options.page.current}/${options.page.total}`);
