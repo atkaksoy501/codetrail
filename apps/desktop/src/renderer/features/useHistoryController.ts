@@ -1272,6 +1272,10 @@ export function useHistoryController({
     [],
   );
 
+  const focusMessagePane = useCallback(() => {
+    focusHistoryList(messageListRef.current);
+  }, []);
+
   useEffect(() => {
     return codetrail.onHistoryExportProgress((progress: HistoryExportProgressPayload) => {
       setHistoryExportState((current) =>
@@ -1494,6 +1498,7 @@ export function useHistoryController({
       pageHistoryMessages("up", options),
     pageHistoryMessagesDown: (options?: { preserveFocus?: boolean }) =>
       pageHistoryMessages("down", options),
+    focusMessagePane,
     handleExportMessages,
     historyExportState,
     selectProjectAllMessages,

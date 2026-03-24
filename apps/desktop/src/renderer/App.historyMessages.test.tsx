@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import { App } from "./App";
@@ -302,6 +303,75 @@ describe("App history messages", () => {
     await waitFor(() => {
       expect(getFocusedHistoryMessageId(container)).toBe("m1");
       expect(document.activeElement).toBe(searchInput);
+    });
+  });
+
+  it("keeps the message pane focused after click-based message and pane actions", async () => {
+    installScrollIntoViewMock();
+
+    const user = userEvent.setup();
+    const client = createAppClient();
+    const { container } = renderWithClient(<App />, client);
+    const messageList = () => container.querySelector<HTMLDivElement>(".msg-scroll.message-list");
+
+    await waitFor(() => {
+      expect(screen.getByText("Please review markdown table rendering")).toBeInTheDocument();
+    });
+
+    const messageListElement = messageList();
+    expect(messageListElement).not.toBeNull();
+    if (!messageListElement) {
+      throw new Error("Expected message list");
+    }
+
+    messageListElement.focus();
+    await user.click(screen.getAllByRole("button", { name: "Collapse message" })[0]!);
+    await waitFor(() => {
+      expect(document.activeElement).toBe(messageListElement);
+    });
+
+    await user.click(screen.getByRole("button", { name: "Expand all messages" }));
+    await waitFor(() => {
+      expect(document.activeElement).toBe(messageListElement);
+    });
+
+    await user.click(screen.getByRole("button", { name: "Next page" }));
+    await waitFor(() => {
+      expect(document.activeElement).toBe(messageListElement);
+    });
+  });
+
+  it("keeps the message pane focused when clicking empty header space", async () => {
+    installScrollIntoViewMock();
+
+    const user = userEvent.setup();
+    const client = createAppClient();
+    const { container } = renderWithClient(<App />, client);
+    const messageList = () => container.querySelector<HTMLDivElement>(".msg-scroll.message-list");
+
+    await waitFor(() => {
+      expect(screen.getByText("Please review markdown table rendering")).toBeInTheDocument();
+    });
+
+    const messageListElement = messageList();
+    const header = container.querySelector<HTMLElement>(".msg-header");
+    expect(messageListElement).not.toBeNull();
+    expect(header).not.toBeNull();
+    if (!messageListElement || !header) {
+      throw new Error("Expected message list and header");
+    }
+
+    messageListElement.focus();
+    await user.pointer([
+      {
+        target: header,
+        coords: { clientX: 12, clientY: 12 },
+        keys: "[MouseLeft]",
+      },
+    ]);
+
+    await waitFor(() => {
+      expect(document.activeElement).toBe(messageListElement);
     });
   });
 

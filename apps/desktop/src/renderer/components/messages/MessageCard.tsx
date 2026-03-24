@@ -28,6 +28,7 @@ type MessageCardProps = {
   onToggleCategoryExpanded?: (category: MessageCategory) => void;
   onToggleBookmark?: (message: SessionMessage) => void;
   onRevealInSession?: (messageId: string, sourceId: string) => void;
+  onPreservePaneFocus?: () => void;
   cardRef?: Ref<HTMLDivElement> | null;
 };
 
@@ -44,6 +45,7 @@ function MessageCardComponent({
   onToggleCategoryExpanded,
   onToggleBookmark,
   onRevealInSession,
+  onPreservePaneFocus,
   cardRef,
 }: MessageCardProps) {
   const parsedToolPayload = useMemo(
@@ -72,9 +74,11 @@ function MessageCardComponent({
   const handleExpansionToggleClick = (event: MouseEvent<HTMLElement>) => {
     if (event.metaKey && onToggleCategoryExpanded) {
       toggleCategoryExpanded();
+      onPreservePaneFocus?.();
       return;
     }
     toggleExpanded();
+    onPreservePaneFocus?.();
   };
 
   const handleHeaderClick = (event: MouseEvent<HTMLElement>) => {
@@ -91,21 +95,25 @@ function MessageCardComponent({
   const handleCopyRawButtonClick = (event: MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation();
     void copyTextToClipboard(JSON.stringify(message, null, 2));
+    onPreservePaneFocus?.();
   };
 
   const handleCopyBodyButtonClick = (event: MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation();
     void copyTextToClipboard(formatMessageBodyForClipboard(message, parsedToolPayload));
+    onPreservePaneFocus?.();
   };
 
   const handleRevealButtonClick = (event: MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation();
     onRevealInSession?.(message.id, message.sourceId);
+    onPreservePaneFocus?.();
   };
 
   const handleBookmarkButtonClick = (event: MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation();
     onToggleBookmark?.(message);
+    onPreservePaneFocus?.();
   };
 
   const handleHeaderKeyDown = (event: KeyboardEvent<HTMLElement>) => {
