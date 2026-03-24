@@ -7,6 +7,7 @@ import {
   type SearchMode,
 } from "@codetrail/core/browser";
 
+import type { AppCommand } from "../shared/appCommands";
 import {
   DEFAULT_PREFERRED_REFRESH_STRATEGY,
   type RefreshStrategy,
@@ -597,6 +598,73 @@ export function App({
     },
     [history.setPreferredAutoRefreshStrategy],
   );
+
+  useEffect(() => {
+    return codetrail.onAppCommand((command: AppCommand) => {
+      switch (command) {
+        case "open-settings":
+          setMainView("settings");
+          break;
+        case "open-help":
+          setMainView("help");
+          break;
+        case "search-current-view":
+          if (mainView === "search") {
+            focusGlobalSearch();
+          } else {
+            focusSessionSearch();
+          }
+          break;
+        case "open-global-search":
+          focusGlobalSearch();
+          break;
+        case "refresh-now":
+          void handleIncrementalRefresh();
+          break;
+        case "toggle-auto-refresh":
+          updateRefreshStrategy((value) => (value !== "off" ? "off" : preferredRefreshStrategy));
+          break;
+        case "zoom-in":
+          void appearance.applyZoomAction("in");
+          break;
+        case "zoom-out":
+          void appearance.applyZoomAction("out");
+          break;
+        case "zoom-reset":
+          void appearance.applyZoomAction("reset");
+          break;
+        case "toggle-project-pane":
+          if (mainView === "history") {
+            history.setProjectPaneCollapsed((value) => !value);
+          }
+          break;
+        case "toggle-session-pane":
+          if (mainView === "history") {
+            history.setSessionPaneCollapsed((value) => !value);
+          }
+          break;
+        case "toggle-focus-mode":
+          toggleFocusMode();
+          break;
+        case "toggle-all-messages-expanded":
+          if (mainView === "history") {
+            history.handleToggleAllCategoryDefaultExpansion();
+          }
+          break;
+      }
+    });
+  }, [
+    appearance,
+    codetrail,
+    focusGlobalSearch,
+    focusSessionSearch,
+    handleIncrementalRefresh,
+    history,
+    mainView,
+    preferredRefreshStrategy,
+    toggleFocusMode,
+    updateRefreshStrategy,
+  ]);
 
   const selectAdjacentSessionWithoutFocus = useCallback(
     (direction: "previous" | "next") => {

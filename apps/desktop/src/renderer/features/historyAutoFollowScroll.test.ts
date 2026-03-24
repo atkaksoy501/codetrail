@@ -65,7 +65,7 @@ describe("scheduleHistoryAutoFollowScroll", () => {
       sortDirection: "desc",
       scheduleAnimationFrame: () => 0,
       cancelAnimationFrame: () => undefined,
-      setTimeoutFn: (() => 0) as typeof window.setTimeout,
+      setTimeoutFn: (() => 0) as unknown as typeof window.setTimeout,
       clearTimeoutFn: (() => undefined) as typeof window.clearTimeout,
       createResizeObserver: null,
     });
