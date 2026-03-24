@@ -53,6 +53,28 @@ describe("App bookmarks", () => {
     });
   });
 
+  it("defaults bookmark sorting to newest first", async () => {
+    const user = userEvent.setup();
+    const client = createBookmarksSearchClient();
+
+    renderWithClient(<App />, client);
+
+    await waitFor(() => {
+      expect(screen.getByText("Bookmarked Messages")).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByText("Bookmarked Messages"));
+    await waitFor(() => {
+      expect(screen.getByText("Parser behavior inspected and fixed.")).toBeInTheDocument();
+    });
+
+    expect(
+      screen.getByRole("button", {
+        name: "Newest first (bookmarks). Switch to oldest first",
+      }),
+    ).toBeInTheDocument();
+  });
+
   it("keeps the session list stable while a bookmark search is in flight", async () => {
     const { client, delayedBookmarks } = createBookmarkSearchDelayClient();
 

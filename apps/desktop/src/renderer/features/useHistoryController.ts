@@ -51,6 +51,14 @@ import {
   focusHistoryList,
   getMessageListFingerprint,
 } from "./historyControllerShared";
+import {
+  getHistoryRefreshScopeKey,
+  getProjectRefreshFingerprint,
+  getRefreshBaselineTotalCount,
+  getSessionRefreshFingerprint,
+  isLiveEdgePage,
+  isPinnedToVisualRefreshEdge,
+} from "./historyRefreshPolicy";
 import { useHistoryDataEffects } from "./useHistoryDataEffects";
 import { useHistoryDerivedState } from "./useHistoryDerivedState";
 import { useHistoryInteractions } from "./useHistoryInteractions";
@@ -61,12 +69,14 @@ export { setTestHistorySelectionDebounceOverrides } from "./useHistorySelectionS
 export type RefreshContext = {
   refreshId: number;
   originPage: number;
+  scopeKey: string;
+  baselineTotalCount: number;
+  followEligible: boolean;
   scrollPreservation: {
     scrollTop: number;
     referenceMessageId: string;
     referenceOffsetTop: number;
   } | null;
-  autoScroll: boolean;
   prevMessageIds: string;
 };
 
@@ -174,22 +184,28 @@ function getVisibleMessageAnchor(container: HTMLElement): {
 
 // ── Periodic-refresh scroll policy ──────────────────────────────────────────
 //
-// There is no manual auto-scroll toggle. Instead, auto-scroll is detected
-// automatically based on scroll position at refresh time:
+// There is no manual auto-scroll toggle. Instead, auto-follow is detected
+// automatically based on scroll position and pagination state at refresh time:
 //
-//   ASC sort → pinned when scrolled to the bottom (within threshold)
-//   DESC sort → pinned when scrolled to the top (within threshold)
+//   Visual edge:
+//     ASC sort → bottom (within threshold)
+//     DESC sort → top (within threshold)
 //
-// This follows the same convention as terminal emulators and chat apps:
-// if you're at the edge where new content appears, you stay pinned; if
-// you've scrolled away, new content arrives without disturbing the viewport.
+//   Live-edge page:
+//     ASC sort → last page
+//     DESC sort → page 0
 //
-// Edge-pinned (at newest-messages edge):
+// Auto-follow is only eligible when the selected scope is both visually pinned
+// and already on its live-edge page. Visual top/bottom alone is not enough.
+// Unrelated project updates may refresh badges and ordering, but they must not
+// move the current page.
+//
+// Follow-eligible refresh with growth in the selected scope:
 //   Navigate to the page containing the newest messages (last page for ASC,
 //   page 0 for DESC) and scroll to the corresponding edge. If message IDs
 //   haven't changed since the previous tick, skip the scroll entirely.
 //
-// Not edge-pinned (scrolled away):
+// Any other refresh:
 //   Re-fetch the *same* sessionPage number. Drift compensation keeps the
 //   viewport pixel-stable via an anchor element. If the page goes out of
 //   range the server clamps to the last valid page.
@@ -285,10 +301,10 @@ export function useHistoryController({
     initialPaneState?.sessionSortDirection ?? "desc",
   );
   const [messageSortDirection, setMessageSortDirection] = useState<SortDirection>(
-    initialPaneState?.messageSortDirection ?? "asc",
+    initialPaneState?.messageSortDirection ?? "desc",
   );
   const [bookmarkSortDirection, setBookmarkSortDirection] = useState<SortDirection>(
-    initialPaneState?.bookmarkSortDirection ?? "asc",
+    initialPaneState?.bookmarkSortDirection ?? "desc",
   );
   const [projectAllSortDirection, setProjectAllSortDirection] = useState<SortDirection>(
     initialPaneState?.projectAllSortDirection ?? "desc",
@@ -344,7 +360,8 @@ export function useHistoryController({
     useState<PendingMessagePageNavigation | null>(null);
   const [pendingSearchNavigation, setPendingSearchNavigation] =
     useState<HistorySearchNavigation | null>(null);
-  const [refreshCounter, setRefreshCounter] = useState(0);
+  const [sessionDetailRefreshNonce, setSessionDetailRefreshNonce] = useState(0);
+  const [projectCombinedDetailRefreshNonce, setProjectCombinedDetailRefreshNonce] = useState(0);
   const [historyExportState, setHistoryExportState] = useState<HistoryExportState>({
     open: false,
     exportId: null,
@@ -390,6 +407,8 @@ export function useHistoryController({
   const pendingAutoScrollRef = useRef(false);
   const prevMessageIdsRef = useRef("");
   const refreshContextRef = useRef<RefreshContext | null>(null);
+  const selectedProjectRefreshFingerprintRef = useRef("");
+  const selectedSessionRefreshFingerprintRef = useRef("");
   const refreshIdCounterRef = useRef(0);
   const treeProjectSessionsLoadTokenRef = useRef<Record<string, number>>({});
   const treeProjectSessionsByProjectIdRef = useRef<Record<string, SessionSummary[]>>({});
@@ -957,7 +976,8 @@ export function useHistoryController({
     projectsLoadTokenRef,
     sessionsLoadTokenRef,
     bookmarksLoadTokenRef,
-    refreshCounter,
+    sessionDetailRefreshNonce,
+    projectCombinedDetailRefreshNonce,
     refreshContextRef,
   });
 
@@ -1044,6 +1064,14 @@ export function useHistoryController({
   });
 
   useEffect(() => {
+    selectedProjectRefreshFingerprintRef.current = getProjectRefreshFingerprint(selectedProject);
+  }, [selectedProject]);
+
+  useEffect(() => {
+    selectedSessionRefreshFingerprintRef.current = getSessionRefreshFingerprint(selectedSession);
+  }, [selectedSession]);
+
+  useEffect(() => {
     const visibleMessageIds = new Set(activeHistoryMessages.map((message) => message.id));
     setMessageExpansionOverrides((current) => {
       let changed = false;
@@ -1060,7 +1088,7 @@ export function useHistoryController({
   }, [activeHistoryMessages]);
 
   useEffect(() => {
-    const bookmarkStateRefreshKey = `${bookmarkStatesRefreshNonce}:${refreshCounter}`;
+    const bookmarkStateRefreshKey = `${bookmarkStatesRefreshNonce}`;
     void bookmarkStateRefreshKey;
 
     if (!selectedProjectId) {
@@ -1109,7 +1137,6 @@ export function useHistoryController({
     bookmarkStatesRefreshNonce,
     codetrail,
     historyMode,
-    refreshCounter,
     selectedProjectId,
   ]);
 
@@ -1525,34 +1552,55 @@ export function useHistoryController({
     prettyProvider: formatPrettyProvider,
     formatDate,
     handleRefreshAllData: useCallback(
-      async (source: "manual" | "auto" = "manual") => {
+      async (
+        source: "manual" | "auto" = "manual",
+        options: { historyViewActive?: boolean } = {},
+      ) => {
         const container = messageListRef.current;
         const id = ++refreshIdCounterRef.current;
+        const historyViewActive = options.historyViewActive ?? true;
 
-        // Detect whether the user is "pinned" to the newest-messages edge.
-        // ASC → newest at bottom → pinned when scrolled to bottom.
-        // DESC → newest at top → pinned when scrolled to top.
         const sortDir =
           historyMode === "project_all"
             ? projectAllSortDirection
             : historyMode === "bookmarks"
               ? bookmarkSortDirection
               : messageSortDirection;
-        const edgeThreshold = 10;
-        const isAtNewestEdge = (() => {
-          if (!container) return false;
-          if (sortDir === "asc") {
-            return (
-              container.scrollTop + container.clientHeight >= container.scrollHeight - edgeThreshold
-            );
-          }
-          return container.scrollTop <= edgeThreshold;
-        })();
+        const scopeKey = getHistoryRefreshScopeKey(
+          historyMode,
+          selectedProjectId,
+          selectedSessionId,
+        );
+        const baselineTotalCount = getRefreshBaselineTotalCount({
+          historyMode,
+          selectedProject,
+          selectedSession,
+          sessionDetail,
+          projectCombinedDetailTotalCount: projectCombinedDetail?.totalCount,
+          bookmarksResponse,
+        });
+        const isAtVisualEdge = container
+          ? isPinnedToVisualRefreshEdge({
+              sortDirection: sortDir,
+              scrollTop: container.scrollTop,
+              clientHeight: container.clientHeight,
+              scrollHeight: container.scrollHeight,
+            })
+          : false;
+        const isOnLiveEdgePage =
+          historyMode !== "bookmarks" &&
+          isLiveEdgePage({
+            sortDirection: sortDir,
+            page: sessionPage,
+            totalCount: baselineTotalCount,
+            pageSize: appearance.messagePageSize,
+          });
+        const followEligible = isAtVisualEdge && isOnLiveEdgePage;
 
         let scrollPreservation: RefreshContext["scrollPreservation"] = null;
         let prevMessageIds = "";
 
-        if (isAtNewestEdge) {
+        if (followEligible) {
           prevMessageIds = getMessageListFingerprint(activeHistoryMessages);
         } else if (container) {
           const anchor = getVisibleMessageAnchor(container);
@@ -1565,25 +1613,121 @@ export function useHistoryController({
             : null;
         }
 
-        refreshContextRef.current = {
+        const refreshContext: RefreshContext = {
           refreshId: id,
           originPage: sessionPage,
+          scopeKey,
+          baselineTotalCount,
+          followEligible,
           scrollPreservation,
-          autoScroll: isAtNewestEdge,
           prevMessageIds,
         };
+        const consumeRefreshContext = async (
+          target: "bookmarks" | "session" | "project_all" | null,
+        ) => {
+          if (target === null) {
+            refreshContextRef.current = null;
+            return;
+          }
+          refreshContextRef.current = refreshContext;
+          if (target === "bookmarks") {
+            await loadBookmarks();
+            return;
+          }
+          if (target === "session") {
+            setSessionDetailRefreshNonce((value) => value + 1);
+            return;
+          }
+          setProjectCombinedDetailRefreshNonce((value) => value + 1);
+        };
 
-        await handleRefresh(source);
-        setRefreshCounter((c) => c + 1);
+        if (source === "manual") {
+          const sharedLoads = [
+            loadProjects("resort"),
+            loadSessions(),
+            refreshTreeProjectSessions(),
+          ];
+          if (historyMode !== "bookmarks") {
+            sharedLoads.push(loadBookmarks());
+          }
+          await Promise.all(sharedLoads);
+          const refreshTarget =
+            historyMode === "bookmarks" && selectedProjectId
+              ? "bookmarks"
+              : historyMode === "session" && selectedSessionId
+                ? "session"
+                : historyMode === "project_all" && selectedProjectId
+                  ? "project_all"
+                  : null;
+          await consumeRefreshContext(refreshTarget);
+          return;
+        }
+
+        const previousProjectFingerprint = selectedProjectRefreshFingerprintRef.current;
+        const previousSessionFingerprint = selectedSessionRefreshFingerprintRef.current;
+        const nextProjects = await loadProjects("auto");
+        const nextSelectedProject =
+          nextProjects?.find((project) => project.id === selectedProjectId) ?? null;
+        const projectFingerprintChanged =
+          previousProjectFingerprint.length > 0 &&
+          nextSelectedProject !== null &&
+          getProjectRefreshFingerprint(nextSelectedProject) !== previousProjectFingerprint;
+
+        let sessionFingerprintChanged = false;
+        if (historyViewActive && selectedProjectId) {
+          const nextSessions = await loadSessions();
+          const nextSelectedSession =
+            nextSessions?.find((session) => session.id === selectedSessionId) ?? null;
+          sessionFingerprintChanged =
+            previousSessionFingerprint.length > 0 &&
+            nextSelectedSession !== null &&
+            getSessionRefreshFingerprint(nextSelectedSession) !== previousSessionFingerprint;
+        }
+
+        const refreshTarget =
+          historyMode === "bookmarks" && historyViewActive && selectedProjectId
+            ? "bookmarks"
+            : historyViewActive &&
+                historyMode === "session" &&
+                sessionFingerprintChanged &&
+                selectedSessionId
+              ? "session"
+              : historyViewActive &&
+                  historyMode === "project_all" &&
+                  projectFingerprintChanged &&
+                  selectedProjectId
+                ? "project_all"
+                : null;
+        await consumeRefreshContext(refreshTarget);
+
+        if (
+          historyViewActive &&
+          projectViewMode === "tree" &&
+          Object.keys(treeProjectSessionsByProjectIdRef.current).length > 0
+        ) {
+          await refreshTreeProjectSessions();
+        }
       },
       [
         activeHistoryMessages,
+        appearance.messagePageSize,
         bookmarkSortDirection,
-        handleRefresh,
         historyMode,
+        loadBookmarks,
+        loadProjects,
+        loadSessions,
         messageSortDirection,
+        bookmarksResponse,
+        projectCombinedDetail,
         projectAllSortDirection,
+        projectViewMode,
+        refreshTreeProjectSessions,
         sessionPage,
+        selectedProject,
+        selectedProjectId,
+        selectedSession,
+        selectedSessionId,
+        sessionDetail,
       ],
     ),
   };

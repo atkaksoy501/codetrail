@@ -155,7 +155,7 @@ export function useHistoryInteractions({
   setSessionQueryInput: Dispatch<SetStateAction<string>>;
   setFocusMessageId: Dispatch<SetStateAction<string>>;
   setPendingRevealTarget: Dispatch<SetStateAction<PendingRevealTarget | null>>;
-  loadBookmarks: () => Promise<void>;
+  loadBookmarks: () => Promise<unknown>;
   sessionScrollTopRef: MutableRefObject<number>;
   sessionScrollSyncTimerRef: MutableRefObject<number | null>;
   setSessionScrollTop: Dispatch<SetStateAction<number>>;
@@ -191,8 +191,8 @@ export function useHistoryInteractions({
   hideSessionsPaneForTreeView: boolean;
   setProjectViewMode: Dispatch<SetStateAction<ProjectViewMode>>;
   setAutoRevealSessionRequest: Dispatch<SetStateAction<TreeAutoRevealSessionRequest | null>>;
-  loadProjects: (source?: "auto" | "resort") => Promise<void>;
-  loadSessions: () => Promise<void>;
+  loadProjects: (source?: "auto" | "resort") => Promise<unknown>;
+  loadSessions: () => Promise<unknown>;
   refreshVisibleBookmarkStates: () => void;
   setProjectProviders: Dispatch<SetStateAction<Provider[]>>;
   setProjectQueryInput: Dispatch<SetStateAction<string>>;

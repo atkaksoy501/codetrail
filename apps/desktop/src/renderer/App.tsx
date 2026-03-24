@@ -240,9 +240,17 @@ export function App({
 
   const reloadIndexedData = useCallback(
     async (source: "manual" | "auto") => {
-      await Promise.all([history.handleRefreshAllData(source), search.reloadSearch()]);
+      const historyRefreshPromise = history.handleRefreshAllData(source, {
+        historyViewActive: mainView === "history",
+      });
+      const shouldReloadSearch =
+        source === "manual" || (mainView === "search" && search.hasActiveSearchQuery);
+      await Promise.all([
+        historyRefreshPromise,
+        shouldReloadSearch ? search.reloadSearch() : Promise.resolve(),
+      ]);
     },
-    [history.handleRefreshAllData, search.reloadSearch],
+    [history.handleRefreshAllData, mainView, search.hasActiveSearchQuery, search.reloadSearch],
   );
 
   const pendingProviderDisableLabel =
@@ -511,12 +519,12 @@ export function App({
   }, [history.refs.messageListRef, mainView]);
 
   const handleRefresh = useCallback(
-    async (force: boolean) => {
+    async (force: boolean, source: "manual" | "auto" = "manual") => {
       setRefreshing(true);
       try {
         skipNextStatusDrivenReloadRef.current = true;
         await codetrail.invoke("indexer:refresh", { force });
-        await reloadIndexedData("manual");
+        await reloadIndexedData(source);
       } catch (error) {
         skipNextStatusDrivenReloadRef.current = false;
         logError("Refresh failed", error);
@@ -649,7 +657,7 @@ export function App({
     const id = window.setInterval(() => {
       if (refreshingRef.current) return;
       setAutoRefreshScanInFlight(true);
-      void handleRefresh(false).finally(() => {
+      void handleRefresh(false, "auto").finally(() => {
         setAutoRefreshScanInFlight(false);
       });
     }, pollingIntervalMs);

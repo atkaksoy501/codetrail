@@ -98,6 +98,33 @@ describe("App shell", () => {
     });
   });
 
+  it("defaults session message sorting to newest first", async () => {
+    const client = createAppClient();
+
+    renderWithClient(
+      <App
+        initialPaneState={
+          {
+            selectedProjectId: "project_1",
+            selectedSessionId: "session_1",
+            historyMode: "session",
+          } as PaneStateSnapshot
+        }
+      />,
+      client,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Please review markdown table rendering")).toBeInTheDocument();
+    });
+
+    expect(
+      screen.getByRole("button", {
+        name: "Newest first (session). Switch to oldest first",
+      }),
+    ).toBeInTheDocument();
+  });
+
   it("shows a compact live session row in the message pane for the selected session", async () => {
     installScrollIntoViewMock();
 
