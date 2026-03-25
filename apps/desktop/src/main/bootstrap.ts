@@ -1,5 +1,5 @@
 import { readdir, realpath, rm, stat } from "node:fs/promises";
-import { dirname, isAbsolute, join, normalize, relative, resolve } from "node:path";
+import { dirname, isAbsolute, join, normalize, resolve } from "node:path";
 
 import { BrowserWindow, app, dialog, ipcMain, shell } from "electron";
 
@@ -14,8 +14,10 @@ import {
   PROVIDER_LIST,
   type Provider,
   createProviderRecord,
+  hasFileExtension,
   indexerConfigBaseSchema,
   initializeDatabase,
+  isPathWithinRoot,
   listDiscoverySettingsPaths,
   listDiscoveryWatchRoots,
   paneStateBaseSchema,
@@ -41,6 +43,7 @@ import { exportHistoryMessages } from "./historyExport";
 import { WorkerIndexingRunner } from "./indexingRunner";
 import { registerIpcHandlers } from "./ipc";
 import { LiveSessionStore } from "./liveSessionStore";
+import { getCurrentMainPlatformConfig } from "./platformConfig";
 import { WatchStatsStore } from "./watchStatsStore";
 
 const MIN_ZOOM_PERCENT = 60;
@@ -103,7 +106,7 @@ function filterPotentialLiveTranscriptPaths(
   discoveryConfig: Pick<DiscoveryConfig, "claudeRoot" | "codexRoot">,
 ): string[] {
   return changedPaths.filter((changedPath) => {
-    if (!changedPath.endsWith(".jsonl")) {
+    if (!hasFileExtension(changedPath, ".jsonl")) {
       return false;
     }
     return (
@@ -117,14 +120,9 @@ function isPathWithinOptionalRoot(
   candidatePath: string,
   rootPath: string | null | undefined,
 ): boolean {
-  if (!rootPath) {
-    return false;
-  }
-  const normalizedRoot = normalize(rootPath);
-  const normalizedCandidate = normalize(candidatePath);
-  return (
-    normalizedCandidate === normalizedRoot || normalizedCandidate.startsWith(`${normalizedRoot}/`)
-  );
+  return typeof rootPath === "string" && rootPath.length > 0
+    ? isPathWithinRoot(candidatePath, rootPath)
+    : false;
 }
 
 async function disposeRuntimeState(state: MainProcessRuntimeState | null): Promise<void> {
@@ -155,6 +153,7 @@ export async function bootstrapMainProcess(
     rm,
   }).catch(() => undefined);
   const runtime = createRuntimeState();
+  const mainPlatform = getCurrentMainPlatformConfig();
   runtimeState = runtime;
   const dbPath = options.dbPath ?? join(app.getPath("userData"), "codetrail.sqlite");
   const bookmarksDbPath = resolveBookmarksDbPath(dbPath);
@@ -358,19 +357,23 @@ export async function bootstrapMainProcess(
       };
     };
 
-    if (process.platform === "darwin") {
+    for (const backendPlan of mainPlatform.preferredWatcherBackends) {
       try {
-        return await startWatcher({ subscribeOptions: { backend: "kqueue" } }, "kqueue");
-      } catch (error) {
-        console.warn(
-          "[codetrail] Failed to start kqueue watcher on macOS, falling back to default backend",
-          error,
+        return await startWatcher(
+          backendPlan.subscribeOptions ? { subscribeOptions: backendPlan.subscribeOptions } : {},
+          backendPlan.backend,
         );
-        return startWatcher({}, "default");
+      } catch (error) {
+        if (backendPlan.backend !== "default") {
+          console.warn(
+            backendPlan.failureMessage ??
+              "[codetrail] failed to start preferred file watcher backend",
+            error,
+          );
+        }
       }
     }
-
-    return startWatcher({}, "default");
+    throw new Error("No file watcher backend could be started.");
   };
 
   registerIpcHandlers(
@@ -491,7 +494,7 @@ export async function bootstrapMainProcess(
         const dialogResult = await dialog.showOpenDialog({
           title: "Choose External Tool Command",
           buttonLabel: "Choose Command",
-          properties: process.platform === "darwin" ? ["openFile", "openDirectory"] : ["openFile"],
+          ...mainPlatform.externalToolCommandDialog,
         });
         if (dialogResult.canceled || dialogResult.filePaths.length === 0) {
           return { canceled: true, path: null, error: null };
@@ -856,6 +859,7 @@ async function resolveCanonicalPath(value: string): Promise<string> {
 }
 
 async function validateExternalToolCommandPath(value: string): Promise<string | null> {
+  const mainPlatform = getCurrentMainPlatformConfig();
   const resolvedPath = await resolveCanonicalPath(value);
 
   try {
@@ -863,10 +867,13 @@ async function validateExternalToolCommandPath(value: string): Promise<string | 
     if (entry.isFile()) {
       return null;
     }
-    if (process.platform === "darwin" && resolvedPath.toLowerCase().endsWith(".app")) {
+    if (
+      mainPlatform.externalToolCommandValidation.allowAppBundle &&
+      resolvedPath.toLowerCase().endsWith(".app")
+    ) {
       return null;
     }
-    return "Choose an executable file or a macOS .app bundle.";
+    return mainPlatform.externalToolCommandValidation.invalidSelectionMessage;
   } catch {
     return "Selected command could not be accessed.";
   }
@@ -874,9 +881,4 @@ async function validateExternalToolCommandPath(value: string): Promise<string | 
 
 function isPathAllowedByRoots(targetPath: string, allowedRoots: string[]): boolean {
   return allowedRoots.some((root) => isPathWithinRoot(targetPath, root));
-}
-
-function isPathWithinRoot(targetPath: string, rootPath: string): boolean {
-  const relativePath = relative(rootPath, targetPath);
-  return relativePath === "" || (!relativePath.startsWith("..") && !isAbsolute(relativePath));
 }

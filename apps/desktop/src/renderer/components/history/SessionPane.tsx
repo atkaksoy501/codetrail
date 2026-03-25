@@ -3,7 +3,9 @@ import { type Ref, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import type { SessionSummary } from "../../app/types";
 import { useClickOutside } from "../../hooks/useClickOutside";
 import { useVirtualListWindow } from "../../hooks/useVirtualListWindow";
-import { formatTooltip } from "../../lib/tooltipText";
+import { formatCompactInteger, formatInteger } from "../../lib/numberFormatting";
+import { useShortcutRegistry } from "../../lib/shortcutRegistry";
+import { useTooltipFormatter } from "../../lib/tooltipText";
 import { deriveSessionTitle, formatDate, sessionActivityOf } from "../../lib/viewUtils";
 import {
   SIDEBAR_LIST_OVERSCAN,
@@ -68,6 +70,8 @@ export function SessionPane({
   onSelectSession: (sessionId: string) => void;
   listRef?: Ref<HTMLDivElement>;
 }) {
+  const shortcuts = useShortcutRegistry();
+  const formatTooltipLabel = useTooltipFormatter();
   const [selectedSessionElement, setSelectedSessionElement] = useState<HTMLButtonElement | null>(
     null,
   );
@@ -221,9 +225,9 @@ export function SessionPane({
             className="collapse-btn pane-collapse-btn"
             onClick={onToggleCollapsed}
             aria-label={collapsed ? "Expand Sessions pane" : "Collapse Sessions pane"}
-            title={formatTooltip(
+            title={formatTooltipLabel(
               collapsed ? "Expand Sessions" : "Collapse Sessions",
-              "Cmd+Shift+B",
+              shortcuts.actions.toggleSessionPane,
             )}
           >
             <ToolbarIcon name="chevronLeft" />
@@ -259,7 +263,9 @@ export function SessionPane({
               >
                 <div className="session-preview">All Sessions</div>
                 <div className="session-meta">
-                  <span className="msg-count">{allSessionsCount} msgs</span>
+                  <span className="msg-count" title={`${formatInteger(allSessionsCount)} messages`}>
+                    {formatCompactInteger(allSessionsCount)} msgs
+                  </span>
                   <span className="session-time">Project-wide</span>
                 </div>
               </button>
@@ -281,7 +287,9 @@ export function SessionPane({
               >
                 <div className="session-preview">Bookmarked Messages</div>
                 <div className="session-meta">
-                  <span className="msg-count">{bookmarksCount} msgs</span>
+                  <span className="msg-count" title={`${formatInteger(bookmarksCount)} messages`}>
+                    {formatCompactInteger(bookmarksCount)} msgs
+                  </span>
                   <span className="session-time">Project-wide</span>
                 </div>
               </button>
@@ -317,7 +325,12 @@ export function SessionPane({
             >
               <div className="session-preview">{deriveSessionTitle(session)}</div>
               <div className="session-meta">
-                <span className="msg-count">{session.messageCount} msgs</span>
+                <span
+                  className="msg-count"
+                  title={`${formatInteger(session.messageCount)} messages`}
+                >
+                  {formatCompactInteger(session.messageCount)} msgs
+                </span>
                 <span className="session-time">{formatDate(sessionActivityOf(session))}</span>
               </div>
             </button>

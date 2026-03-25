@@ -2,9 +2,17 @@
   "name": "codetrail",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": ">=20 <24",
+    "bun": ">=1.1"
+  },
+  "overrides": {
+    "node-gyp": "^12.1.0"
+  },
   "workspaces": ["apps/*", "packages/*"],
   "scripts": {
     "install": "echo \"Dependencies are managed by 'bun install'.\"",
+    "check:platform-boundaries": "node ./scripts/check-platform-boundaries.mjs",
     "lint": "biome check .",
     "format": "biome format --write .",
     "typecheck": "tsc -p tsconfig.json --noEmit",
@@ -27,6 +35,8 @@
     "e2e:headed": "HEADED=1 npx playwright test --config e2e/playwright.config.ts",
     "e2e:report": "npx playwright show-report e2e/playwright-report",
     "ci": "bun run lint && bun run typecheck && bun run test && bun run test:coverage"
+    "desktop:make:win": "bun run --cwd apps/desktop make:win",
+    "ci": "bun run lint && bun run check:platform-boundaries && bun run typecheck && bun run test && bun run test:coverage"
   },
   "devDependencies": {
     "@biomejs/biome": "1.9.4",
