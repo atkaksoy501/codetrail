@@ -33,7 +33,7 @@ import { HistoryLayout } from "./features/HistoryLayout";
 import { SearchView } from "./features/SearchView";
 import { useAppearanceController } from "./features/useAppearanceController";
 import {
-  setTestHistorySelectionDebounceOverrides,
+  type HistorySelectionDebounceOverrides,
   useHistoryController,
 } from "./features/useHistoryController";
 import { useLiveWatchController } from "./features/useLiveWatchController";
@@ -43,6 +43,11 @@ import { useReconcileProviderSelection } from "./hooks/useReconcileProviderSelec
 import { useCodetrailClient } from "./lib/codetrailClient";
 import { isSessionsPaneVisible } from "./lib/historyPaneVisibility";
 import { findSessionSummaryById } from "./lib/historySessionLookup";
+import {
+  PaneFocusProvider,
+  type HistoryPaneId,
+  useCreatePaneFocusController,
+} from "./lib/paneFocusController";
 import { useShortcutRegistry } from "./lib/shortcutRegistry";
 import { toErrorMessage } from "./lib/viewUtils";
 import { ViewerExternalAppsProvider } from "./lib/viewerExternalAppsContext";
@@ -59,7 +64,6 @@ export function setTestStrategyIntervalOverrides(
 ): void {
   _testStrategyIntervalOverrides = overrides;
 }
-export { setTestHistorySelectionDebounceOverrides };
 
 type PendingHistoryDelete =
   | (Extract<DeleteTarget, { kind: "project" }> & { projectId: string })
@@ -102,8 +106,10 @@ function resolveExplicitOrSelectedSession({
 
 export function App({
   initialPaneState = null,
+  testHistorySelectionDebounceOverrides = null,
 }: {
   initialPaneState?: PaneStateSnapshot | null;
+  testHistorySelectionDebounceOverrides?: HistorySelectionDebounceOverrides | null;
 }) {
   const codetrail = useCodetrailClient();
   const [refreshing, setRefreshing] = useState(false);
@@ -148,6 +154,41 @@ export function App({
   const lastCompletedJobsRef = useRef(-1);
   const watchStatsLoadedRef = useRef(false);
   const skipNextStatusDrivenReloadRef = useRef(false);
+  const helpViewRef = useRef<HTMLElement | null>(null);
+  const settingsViewRef = useRef<HTMLElement | null>(null);
+  const viewFocusRafRef = useRef<number | null>(null);
+  const returnToHistoryFocusRafRef = useRef<number | null>(null);
+  const focusModeRafRef = useRef<number | null>(null);
+  const historyInvariantRafRef = useRef<number | null>(null);
+  const historyReturnPaneRef = useRef<HistoryPaneId>("message");
+  const paneFocus = useCreatePaneFocusController();
+
+  const scheduleFocusFrame = useCallback((ref: { current: number | null }, fn: () => void) => {
+    if (ref.current !== null) {
+      window.cancelAnimationFrame(ref.current);
+    }
+    ref.current = window.requestAnimationFrame(() => {
+      ref.current = null;
+      fn();
+    });
+  }, []);
+
+  useEffect(
+    () => () => {
+      for (const ref of [
+        viewFocusRafRef,
+        returnToHistoryFocusRafRef,
+        focusModeRafRef,
+        historyInvariantRafRef,
+      ]) {
+        if (ref.current !== null) {
+          window.cancelAnimationFrame(ref.current);
+          ref.current = null;
+        }
+      }
+    },
+    [],
+  );
 
   const appearance = useAppearanceController({
     initialPaneState,
@@ -163,6 +204,8 @@ export function App({
     setSearchProviders,
     appearance,
     logError,
+    testHistorySelectionDebounceOverrides,
+    focusHistoryPane: paneFocus.focusHistoryPane,
   });
   const search = useSearchController({
     searchMode,
@@ -236,6 +279,53 @@ export function App({
       search.setSearchProjectId("");
     }
   }, [history.sortedProjects, search.searchProjectId, search.setSearchProjectId]);
+
+  useEffect(() => {
+    paneFocus.registerViewTarget(
+      "search",
+      mainView === "search" ? search.globalSearchInputRef.current : null,
+    );
+    paneFocus.registerViewTarget("help", mainView === "help" ? helpViewRef.current : null);
+    paneFocus.registerViewTarget(
+      "settings",
+      mainView === "settings" ? settingsViewRef.current : null,
+    );
+  }, [mainView, paneFocus.registerViewTarget]);
+
+  useEffect(() => {
+    if (mainView !== "history") {
+      return;
+    }
+    historyReturnPaneRef.current =
+      paneFocus.activeDomain.kind === "history"
+        ? paneFocus.activeDomain.pane
+        : paneFocus.lastHistoryPane;
+  }, [mainView, paneFocus.activeDomain, paneFocus.lastHistoryPane]);
+
+  useEffect(() => {
+    if (mainView === "search") {
+      paneFocus.enterView("search");
+      return;
+    }
+    if (mainView === "help") {
+      paneFocus.enterView("help");
+      scheduleFocusFrame(viewFocusRafRef, () => {
+        helpViewRef.current?.focus({ preventScroll: true });
+      });
+      return;
+    }
+    if (mainView === "settings") {
+      paneFocus.enterView("settings");
+      scheduleFocusFrame(viewFocusRafRef, () => {
+        settingsViewRef.current?.focus({ preventScroll: true });
+      });
+      return;
+    }
+    if (viewFocusRafRef.current !== null) {
+      window.cancelAnimationFrame(viewFocusRafRef.current);
+      viewFocusRafRef.current = null;
+    }
+  }, [mainView, paneFocus.enterView, scheduleFocusFrame]);
 
   const reloadIndexedData = useCallback(
     async (source: "manual" | "auto") => {
@@ -507,22 +597,31 @@ export function App({
     search.focusGlobalSearch();
   }, [search.focusGlobalSearch]);
 
-  const returnToHistoryWithMessageFocus = useCallback(() => {
+  const openHelpView = useCallback(() => {
+    setMainView("help");
+  }, []);
+
+  const openSettingsView = useCallback(() => {
+    setMainView("settings");
+  }, []);
+
+  const returnToHistoryWithPaneFocus = useCallback(() => {
+    const returnPane = historyReturnPaneRef.current;
     setMainView("history");
-    window.requestAnimationFrame(() => {
-      history.focusMessagePane();
+    scheduleFocusFrame(returnToHistoryFocusRafRef, () => {
+      paneFocus.exitViewAndRestoreHistoryPane({ kind: "history", pane: returnPane });
     });
-  }, [history.focusMessagePane]);
+  }, [paneFocus.exitViewAndRestoreHistoryPane, scheduleFocusFrame]);
 
   const toggleFocusMode = useCallback(() => {
     if (mainView !== "history") {
       return;
     }
-    window.requestAnimationFrame(() => {
-      history.refs.messageListRef.current?.focus({ preventScroll: true });
+    scheduleFocusFrame(focusModeRafRef, () => {
+      paneFocus.focusHistoryPane("message");
     });
     setFocusMode((value) => !value);
-  }, [history.refs.messageListRef, mainView]);
+  }, [mainView, paneFocus.focusHistoryPane, scheduleFocusFrame]);
 
   const handleRefresh = useCallback(
     async (force: boolean, source: "manual" | "auto" = "manual") => {
@@ -608,10 +707,10 @@ export function App({
     return codetrail.onAppCommand((command: AppCommand) => {
       switch (command) {
         case "open-settings":
-          setMainView("settings");
+          openSettingsView();
           break;
         case "open-help":
-          setMainView("help");
+          openHelpView();
           break;
         case "search-current-view":
           if (mainView === "search") {
@@ -666,6 +765,8 @@ export function App({
     handleIncrementalRefresh,
     history,
     mainView,
+    openHelpView,
+    openSettingsView,
     preferredRefreshStrategy,
     toggleFocusMode,
     updateRefreshStrategy,
@@ -747,6 +848,9 @@ export function App({
     refreshingRef.current = indexing;
   }, [indexing]);
 
+  const activeHistoryPaneId =
+    paneFocus.activeDomain.kind === "history" ? paneFocus.activeDomain.pane : null;
+
   const pollingIntervalMs = isScanRefreshStrategy(refreshStrategy)
     ? (_testStrategyIntervalOverrides?.[refreshStrategy] ??
       SCAN_STRATEGY_TO_INTERVAL_MS[refreshStrategy])
@@ -786,8 +890,55 @@ export function App({
     };
   }, [codetrail, logError, refreshStrategy]);
 
+  useEffect(() => {
+    if (mainView !== "history" || paneFocus.activeDomain.kind === "overlay") {
+      if (historyInvariantRafRef.current !== null) {
+        window.cancelAnimationFrame(historyInvariantRafRef.current);
+        historyInvariantRafRef.current = null;
+      }
+      return;
+    }
+    const preferredPane =
+      activeHistoryPaneId ?? paneFocus.lastHistoryPane;
+    const nextPane = paneFocus.resolveAvailableHistoryPane(preferredPane);
+    const activePaneMatches =
+      activeHistoryPaneId === nextPane;
+    const domFocusMatches = paneFocus.isFocusWithinHistoryPane(nextPane);
+    if (activePaneMatches && domFocusMatches) {
+      if (historyInvariantRafRef.current !== null) {
+        window.cancelAnimationFrame(historyInvariantRafRef.current);
+        historyInvariantRafRef.current = null;
+      }
+      return;
+    }
+    scheduleFocusFrame(historyInvariantRafRef, () => {
+      paneFocus.focusHistoryPane(nextPane);
+    });
+    return () => {
+      if (historyInvariantRafRef.current !== null) {
+        window.cancelAnimationFrame(historyInvariantRafRef.current);
+        historyInvariantRafRef.current = null;
+      }
+    };
+  }, [
+    history.hideSessionsPaneForTreeView,
+    history.projectPaneCollapsed,
+    history.sessionPaneCollapsed,
+    mainView,
+    paneFocus.activeDomain.kind,
+    activeHistoryPaneId,
+    paneFocus.isFocusWithinHistoryPane,
+    paneFocus.lastHistoryPane,
+    paneFocus.resolveAvailableHistoryPane,
+    paneFocus.focusHistoryPane,
+    scheduleFocusFrame,
+  ]);
+
   useKeyboardShortcuts({
     mainView,
+    activeHistoryPane: activeHistoryPaneId,
+    lastHistoryPane: paneFocus.lastHistoryPane,
+    overlayOpen: paneFocus.isOverlayOpen,
     hasFocusedHistoryMessage: Boolean(history.visibleFocusedMessageId),
     projectListRef: history.refs.projectListRef,
     sessionListRef: history.refs.sessionListRef,
@@ -799,7 +950,9 @@ export function App({
     searchProjectSelectRef: search.searchProjectSelectRef,
     searchResultsViewRef: search.searchResultsScrollRef,
     setMainView,
-    returnToHistoryWithMessageFocus,
+    openSettingsView,
+    openHelpView,
+    returnToHistoryWithPaneFocus,
     clearFocusedHistoryMessage: () => history.setFocusMessageId(""),
     focusGlobalSearch,
     focusSessionSearch,
@@ -884,69 +1037,53 @@ export function App({
 
   return (
     <ViewerExternalAppsProvider value={viewerExternalAppsSnapshot}>
-      <main className="app-shell">
-        <TopBar
-          mainView={mainView}
-          theme={appearance.theme}
-          shikiTheme={appearance.shikiTheme}
-          indexing={indexing}
-          focusMode={focusMode}
-          focusDisabled={mainView !== "history"}
-          onToggleSearchView={() =>
-            mainView === "search" ? returnToHistoryWithMessageFocus() : setMainView("search")
-          }
-          onThemeChange={appearance.setTheme}
-          onThemePreview={appearance.previewTheme}
-          onThemePreviewReset={appearance.clearPreviewTheme}
-          onShikiThemeChange={appearance.setShikiTheme}
-          onShikiThemePreview={appearance.previewShikiTheme}
-          onShikiThemePreviewReset={appearance.clearPreviewShikiTheme}
-          onIncrementalRefresh={() => void handleIncrementalRefresh()}
-          refreshStrategy={refreshStrategy}
-          onRefreshStrategyChange={updateRefreshStrategy}
-          autoRefreshStatusLabel={autoRefreshStatusLabel}
-          autoRefreshStatusTone={autoRefreshStatusTone}
-          autoRefreshStatusTooltip={autoRefreshStatusTooltip}
-          onToggleFocus={toggleFocusMode}
-          onToggleHelp={() =>
-            mainView === "help" ? returnToHistoryWithMessageFocus() : setMainView("help")
-          }
-          onToggleSettings={() =>
-            mainView === "settings" ? returnToHistoryWithMessageFocus() : setMainView("settings")
-          }
-        />
+      <PaneFocusProvider controller={paneFocus}>
+        <main className="app-shell">
+          <TopBar
+            mainView={mainView}
+            theme={appearance.theme}
+            shikiTheme={appearance.shikiTheme}
+            indexing={indexing}
+            focusMode={focusMode}
+            focusDisabled={mainView !== "history"}
+            onToggleSearchView={() =>
+              mainView === "search" ? returnToHistoryWithPaneFocus() : focusGlobalSearch()
+            }
+            onThemeChange={appearance.setTheme}
+            onThemePreview={appearance.previewTheme}
+            onThemePreviewReset={appearance.clearPreviewTheme}
+            onShikiThemeChange={appearance.setShikiTheme}
+            onShikiThemePreview={appearance.previewShikiTheme}
+            onShikiThemePreviewReset={appearance.clearPreviewShikiTheme}
+            onIncrementalRefresh={() => void handleIncrementalRefresh()}
+            refreshStrategy={refreshStrategy}
+            onRefreshStrategyChange={updateRefreshStrategy}
+            autoRefreshStatusLabel={autoRefreshStatusLabel}
+            autoRefreshStatusTone={autoRefreshStatusTone}
+            autoRefreshStatusTooltip={autoRefreshStatusTooltip}
+            onToggleFocus={toggleFocusMode}
+            onToggleHelp={() =>
+              mainView === "help" ? returnToHistoryWithPaneFocus() : openHelpView()
+            }
+            onToggleSettings={() =>
+              mainView === "settings" ? returnToHistoryWithPaneFocus() : openSettingsView()
+            }
+          />
 
-        <div
-          className={`workspace ${isHistoryLayout ? "history-layout" : "single-layout"} ${
-            mainView === "search" ? "search-layout" : ""
-          }${history.projectPaneCollapsed ? " projects-collapsed" : ""}${
-            history.sessionPaneCollapsed ? " sessions-collapsed" : ""
-          }${
-            history.hideSessionsPaneForTreeView ? " tree-sessions-hidden" : ""
-          }${isHistoryLayout && !history.paneStateHydrated ? " pane-layout-hydrating" : ""}`}
-          style={history.workspaceStyle}
-          aria-busy={isHistoryLayout && !history.paneStateHydrated}
-        >
-          {mainView === "history" ? (
-            isHistoryLayout ? (
-              <HistoryLayout
-                history={history}
-                advancedSearchEnabled={advancedSearchEnabled}
-                setAdvancedSearchEnabled={setAdvancedSearchEnabled}
-                zoomPercent={appearance.zoomPercent}
-                canZoomIn={appearance.canZoomIn}
-                canZoomOut={appearance.canZoomOut}
-                applyZoomAction={appearance.applyZoomAction}
-                setZoomPercent={appearance.setZoomPercent}
-                logError={logError}
-                onDeleteProject={handleOpenProjectDelete}
-                onDeleteSession={handleOpenSessionDelete}
-                liveSessions={liveStatus?.sessions ?? []}
-                liveRowHasBackground={history.liveWatchRowHasBackground}
-              />
-            ) : (
-              <section className="pane content-pane history-focus-pane">
-                <HistoryDetailPane
+          <div
+            className={`workspace ${isHistoryLayout ? "history-layout" : "single-layout"} ${
+              mainView === "search" ? "search-layout" : ""
+            }${history.projectPaneCollapsed ? " projects-collapsed" : ""}${
+              history.sessionPaneCollapsed ? " sessions-collapsed" : ""
+            }${
+              history.hideSessionsPaneForTreeView ? " tree-sessions-hidden" : ""
+            }${isHistoryLayout && !history.paneStateHydrated ? " pane-layout-hydrating" : ""}`}
+            style={history.workspaceStyle}
+            aria-busy={isHistoryLayout && !history.paneStateHydrated}
+          >
+            {mainView === "history" ? (
+              isHistoryLayout ? (
+                <HistoryLayout
                   history={history}
                   advancedSearchEnabled={advancedSearchEnabled}
                   setAdvancedSearchEnabled={setAdvancedSearchEnabled}
@@ -955,80 +1092,103 @@ export function App({
                   canZoomOut={appearance.canZoomOut}
                   applyZoomAction={appearance.applyZoomAction}
                   setZoomPercent={appearance.setZoomPercent}
+                  logError={logError}
+                  onDeleteProject={handleOpenProjectDelete}
+                  onDeleteSession={handleOpenSessionDelete}
                   liveSessions={liveStatus?.sessions ?? []}
                   liveRowHasBackground={history.liveWatchRowHasBackground}
                 />
-              </section>
-            )
-          ) : mainView === "search" ? (
-            <SearchView
-              search={search}
-              enabledProviders={enabledProviders}
-              projects={history.sortedProjects}
-              advancedSearchEnabled={advancedSearchEnabled}
-              setAdvancedSearchEnabled={setAdvancedSearchEnabled}
-              onSelectResult={(result) => {
-                history.navigateFromSearchResult({
-                  targetMode: "project_all",
-                  projectId: result.projectId,
-                  sessionId: result.sessionId,
-                  messageId: result.messageId,
-                  sourceId: result.messageSourceId,
-                  historyCategories: [...history.historyCategories],
-                });
-                returnToHistoryWithMessageFocus();
-              }}
-            />
-          ) : mainView === "help" ? (
-            <section className="pane content-pane">
-              <ShortcutsDialog
-                shortcutItems={[...shortcuts.shortcutItems]}
-                commonSyntaxItems={[...COMMON_SYNTAX_ITEMS]}
-                advancedSyntaxItems={[...ADVANCED_SYNTAX_ITEMS]}
+              ) : (
+                <section
+                  className="pane content-pane history-focus-pane"
+                  {...paneFocus.getHistoryPaneRootProps("message")}
+                  ref={(element) => {
+                    paneFocus.registerHistoryPaneRoot("message", element);
+                  }}
+                >
+                  <HistoryDetailPane
+                    history={history}
+                    advancedSearchEnabled={advancedSearchEnabled}
+                    setAdvancedSearchEnabled={setAdvancedSearchEnabled}
+                    zoomPercent={appearance.zoomPercent}
+                    canZoomIn={appearance.canZoomIn}
+                    canZoomOut={appearance.canZoomOut}
+                    applyZoomAction={appearance.applyZoomAction}
+                    setZoomPercent={appearance.setZoomPercent}
+                    liveSessions={liveStatus?.sessions ?? []}
+                    liveRowHasBackground={history.liveWatchRowHasBackground}
+                  />
+                </section>
+              )
+            ) : mainView === "search" ? (
+              <SearchView
+                search={search}
+                enabledProviders={enabledProviders}
+                projects={history.sortedProjects}
+                advancedSearchEnabled={advancedSearchEnabled}
+                setAdvancedSearchEnabled={setAdvancedSearchEnabled}
+                onSelectResult={(result) => {
+                  history.navigateFromSearchResult({
+                    targetMode: "project_all",
+                    projectId: result.projectId,
+                    sessionId: result.sessionId,
+                    messageId: result.messageId,
+                    sourceId: result.messageSourceId,
+                    historyCategories: [...history.historyCategories],
+                  });
+                  returnToHistoryWithPaneFocus();
+                }}
               />
-            </section>
-          ) : (
-            <section className="pane content-pane">
-              <SettingsView
-                info={appearance.settingsInfo}
-                loading={appearance.settingsLoading}
-                error={appearance.settingsError}
-                diagnostics={watchStats}
-                diagnosticsLoading={watchStatsLoading}
-                diagnosticsError={watchStatsError}
-                liveStatus={liveStatus}
-                liveStatusError={liveStatusError}
-                claudeHookState={liveStatus?.claudeHookState ?? null}
-                claudeHookActionPending={claudeHookActionPending}
-                onInstallClaudeHooks={() => void installClaudeHooks()}
-                onRemoveClaudeHooks={() => void removeClaudeHooks()}
-                liveWatchEnabled={history.liveWatchEnabled}
-                liveWatchRowHasBackground={history.liveWatchRowHasBackground}
-                onLiveWatchEnabledChange={history.setLiveWatchEnabled}
-                onLiveWatchRowHasBackgroundChange={history.setLiveWatchRowHasBackground}
-                appearance={{
-                  theme: appearance.theme,
-                  shikiTheme: appearance.shikiTheme,
-                  zoomPercent: appearance.zoomPercent,
-                  messagePageSize: appearance.messagePageSize,
-                  monoFontFamily: appearance.monoFontFamily,
-                  regularFontFamily: appearance.regularFontFamily,
-                  monoFontSize: appearance.monoFontSize,
-                  regularFontSize: appearance.regularFontSize,
-                  useMonospaceForAllMessages: appearance.useMonospaceForAllMessages,
-                  autoHideMessageActions: appearance.autoHideMessageActions,
-                  autoHideViewerHeaderActions: appearance.autoHideViewerHeaderActions,
-                  defaultViewerWrapMode: appearance.defaultViewerWrapMode,
-                  defaultDiffViewMode: appearance.defaultDiffViewMode,
-                  preferredExternalEditor: appearance.preferredExternalEditor,
-                  preferredExternalDiffTool: appearance.preferredExternalDiffTool,
-                  terminalAppCommand: appearance.terminalAppCommand,
-                  externalTools: appearance.externalTools,
-                  availableEditors: appearance.availableEditors,
-                  availableDiffTools: appearance.availableDiffTools,
-                  onThemeChange: appearance.setTheme,
-                  onShikiThemeChange: appearance.setShikiTheme,
-                  onZoomPercentChange: appearance.setZoomPercent,
+            ) : mainView === "help" ? (
+              <section className="pane content-pane" ref={helpViewRef} tabIndex={-1}>
+                <ShortcutsDialog
+                  shortcutItems={[...shortcuts.shortcutItems]}
+                  commonSyntaxItems={[...COMMON_SYNTAX_ITEMS]}
+                  advancedSyntaxItems={[...ADVANCED_SYNTAX_ITEMS]}
+                />
+              </section>
+            ) : (
+              <section className="pane content-pane" ref={settingsViewRef} tabIndex={-1}>
+                <SettingsView
+                  info={appearance.settingsInfo}
+                  loading={appearance.settingsLoading}
+                  error={appearance.settingsError}
+                  diagnostics={watchStats}
+                  diagnosticsLoading={watchStatsLoading}
+                  diagnosticsError={watchStatsError}
+                  liveStatus={liveStatus}
+                  liveStatusError={liveStatusError}
+                  claudeHookState={liveStatus?.claudeHookState ?? null}
+                  claudeHookActionPending={claudeHookActionPending}
+                  onInstallClaudeHooks={() => void installClaudeHooks()}
+                  onRemoveClaudeHooks={() => void removeClaudeHooks()}
+                  liveWatchEnabled={history.liveWatchEnabled}
+                  liveWatchRowHasBackground={history.liveWatchRowHasBackground}
+                  onLiveWatchEnabledChange={history.setLiveWatchEnabled}
+                  onLiveWatchRowHasBackgroundChange={history.setLiveWatchRowHasBackground}
+                  appearance={{
+                    theme: appearance.theme,
+                    shikiTheme: appearance.shikiTheme,
+                    zoomPercent: appearance.zoomPercent,
+                    messagePageSize: appearance.messagePageSize,
+                    monoFontFamily: appearance.monoFontFamily,
+                    regularFontFamily: appearance.regularFontFamily,
+                    monoFontSize: appearance.monoFontSize,
+                    regularFontSize: appearance.regularFontSize,
+                    useMonospaceForAllMessages: appearance.useMonospaceForAllMessages,
+                    autoHideMessageActions: appearance.autoHideMessageActions,
+                    autoHideViewerHeaderActions: appearance.autoHideViewerHeaderActions,
+                    defaultViewerWrapMode: appearance.defaultViewerWrapMode,
+                    defaultDiffViewMode: appearance.defaultDiffViewMode,
+                    preferredExternalEditor: appearance.preferredExternalEditor,
+                    preferredExternalDiffTool: appearance.preferredExternalDiffTool,
+                    terminalAppCommand: appearance.terminalAppCommand,
+                    externalTools: appearance.externalTools,
+                    availableEditors: appearance.availableEditors,
+                    availableDiffTools: appearance.availableDiffTools,
+                    onThemeChange: appearance.setTheme,
+                    onShikiThemeChange: appearance.setShikiTheme,
+                    onZoomPercentChange: appearance.setZoomPercent,
                   onMessagePageSizeChange: appearance.setMessagePageSize,
                   onMonoFontFamilyChange: appearance.setMonoFontFamily,
                   onRegularFontFamilyChange: appearance.setRegularFontFamily,
@@ -1062,10 +1222,10 @@ export function App({
                   onRemoveSystemMessageRegexRule: handleRemoveSystemMessageRegexRule,
                 }}
                 onActionError={logError}
-              />
-            </section>
-          )}
-        </div>
+                />
+              </section>
+            )}
+          </div>
         <ConfirmDialog
           open={showClaudeHooksPrompt}
           title="Install Claude Hooks?"
@@ -1144,7 +1304,8 @@ export function App({
             history.historyExportState.scope === "all_pages" ? "All pages" : "Current page"
           }
         />
-      </main>
+        </main>
+      </PaneFocusProvider>
     </ViewerExternalAppsProvider>
   );
 }

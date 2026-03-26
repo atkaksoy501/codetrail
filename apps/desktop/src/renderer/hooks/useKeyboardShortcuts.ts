@@ -2,6 +2,7 @@ import type { MessageCategory } from "@codetrail/core/browser";
 import { type RefObject, useEffect, useRef } from "react";
 
 import type { MainView } from "../app/types";
+import { isEditableTarget } from "../lib/focusTargets";
 import { type ShortcutRegistry, useShortcutRegistry } from "../lib/shortcutRegistry";
 
 type HistoryPane = "project" | "session" | "message";
@@ -32,6 +33,9 @@ const HISTORY_PAGE_SCROLL_OVERLAP_PX = 20;
 
 export function useKeyboardShortcuts(args: {
   mainView: MainView;
+  activeHistoryPane: HistoryPane | null;
+  lastHistoryPane: HistoryPane;
+  overlayOpen: boolean;
   hasFocusedHistoryMessage: boolean;
   projectListRef: RefObject<HTMLDivElement | null>;
   sessionListRef: RefObject<HTMLDivElement | null>;
@@ -43,7 +47,9 @@ export function useKeyboardShortcuts(args: {
   searchProjectSelectRef: RefObject<HTMLButtonElement | null>;
   searchResultsViewRef: RefObject<HTMLDivElement | null>;
   setMainView: (view: MainView | ((value: MainView) => MainView)) => void;
-  returnToHistoryWithMessageFocus: () => void;
+  openSettingsView: () => void;
+  openHelpView: () => void;
+  returnToHistoryWithPaneFocus: () => void;
   clearFocusedHistoryMessage: () => void;
   focusGlobalSearch: () => void;
   focusSessionSearch: () => void;
@@ -92,11 +98,9 @@ export function useKeyboardShortcuts(args: {
       const shortcutTarget = resolveShortcutTarget(event.target);
       const focusedPane =
         args.mainView === "history"
-          ? getFocusedHistoryPane(shortcutTarget, {
-              project: args.projectListRef.current,
-              session: args.sessionListRef.current,
-              message: args.messageListRef.current,
-            })
+          ? (resolveFocusedHistoryPane(shortcutTarget) ??
+            args.activeHistoryPane ??
+            args.lastHistoryPane)
           : null;
       const command = shortcuts.matches.isPrimaryModifierPressed(event);
       const shift = event.shiftKey;
@@ -117,6 +121,9 @@ export function useKeyboardShortcuts(args: {
         isHistoryArrowNavigation,
       };
       if (event.defaultPrevented) {
+        return;
+      }
+      if (args.overlayOpen) {
         return;
       }
       const handledExpandedCategory = handleHistoryCategoryShortcut({
@@ -176,7 +183,7 @@ function handleSettingsShortcut(context: ShortcutContext): boolean {
     return false;
   }
   context.event.preventDefault();
-  context.setMainView("settings");
+  context.openSettingsView();
   return true;
 }
 
@@ -185,7 +192,7 @@ function handleHelpShortcut(context: ShortcutContext): boolean {
     return false;
   }
   context.event.preventDefault();
-  context.setMainView("help");
+  context.openHelpView();
   return true;
 }
 
@@ -193,17 +200,12 @@ function handleEscapeShortcut(context: ShortcutContext): boolean {
   if (context.event.key !== "Escape") {
     return false;
   }
-  if (context.mainView === "search" || context.mainView === "settings") {
+  if (context.mainView !== "history") {
     context.event.preventDefault();
-    context.returnToHistoryWithMessageFocus();
+    context.returnToHistoryWithPaneFocus();
     return true;
   }
-  if (context.mainView === "help") {
-    context.event.preventDefault();
-    context.returnToHistoryWithMessageFocus();
-    return true;
-  }
-  if (context.mainView === "history" && context.hasFocusedHistoryMessage) {
+  if (context.hasFocusedHistoryMessage) {
     context.event.preventDefault();
     context.clearFocusedHistoryMessage();
     return true;
@@ -247,7 +249,13 @@ function handleZoomShortcut(context: ShortcutContext): boolean {
 }
 
 function handleFocusedPaneArrowShortcut(context: ShortcutContext): boolean {
-  if (context.mainView !== "history" || context.command || context.event.altKey || context.shift) {
+  if (
+    context.mainView !== "history" ||
+    context.command ||
+    context.event.altKey ||
+    context.shift ||
+    isEditableTarget(context.event.target)
+  ) {
     return false;
   }
   if (context.focusedPane === "project" && context.event.key === "ArrowUp") {
@@ -634,17 +642,6 @@ function handleHistoryCategoryShortcut(args: {
   return true;
 }
 
-function isEditableTarget(target: EventTarget | null): boolean {
-  if (!target || !(target instanceof HTMLElement)) {
-    return false;
-  }
-  if (target.isContentEditable) {
-    return true;
-  }
-  const tagName = target.tagName;
-  return tagName === "INPUT" || tagName === "TEXTAREA" || tagName === "SELECT";
-}
-
 function isHistorySearchInputTarget(target: HTMLElement | null): boolean {
   return Boolean(target?.closest(".msg-search .search-input"));
 }
@@ -670,28 +667,9 @@ function resolveShortcutTarget(target: EventTarget | null): HTMLElement | null {
   return document.activeElement instanceof HTMLElement ? document.activeElement : null;
 }
 
-function getFocusedHistoryPane(
-  target: HTMLElement | null,
-  panes: Record<HistoryPane, HTMLDivElement | null>,
-): HistoryPane | null {
-  if (!target) {
-    return null;
-  }
-  const paneContainer = target.closest(".history-focus-pane");
-  for (const [paneName, paneElement] of Object.entries(panes) as Array<
-    [HistoryPane, HTMLDivElement | null]
-  >) {
-    if (!paneElement) {
-      continue;
-    }
-    if (paneContainer && paneElement.closest(".history-focus-pane") === paneContainer) {
-      return paneName;
-    }
-    if (paneElement === target || paneElement.contains(target)) {
-      return paneName;
-    }
-  }
-  return null;
+function resolveFocusedHistoryPane(target: HTMLElement | null): HistoryPane | null {
+  const paneId = target?.closest<HTMLElement>("[data-history-pane]")?.dataset.historyPane;
+  return paneId === "project" || paneId === "session" || paneId === "message" ? paneId : null;
 }
 
 function isVisiblePaneTarget(pane: HTMLDivElement | null): pane is HTMLDivElement {
@@ -703,13 +681,14 @@ function isVisiblePaneTarget(pane: HTMLDivElement | null): pane is HTMLDivElemen
 }
 
 function resolvePageableHistoryPaneElement(context: ShortcutContext): HTMLDivElement | null {
-  if (context.focusedPane === "project") {
+  const targetPane = context.focusedPane ?? context.lastHistoryPane;
+  if (targetPane === "project") {
     return context.projectListRef.current;
   }
-  if (context.focusedPane === "session") {
+  if (targetPane === "session") {
     return context.sessionListRef.current;
   }
-  if (context.focusedPane === "message") {
+  if (targetPane === "message") {
     return context.messageListRef.current;
   }
   return context.messageListRef.current;

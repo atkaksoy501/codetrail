@@ -4,6 +4,7 @@ import type { SessionSummary } from "../../app/types";
 import { useClickOutside } from "../../hooks/useClickOutside";
 import { useVirtualListWindow } from "../../hooks/useVirtualListWindow";
 import { formatCompactInteger, formatInteger } from "../../lib/numberFormatting";
+import { usePaneFocus, usePaneFocusOverlay } from "../../lib/paneFocusController";
 import { useShortcutRegistry } from "../../lib/shortcutRegistry";
 import { useTooltipFormatter } from "../../lib/tooltipText";
 import { deriveSessionTitle, formatDate, sessionActivityOf } from "../../lib/viewUtils";
@@ -12,7 +13,6 @@ import {
   SIDEBAR_LIST_ROW_HEIGHT,
   SIDEBAR_LIST_VIRTUALIZATION_THRESHOLD,
 } from "../../lib/virtualList";
-import { focusHistoryList } from "../../features/historyControllerShared";
 import { ToolbarIcon } from "../ToolbarIcon";
 import { HistoryListContextMenu } from "./HistoryListContextMenu";
 import { scheduleSelectedSessionScroll } from "./sessionAutoScroll";
@@ -71,6 +71,7 @@ export function SessionPane({
   onSelectSession: (sessionId: string) => void;
   listRef?: Ref<HTMLDivElement>;
 }) {
+  const paneFocus = usePaneFocus();
   const shortcuts = useShortcutRegistry();
   const formatTooltipLabel = useTooltipFormatter();
   const [selectedSessionElement, setSelectedSessionElement] = useState<HTMLButtonElement | null>(
@@ -83,7 +84,6 @@ export function SessionPane({
     y: number;
   } | null>(null);
   const [overflowMenuOpen, setOverflowMenuOpen] = useState(false);
-  const sessionListContainerRef = useRef<HTMLDivElement | null>(null);
   const selectedItemId = allSessionsSelected
     ? "__project_all__"
     : bookmarksSelected
@@ -125,18 +125,15 @@ export function SessionPane({
   });
   const setSessionListRefs = useCallback(
     (element: HTMLDivElement | null) => {
-      sessionListContainerRef.current = element;
+      paneFocus.registerHistoryPaneTarget("session", element);
       setContainerRef(element);
     },
-    [setContainerRef],
+    [paneFocus, setContainerRef],
   );
   const selectedSessionRef = useCallback((node: HTMLButtonElement | null) => {
     setSelectedSessionElement(node);
   }, []);
-  const focusSessionPane = useCallback(() => {
-    focusHistoryList(sessionListContainerRef.current);
-  }, []);
-
+  usePaneFocusOverlay(overflowMenuOpen || Boolean(contextMenu));
   useClickOutside(overflowMenuRef, overflowMenuOpen, () => setOverflowMenuOpen(false));
 
   useEffect(() => {
@@ -148,16 +145,14 @@ export function SessionPane({
   }, [collapsed, selectedItemId, selectedSessionElement]);
 
   return (
-    <aside className={`panel history-focus-pane session-pane${collapsed ? " collapsed" : ""}`}>
-      <div
-        className="panel-header"
-        onMouseDown={(event) => {
-          if (isInteractiveHeaderTarget(event.target)) {
-            return;
-          }
-          focusSessionPane();
-        }}
-      >
+    <aside
+      className={`panel history-focus-pane session-pane${collapsed ? " collapsed" : ""}`}
+      {...paneFocus.getHistoryPaneRootProps("session")}
+      ref={(element) => {
+        paneFocus.registerHistoryPaneRoot("session", element);
+      }}
+    >
+      <div className="panel-header" {...paneFocus.getPaneChromeProps("session")}>
         <div className="panel-header-left">
           <span className="panel-title">Sessions</span>
           {!collapsed ? <span className="panel-count">{sortedSessions.length}</span> : null}
@@ -168,6 +163,7 @@ export function SessionPane({
               <button
                 type="button"
                 className="collapse-btn"
+                {...paneFocus.getPreservePaneFocusProps("session")}
                 onClick={onToggleSortDirection}
                 aria-label={sortAriaLabel}
                 title={sortTooltip}
@@ -178,6 +174,7 @@ export function SessionPane({
                 <button
                   type="button"
                   className="collapse-btn tb-dropdown-trigger"
+                  {...paneFocus.getPreservePaneFocusProps("session")}
                   onClick={() => setOverflowMenuOpen((value) => !value)}
                   aria-haspopup="menu"
                   aria-expanded={overflowMenuOpen}
@@ -243,6 +240,7 @@ export function SessionPane({
           <button
             type="button"
             className="collapse-btn pane-collapse-btn"
+            {...paneFocus.getPreservePaneFocusProps("session")}
             onClick={onToggleCollapsed}
             aria-label={collapsed ? "Expand Sessions pane" : "Collapse Sessions pane"}
             title={formatTooltipLabel(
@@ -400,16 +398,5 @@ export function SessionPane({
         }
       />
     </aside>
-  );
-}
-
-function isInteractiveHeaderTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) {
-    return false;
-  }
-  return Boolean(
-    target.closest(
-      'button, input, select, textarea, a, label, [role="button"], [role="menuitem"], [contenteditable="true"]',
-    ),
   );
 }

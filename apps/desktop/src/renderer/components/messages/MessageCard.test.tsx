@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -12,6 +12,7 @@ vi.mock("../../lib/clipboard", () => ({
   copyTextToClipboard,
 }));
 
+import { renderWithPaneFocus } from "../../test/renderWithPaneFocus";
 import { MessageCard, isMessageExpandedByDefault } from "./MessageCard";
 import type { SessionMessage } from "./types";
 
@@ -38,7 +39,7 @@ describe("MessageCard", () => {
     const onRevealInSession = vi.fn();
     const onRevealInProject = vi.fn();
 
-    render(
+    renderWithPaneFocus(
       <MessageCard
         message={message}
         query=""
@@ -76,7 +77,7 @@ describe("MessageCard", () => {
     const user = userEvent.setup();
     const onToggleExpanded = vi.fn();
 
-    render(
+    renderWithPaneFocus(
       <MessageCard
         message={{
           ...message,
@@ -107,7 +108,7 @@ describe("MessageCard", () => {
     const onToggleExpanded = vi.fn();
     const onToggleCategoryExpanded = vi.fn();
 
-    render(
+    renderWithPaneFocus(
       <MessageCard
         message={message}
         query=""

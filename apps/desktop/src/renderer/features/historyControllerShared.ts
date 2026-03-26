@@ -94,12 +94,6 @@ export function scrollFocusedHistoryMessageIntoView(
   });
 }
 
-export function focusHistoryList(container: HTMLDivElement | null): void {
-  window.setTimeout(() => {
-    container?.focus({ preventScroll: true });
-  }, 0);
-}
-
 export function getMessageListFingerprint(messages: Array<{ id: string }>): string {
   const firstId = messages[0]?.id ?? "";
   const lastId = messages[messages.length - 1]?.id ?? "";

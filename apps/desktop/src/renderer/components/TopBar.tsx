@@ -20,6 +20,7 @@ import {
 } from "../../shared/uiPreferences";
 import { REFRESH_STRATEGY_OPTIONS, type RefreshStrategy } from "../app/autoRefresh";
 import { useClickOutside } from "../hooks/useClickOutside";
+import { usePaneFocus, usePaneFocusOverlay } from "../lib/paneFocusController";
 import { useShortcutRegistry } from "../lib/shortcutRegistry";
 import { useTooltipFormatter } from "../lib/tooltipText";
 import { ToolbarIcon } from "./ToolbarIcon";
@@ -194,10 +195,10 @@ function useToolbarDropdownKeyboardNavigation({
       }
 
       if (event.key === "Tab") {
-        closeDropdownMenu();
+        closeDropdownAndFocusTrigger();
       }
     },
-    [closeDropdownAndFocusTrigger, closeDropdownMenu, itemCount],
+    [closeDropdownAndFocusTrigger, itemCount],
   );
 
   const setItemRef = useCallback((index: number, node: HTMLButtonElement | null) => {
@@ -240,10 +241,12 @@ function RefreshStrategyDropdown({
   statusTone: "queued" | "running" | null;
   statusTooltip: string | null;
 }) {
+  const paneFocus = usePaneFocus();
   const shortcuts = useShortcutRegistry();
   const formatTooltipLabel = useTooltipFormatter();
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  usePaneFocusOverlay(open);
   const selectedLabel = REFRESH_STRATEGY_OPTIONS.find((o) => o.value === value)?.label ?? "Off";
   const closeDropdown = useCallback(() => {
     setOpen(false);
@@ -255,6 +258,7 @@ function RefreshStrategyDropdown({
       <button
         type="button"
         className={`tb-btn tb-dropdown-trigger${value !== "off" ? " active" : ""}`}
+        {...paneFocus.getPreserveHistoryFocusProps()}
         onClick={() => setOpen((v) => !v)}
         aria-label="Auto-refresh strategy"
         aria-haspopup="menu"
@@ -312,9 +316,11 @@ function ThemeDropdown({
   onPreview: (theme: ThemeMode) => void;
   onPreviewReset: () => void;
 }) {
+  const paneFocus = usePaneFocus();
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const previewActiveRef = useRef(false);
+  usePaneFocusOverlay(open);
   const themeOptions = THEME_OPTIONS;
   const selectedIndex = themeOptions.findIndex((option) => option.value === value);
   const restorePreview = useCallback(() => {
@@ -352,6 +358,7 @@ function ThemeDropdown({
         ref={triggerRef}
         type="button"
         className={open ? "tb-btn tb-btn-icon active" : "tb-btn tb-btn-icon"}
+        {...paneFocus.getPreserveHistoryFocusProps()}
         onClick={() => {
           if (open) {
             closeDropdownMenu();
@@ -449,9 +456,11 @@ function ShikiThemeDropdown({
   onPreview: (theme: ShikiThemeId) => void;
   onPreviewReset: () => void;
 }) {
+  const paneFocus = usePaneFocus();
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const previewActiveRef = useRef(false);
+  usePaneFocusOverlay(open);
   const restorePreview = useCallback(() => {
     if (!previewActiveRef.current) {
       return;
@@ -489,6 +498,7 @@ function ShikiThemeDropdown({
         ref={triggerRef}
         type="button"
         className={open ? "tb-btn tb-btn-icon active" : "tb-btn tb-btn-icon"}
+        {...paneFocus.getPreserveHistoryFocusProps()}
         onClick={() => {
           if (open) {
             closeDropdownMenu();
@@ -621,8 +631,10 @@ export function TopBar({
   onToggleHelp: () => void;
   onToggleSettings: () => void;
 }) {
+  const paneFocus = usePaneFocus();
   const shortcuts = useShortcutRegistry();
   const formatTooltipLabel = useTooltipFormatter();
+  const preserveHistoryFocusProps = paneFocus.getPreserveHistoryFocusProps();
   const activeTitleSuffix =
     mainView === "search"
       ? "Search"
@@ -648,6 +660,7 @@ export function TopBar({
         <button
           type="button"
           className={mainView === "search" ? "tb-btn active" : "tb-btn"}
+          {...preserveHistoryFocusProps}
           onClick={onToggleSearchView}
           aria-label="Search"
           title={
@@ -662,6 +675,7 @@ export function TopBar({
         <button
           type="button"
           className="tb-btn"
+          {...preserveHistoryFocusProps}
           onClick={onIncrementalRefresh}
           disabled={indexing}
           aria-label={indexing ? "Indexing in progress" : "Incremental refresh"}
@@ -684,6 +698,7 @@ export function TopBar({
         <button
           type="button"
           className="tb-btn"
+          {...preserveHistoryFocusProps}
           onClick={onToggleFocus}
           disabled={focusDisabled}
           aria-label={focusMode ? "Exit focus mode" : "Enter focus mode"}
@@ -699,6 +714,7 @@ export function TopBar({
         <button
           type="button"
           className={mainView === "help" ? "tb-btn active" : "tb-btn"}
+          {...preserveHistoryFocusProps}
           onClick={onToggleHelp}
           aria-label={mainView === "help" ? "Return to history view" : "Open help"}
           title={
@@ -727,6 +743,7 @@ export function TopBar({
         <button
           type="button"
           className={mainView === "settings" ? "tb-btn tb-btn-icon active" : "tb-btn tb-btn-icon"}
+          {...preserveHistoryFocusProps}
           onClick={onToggleSettings}
           aria-label={mainView === "settings" ? "Return to history view" : "Open settings"}
           title={

@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 
 import type { ProjectSortField, ProjectViewMode } from "../../app/types";
 import { useClickOutside } from "../../hooks/useClickOutside";
+import { usePaneFocus, usePaneFocusOverlay } from "../../lib/paneFocusController";
 import { useShortcutRegistry } from "../../lib/shortcutRegistry";
 import { useTooltipFormatter } from "../../lib/tooltipText";
 import { ToolbarIcon } from "../ToolbarIcon";
@@ -56,7 +57,6 @@ type ProjectPaneHeaderProps = {
   canCopyProjectDetails: boolean;
   canOpenProjectLocation: boolean;
   canDeleteProject: boolean;
-  onFocusPane: () => void;
   onToggleCollapsed: () => void;
   onSetSortField: (value: ProjectSortField) => void;
   onToggleSortDirection: () => void;
@@ -84,7 +84,6 @@ export function ProjectPaneHeader({
   canCopyProjectDetails,
   canOpenProjectLocation,
   canDeleteProject,
-  onFocusPane,
   onToggleCollapsed,
   onSetSortField,
   onToggleSortDirection,
@@ -98,6 +97,7 @@ export function ProjectPaneHeader({
   onOpenProjectLocation,
   onDeleteProject,
 }: ProjectPaneHeaderProps) {
+  const paneFocus = usePaneFocus();
   const shortcuts = useShortcutRegistry();
   const formatTooltipLabel = useTooltipFormatter();
   const sortMenuRef = useRef<HTMLDivElement | null>(null);
@@ -105,6 +105,7 @@ export function ProjectPaneHeader({
   const [sortMenuOpen, setSortMenuOpen] = useState(false);
   const [overflowMenuOpen, setOverflowMenuOpen] = useState(false);
 
+  usePaneFocusOverlay(sortMenuOpen || overflowMenuOpen);
   useClickOutside(sortMenuRef, sortMenuOpen, () => setSortMenuOpen(false));
   useClickOutside(overflowMenuRef, overflowMenuOpen, () => setOverflowMenuOpen(false));
 
@@ -112,15 +113,7 @@ export function ProjectPaneHeader({
   const sortCopy = PROJECT_SORT_COPY[sortField][sortDirection];
 
   return (
-    <div
-      className="panel-header"
-      onMouseDown={(event) => {
-        if (isInteractiveHeaderTarget(event.target)) {
-          return;
-        }
-        onFocusPane();
-      }}
-    >
+    <div className="panel-header" {...paneFocus.getPaneChromeProps("project")}>
       <div className="panel-header-left">
         <span className="panel-title">Projects</span>
       </div>
@@ -131,6 +124,7 @@ export function ProjectPaneHeader({
               <button
                 type="button"
                 className="collapse-btn"
+                {...paneFocus.getPreservePaneFocusProps("project")}
                 onClick={onToggleAllFolders}
                 aria-label={
                   allVisibleFoldersExpanded ? "Collapse all folders" : "Expand all folders"
@@ -144,6 +138,7 @@ export function ProjectPaneHeader({
               <button
                 type="button"
                 className="collapse-btn tb-dropdown-trigger project-pane-sort-field-btn"
+                {...paneFocus.getPreservePaneFocusProps("project")}
                 aria-haspopup="menu"
                 aria-expanded={sortMenuOpen}
                 aria-label={`Project sort field: ${sortLabel}`}
@@ -155,6 +150,7 @@ export function ProjectPaneHeader({
               <button
                 type="button"
                 className="collapse-btn project-pane-sort-direction-btn"
+                {...paneFocus.getPreservePaneFocusProps("project")}
                 onClick={onToggleSortDirection}
                 aria-label={sortCopy.ariaLabel}
                 title={sortCopy.tooltip}
@@ -193,6 +189,7 @@ export function ProjectPaneHeader({
               className={`collapse-btn project-pane-view-toggle-btn${
                 viewMode === "tree" ? " active" : ""
               }`}
+              {...paneFocus.getPreservePaneFocusProps("project")}
               onClick={onToggleViewMode}
               aria-label={viewMode === "list" ? "Switch to By Folder" : "Switch to List"}
               title={viewMode === "list" ? "Switch to Folder view" : "Switch to List view"}
@@ -203,6 +200,7 @@ export function ProjectPaneHeader({
               <button
                 type="button"
                 className="collapse-btn tb-dropdown-trigger"
+                {...paneFocus.getPreservePaneFocusProps("project")}
                 onClick={() => setOverflowMenuOpen((value) => !value)}
                 aria-haspopup="menu"
                 aria-expanded={overflowMenuOpen}
@@ -336,11 +334,12 @@ export function ProjectPaneHeader({
             </div>
           </>
         ) : null}
-        <button
-          type="button"
-          className="collapse-btn pane-collapse-btn"
-          onClick={onToggleCollapsed}
-          aria-label={collapsed ? "Expand Projects pane" : "Collapse Projects pane"}
+          <button
+            type="button"
+            className="collapse-btn pane-collapse-btn"
+            {...paneFocus.getPreservePaneFocusProps("project")}
+            onClick={onToggleCollapsed}
+            aria-label={collapsed ? "Expand Projects pane" : "Collapse Projects pane"}
           title={formatTooltipLabel(
             collapsed ? "Expand Projects" : "Collapse Projects",
             shortcuts.actions.toggleProjectPane,
@@ -350,16 +349,5 @@ export function ProjectPaneHeader({
         </button>
       </div>
     </div>
-  );
-}
-
-function isInteractiveHeaderTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) {
-    return false;
-  }
-  return Boolean(
-    target.closest(
-      'button, input, select, textarea, a, label, [role="button"], [role="menuitem"], [contenteditable="true"]',
-    ),
   );
 }

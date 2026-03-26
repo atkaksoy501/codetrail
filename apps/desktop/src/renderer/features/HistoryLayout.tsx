@@ -6,6 +6,7 @@ import { SessionPane } from "../components/history/SessionPane";
 import { copyTextToClipboard } from "../lib/clipboard";
 import { findSessionSummaryById } from "../lib/historySessionLookup";
 import { openInFileManager, openPath } from "../lib/pathActions";
+import { usePaneFocus } from "../lib/paneFocusController";
 import { HistoryDetailPane } from "./HistoryDetailPane";
 import { formatProjectDetails, formatSessionDetails } from "./historyCopyFormat";
 import type { useHistoryController } from "./useHistoryController";
@@ -129,6 +130,8 @@ export function HistoryLayout({
   liveSessions?: WatchLiveStatusResponse["sessions"];
   liveRowHasBackground?: boolean;
 }) {
+  const paneFocus = usePaneFocus();
+
   return (
     <>
       <ProjectPane
@@ -268,7 +271,13 @@ export function HistoryLayout({
         </>
       )}
 
-      <section className="pane content-pane history-focus-pane">
+      <section
+        className="pane content-pane history-focus-pane"
+        {...paneFocus.getHistoryPaneRootProps("message")}
+        ref={(element) => {
+          paneFocus.registerHistoryPaneRoot("message", element);
+        }}
+      >
         <HistoryDetailPane
           history={history}
           advancedSearchEnabled={advancedSearchEnabled}

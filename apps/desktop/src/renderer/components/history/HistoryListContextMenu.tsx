@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { useClickOutside } from "../../hooks/useClickOutside";
+import { usePaneFocusOverlay } from "../../lib/paneFocusController";
 import { ToolbarIcon, type ToolbarIconName } from "../ToolbarIcon";
 
 type ContextMenuItem = {
@@ -26,6 +27,7 @@ export function HistoryListContextMenu({
 }) {
   const menuRef = useRef<HTMLDivElement | null>(null);
   const [position, setPosition] = useState({ left: x, top: y });
+  usePaneFocusOverlay(open);
 
   useClickOutside(menuRef, open, onClose);
 

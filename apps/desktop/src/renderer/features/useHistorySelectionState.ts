@@ -18,13 +18,14 @@ type PendingSelectionCommit =
 const PROJECT_SELECTION_COMMIT_DEBOUNCE_MS = 140;
 const SESSION_SELECTION_COMMIT_DEBOUNCE_MS = 140;
 
-let _testHistorySelectionDebounceOverrides: { project: number; session: number } | null = null;
+export type HistorySelectionDebounceOverrides = { project: number; session: number };
 
-function getHistorySelectionCommitDebounceMs(kind: "project" | "session"): number {
-  if (_testHistorySelectionDebounceOverrides) {
-    return kind === "project"
-      ? _testHistorySelectionDebounceOverrides.project
-      : _testHistorySelectionDebounceOverrides.session;
+function getHistorySelectionCommitDebounceMs(
+  kind: "project" | "session",
+  overrides?: HistorySelectionDebounceOverrides | null,
+): number {
+  if (overrides) {
+    return kind === "project" ? overrides.project : overrides.session;
   }
   return kind === "project"
     ? PROJECT_SELECTION_COMMIT_DEBOUNCE_MS
@@ -41,13 +42,10 @@ function historySelectionsEqual(left: HistorySelection, right: HistorySelection)
   return left.mode === "session" && right.mode === "session" && left.sessionId === right.sessionId;
 }
 
-export function setTestHistorySelectionDebounceOverrides(
-  overrides: { project: number; session: number } | null,
-): void {
-  _testHistorySelectionDebounceOverrides = overrides;
-}
-
-export function useHistorySelectionState(initialPaneState?: PaneStateSnapshot | null): {
+export function useHistorySelectionState(
+  initialPaneState?: PaneStateSnapshot | null,
+  debounceOverrides?: HistorySelectionDebounceOverrides | null,
+): {
   selection: HistorySelection;
   committedSelection: HistorySelection;
   pendingProjectPaneFocusCommitModeRef: MutableRefObject<HistorySelectionCommitMode>;
@@ -81,6 +79,10 @@ export function useHistorySelectionState(initialPaneState?: PaneStateSnapshot | 
   const pendingDebouncedSelectionRef = useRef<PendingSelectionCommit | null>(null);
   const pendingProjectPaneFocusCommitModeRef = useRef<HistorySelectionCommitMode>("immediate");
   const pendingProjectPaneFocusWaitForKeyboardIdleRef = useRef(false);
+  const getCommitDebounceMs = useCallback(
+    (kind: "project" | "session") => getHistorySelectionCommitDebounceMs(kind, debounceOverrides),
+    [debounceOverrides],
+  );
 
   const clearSelectionCommitTimer = useCallback(() => {
     if (selectionCommitTimerRef.current === null) {
@@ -109,6 +111,10 @@ export function useHistorySelectionState(initialPaneState?: PaneStateSnapshot | 
     (nextSelection: HistorySelection, delayMs: number) => {
       pendingDebouncedSelectionRef.current = null;
       clearSelectionCommitTimer();
+      if (delayMs <= 0) {
+        commitHistorySelection(nextSelection);
+        return;
+      }
       selectionCommitTimerRef.current = window.setTimeout(() => {
         selectionCommitTimerRef.current = null;
         commitHistorySelection(nextSelection);
@@ -121,6 +127,9 @@ export function useHistorySelectionState(initialPaneState?: PaneStateSnapshot | 
     (delayMs: number) => {
       pendingDebouncedSelectionRef.current = null;
       clearSelectionCommitTimer();
+      if (delayMs <= 0) {
+        return;
+      }
       selectionCommitTimerRef.current = window.setTimeout(() => {
         selectionCommitTimerRef.current = null;
       }, delayMs);
@@ -158,7 +167,7 @@ export function useHistorySelectionState(initialPaneState?: PaneStateSnapshot | 
         return;
       }
 
-      const delayMs = getHistorySelectionCommitDebounceMs(
+      const delayMs = getCommitDebounceMs(
         commitMode === "debounced_project" ? "project" : "session",
       );
       if (waitForKeyboardIdle) {
@@ -172,7 +181,7 @@ export function useHistorySelectionState(initialPaneState?: PaneStateSnapshot | 
       }
       scheduleCommittedSelection(nextSelection, delayMs);
     },
-    [clearSelectionCommitTimer, commitHistorySelection, scheduleCommittedSelection],
+    [clearSelectionCommitTimer, commitHistorySelection, getCommitDebounceMs, scheduleCommittedSelection],
   );
 
   const setHistorySelectionImmediate = useCallback(
@@ -190,7 +199,7 @@ export function useHistorySelectionState(initialPaneState?: PaneStateSnapshot | 
         return;
       }
 
-      const delayMs = getHistorySelectionCommitDebounceMs(
+      const delayMs = getCommitDebounceMs(
         commitMode === "debounced_project" ? "project" : "session",
       );
       if (waitForKeyboardIdle) {
@@ -203,7 +212,7 @@ export function useHistorySelectionState(initialPaneState?: PaneStateSnapshot | 
       }
       scheduleNoopCommit(delayMs);
     },
-    [clearSelectionCommitTimer, scheduleNoopCommit],
+    [clearSelectionCommitTimer, getCommitDebounceMs, scheduleNoopCommit],
   );
 
   const consumeProjectPaneFocusSelectionBehavior = useCallback(() => {
@@ -232,8 +241,10 @@ export function useHistorySelectionState(initialPaneState?: PaneStateSnapshot | 
     return () => {
       window.removeEventListener("keyup", flushOnArrowRelease);
       window.removeEventListener("blur", flushOnBlur);
+      pendingDebouncedSelectionRef.current = null;
+      clearSelectionCommitTimer();
     };
-  }, [flushPendingDebouncedSelection]);
+  }, [clearSelectionCommitTimer, flushPendingDebouncedSelection]);
 
   return {
     selection,

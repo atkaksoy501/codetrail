@@ -3,12 +3,13 @@
 import type { ComponentProps } from "react";
 import { createRef, useMemo } from "react";
 
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import type { ProjectSummary, SessionSummary, TreeAutoRevealSessionRequest } from "../../app/types";
 import { SEARCH_PLACEHOLDERS } from "../../lib/searchLabels";
+import { renderWithPaneFocus } from "../../test/renderWithPaneFocus";
 import { ProjectPane } from "./ProjectPane";
 import { useProjectPaneTreeState } from "./useProjectPaneTreeState";
 
@@ -219,7 +220,7 @@ function ProjectPaneHarness({ overrides }: { overrides?: ProjectPaneOverrides })
 }
 
 function renderProjectPane(overrides: ProjectPaneOverrides = {}) {
-  return render(<ProjectPaneHarness overrides={overrides} />);
+  return renderWithPaneFocus(<ProjectPaneHarness overrides={overrides} />);
 }
 
 describe("ProjectPane", () => {
@@ -356,8 +357,10 @@ describe("ProjectPane", () => {
 
     fireEvent.mouseDown(tagRow);
 
-    await new Promise((resolve) => window.setTimeout(resolve, 0));
-    expect(document.activeElement).toBe(projectList);
+    expect(projectList.closest('[data-history-pane="project"]')).toHaveAttribute(
+      "data-pane-active",
+      "true",
+    );
   });
 
   it("routes Enter, Escape, and Tab from the project search box into the project list", () => {

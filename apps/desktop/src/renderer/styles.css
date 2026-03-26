@@ -1301,13 +1301,18 @@ body.platform-macos .titlebar-left {
   z-index: 2;
 }
 
-.history-focus-pane:focus-within::before {
+[data-pane-active="true"]::before {
   background: var(--pane-focus-line-active);
 }
 
 .content-pane {
   background: var(--bg-base);
   min-width: 0;
+}
+
+.content-pane:focus,
+.content-pane:focus-visible {
+  outline: none;
 }
 
 .panel-header {
@@ -1524,6 +1529,7 @@ body.platform-macos .titlebar-left {
 
 .search-input-shell .toolbar-icon {
   position: absolute;
+  z-index: 2;
   left: 10px;
   top: 50%;
   transform: translateY(-50%);
@@ -4020,6 +4026,8 @@ mark {
 }
 
 .search-query-shell .toolbar-icon {
+  position: relative;
+  z-index: 1;
   color: var(--text-secondary);
   width: 15px;
   height: 15px;
@@ -4028,6 +4036,8 @@ mark {
 
 .search-filter-icon {
   display: inline-flex;
+  position: relative;
+  z-index: 1;
   align-items: center;
   justify-content: center;
   color: var(--text-tertiary);

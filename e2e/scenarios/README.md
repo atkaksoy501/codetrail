@@ -12,7 +12,6 @@ The Markdown files in this folder **map 1:1** to Playwright tests in `e2e/tests/
 | 06 | `06-theme-and-appearance-flow.md` | `theme-and-appearance-flow.test.ts` |
 | 07 | `07-keyboard-navigation-flow.md` | `keyboard-navigation-flow.test.ts` |
 | 08 | `08-focus-mode-flow.md` | `focus-mode-flow.test.ts` |
-| 09 | `09-refresh-and-indexing-flow.md` | `refresh-and-indexing-flow.test.ts` |
-| 10 | `10-provider-toggle-flow.md` | `provider-toggle-flow.test.ts` |
+| 11 | `11-pane-focus-controller-flow.md` | `pane-focus-controller-flow.test.ts` |
 
 Run: `bun run e2e` or `npx playwright test --config e2e/playwright.config.ts`.

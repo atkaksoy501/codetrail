@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 
 import type { HistoryExportScope } from "../app/types";
 import { useClickOutside } from "../hooks/useClickOutside";
+import { usePaneFocus, usePaneFocusOverlay } from "../lib/paneFocusController";
 import { ToolbarIcon } from "./ToolbarIcon";
 
 export function HistoryExportMenu({
@@ -21,10 +22,12 @@ export function HistoryExportMenu({
   sortLabel: string;
   onExport: (args: { scope: HistoryExportScope }) => Promise<void>;
 }) {
+  const paneFocus = usePaneFocus();
   const [menuOpen, setMenuOpen] = useState(false);
   const [scope, setScope] = useState<HistoryExportScope>("current_page");
   const [exporting, setExporting] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
+  usePaneFocusOverlay(menuOpen);
 
   useClickOutside(menuRef, menuOpen, () => {
     if (!exporting) {
@@ -58,6 +61,7 @@ export function HistoryExportMenu({
       <button
         type="button"
         className="toolbar-btn tb-dropdown-trigger history-export-trigger"
+        {...paneFocus.getPreservePaneFocusProps("message")}
         onClick={() => {
           setMenuOpen((value) => !value);
         }}

@@ -1,5 +1,6 @@
 import "@testing-library/jest-dom/vitest";
-import { beforeEach, vi } from "vitest";
+import { cleanup } from "@testing-library/react";
+import { afterEach, beforeEach, vi } from "vitest";
 
 beforeEach(() => {
   if (typeof window === "undefined") {
@@ -17,4 +18,8 @@ beforeEach(() => {
       onAppCommand: vi.fn(() => () => undefined),
     },
   });
+});
+
+afterEach(() => {
+  cleanup();
 });

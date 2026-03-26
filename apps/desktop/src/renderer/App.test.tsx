@@ -171,6 +171,36 @@ describe("App shell", () => {
     });
   });
 
+  it("closes the search project menu with Escape without leaving search", async () => {
+    installScrollIntoViewMock();
+
+    const user = userEvent.setup();
+    const client = createAppClient();
+    const { container } = renderWithClient(<App />, client);
+
+    await waitFor(() => {
+      expect(screen.getByText("Project One")).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: "Search" }));
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText(SEARCH_PLACEHOLDERS.globalMessages)).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: "All projects" }));
+    await waitFor(() => {
+      expect(screen.getByRole("menu", { name: "Projects" })).toBeInTheDocument();
+    });
+
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    await waitFor(() => {
+      expect(screen.queryByRole("menu", { name: "Projects" })).toBeNull();
+      expect(container.querySelector(".search-view")).not.toBeNull();
+      expect(screen.getByRole("button", { name: "All projects" })).toHaveFocus();
+    });
+  });
+
   it("defaults session message sorting to newest first", async () => {
     const client = createAppClient();
 
@@ -1311,109 +1341,6 @@ describe("App shell", () => {
       expect(screen.queryByText("Disable Codex?")).not.toBeInTheDocument();
     });
     expect(screen.getByRole("heading", { name: "Database Maintenance" })).toBeInTheDocument();
-  });
-
-  it("returns focus to the message pane when global search closes with Escape", async () => {
-    installScrollIntoViewMock();
-    const user = userEvent.setup();
-    const client = createAppClient();
-    const { container } = renderWithClient(
-      <App
-        initialPaneState={
-          {
-            selectedProjectId: "project_1",
-            selectedSessionId: "session_1",
-            historyMode: "session",
-          } as PaneStateSnapshot
-        }
-      />,
-      client,
-    );
-
-    await waitFor(() => {
-      expect(screen.getByText("Please review markdown table rendering")).toBeInTheDocument();
-    });
-
-    await user.click(screen.getByRole("button", { name: "Search" }));
-    await waitFor(() => {
-      expect(screen.getByPlaceholderText(SEARCH_PLACEHOLDERS.globalMessages)).toBeInTheDocument();
-    });
-
-    fireEvent.keyDown(window, { key: "Escape" });
-
-    await waitFor(() => {
-      expect(container.querySelector(".search-view")).toBeNull();
-      expect(document.activeElement).toBe(container.querySelector(".msg-scroll.message-list"));
-    });
-  });
-
-  it("returns focus to the message pane when exiting settings", async () => {
-    installScrollIntoViewMock();
-    const user = userEvent.setup();
-    const client = createAppClient();
-    const { container } = renderWithClient(<App />, client);
-
-    await waitFor(() => {
-      expect(screen.getByText("Project One")).toBeInTheDocument();
-    });
-
-    await user.click(screen.getByRole("button", { name: "Open settings" }));
-    await waitFor(() => {
-      expect(screen.getByText("Discovery Roots")).toBeInTheDocument();
-    });
-
-    fireEvent.keyDown(window, { key: "Escape" });
-
-    await waitFor(() => {
-      expect(screen.queryByText("Discovery Roots")).toBeNull();
-      expect(document.activeElement).toBe(container.querySelector(".msg-scroll.message-list"));
-    });
-  });
-
-  it("returns focus to the message pane when exiting help with Escape", async () => {
-    installScrollIntoViewMock();
-    const user = userEvent.setup();
-    const client = createAppClient();
-    const { container } = renderWithClient(<App />, client);
-
-    await waitFor(() => {
-      expect(screen.getByText("Project One")).toBeInTheDocument();
-    });
-
-    await user.click(screen.getByRole("button", { name: "Open help" }));
-    await waitFor(() => {
-      expect(screen.getByRole("heading", { name: "Keyboard Shortcuts" })).toBeInTheDocument();
-    });
-
-    fireEvent.keyDown(window, { key: "Escape" });
-
-    await waitFor(() => {
-      expect(screen.queryByRole("heading", { name: "Keyboard Shortcuts" })).toBeNull();
-      expect(document.activeElement).toBe(container.querySelector(".msg-scroll.message-list"));
-    });
-  });
-
-  it("returns focus to the message pane when exiting help from the toolbar", async () => {
-    installScrollIntoViewMock();
-    const user = userEvent.setup();
-    const client = createAppClient();
-    const { container } = renderWithClient(<App />, client);
-
-    await waitFor(() => {
-      expect(screen.getByText("Project One")).toBeInTheDocument();
-    });
-
-    await user.click(screen.getByRole("button", { name: "Open help" }));
-    await waitFor(() => {
-      expect(screen.getByRole("heading", { name: "Keyboard Shortcuts" })).toBeInTheDocument();
-    });
-
-    await user.click(screen.getByRole("button", { name: "Return to history view" }));
-
-    await waitFor(() => {
-      expect(screen.queryByRole("heading", { name: "Keyboard Shortcuts" })).toBeNull();
-      expect(document.activeElement).toBe(container.querySelector(".msg-scroll.message-list"));
-    });
   });
 
   it("requires confirmation before enabling missing session cleanup", async () => {

@@ -1,6 +1,8 @@
 import { PROVIDER_METADATA, type Provider } from "@codetrail/core/browser";
 import { useEffect, useMemo, useRef } from "react";
 
+import { usePaneFocusOverlay } from "../lib/paneFocusController";
+
 export type DeleteTarget =
   | {
       kind: "session";
@@ -35,6 +37,7 @@ export function DeleteIndexedHistoryDialog({
 }) {
   const dialogRef = useRef<HTMLDialogElement | null>(null);
   const confirmedRef = useRef(false);
+  usePaneFocusOverlay(open);
 
   useEffect(() => {
     const dialog = dialogRef.current;

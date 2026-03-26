@@ -16,6 +16,7 @@ import {
   selectRelevantLiveSession,
 } from "../lib/liveSessions";
 import { formatCompactInteger, formatInteger } from "../lib/numberFormatting";
+import { usePaneFocus } from "../lib/paneFocusController";
 import {
   getAdvancedSearchToggleTitle,
   getSearchQueryPlaceholder,
@@ -91,17 +92,6 @@ function getHistoryExportViewLabel(history: HistoryController): string {
   return "Session";
 }
 
-function isInteractiveHeaderTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) {
-    return false;
-  }
-  return Boolean(
-    target.closest(
-      'button, input, select, textarea, a, label, [role="button"], [role="menuitem"], [contenteditable="true"]',
-    ),
-  );
-}
-
 function selectNumericValueOrFallback<T extends number>(
   value: string,
   allowedValues: readonly T[],
@@ -134,8 +124,12 @@ export function HistoryDetailPane({
   liveSessions?: WatchLiveStatusResponse["sessions"];
   liveRowHasBackground?: boolean;
 }) {
+  const paneFocus = usePaneFocus();
   const shortcuts = useShortcutRegistry();
   const formatTooltipLabel = useTooltipFormatter();
+  const focusMessagePane = () => paneFocus.focusHistoryPane("message");
+  const messagePaneChromeProps = paneFocus.getPaneChromeProps("message");
+  const preserveMessagePaneFocusProps = paneFocus.getPreservePaneFocusProps("message");
   const exportAllPagesCount =
     history.historyMode === "bookmarks"
       ? history.bookmarksResponse.filteredCount
@@ -227,7 +221,7 @@ export function HistoryDetailPane({
     skipNextPageInputBlurResetRef.current = true;
     if (!Number.isFinite(parsedValue)) {
       resetPageInputValue();
-      history.focusMessagePane();
+      focusMessagePane();
       return;
     }
     const nextPageNumber = Math.max(1, Math.min(history.totalPages, parsedValue));
@@ -235,20 +229,12 @@ export function HistoryDetailPane({
     if (nextPageNumber !== history.sessionPage + 1) {
       history.goToHistoryPage(nextPageNumber - 1);
     }
-    history.focusMessagePane();
+    focusMessagePane();
   };
 
   return (
     <div className="history-view">
-      <div
-        className="msg-header"
-        onMouseDown={(event) => {
-          if (isInteractiveHeaderTarget(event.target)) {
-            return;
-          }
-          history.focusMessagePane();
-        }}
-      >
+      <div className="msg-header" {...messagePaneChromeProps}>
         <div className="msg-header-top">
           <div className="msg-header-info">
             <span className="summary-count">{history.selectedSummaryMessageCount}</span>
@@ -256,9 +242,10 @@ export function HistoryDetailPane({
               <button
                 type="button"
                 className="msg-header-action-button msg-header-action-button-close"
+                {...preserveMessagePaneFocusProps}
                 onClick={() => {
                   history.closeBookmarksView();
-                  history.focusMessagePane();
+                  focusMessagePane();
                 }}
                 aria-label="Close bookmarks"
                 title="Close bookmarks"
@@ -270,9 +257,10 @@ export function HistoryDetailPane({
               <button
                 type="button"
                 className="msg-header-action-button"
+                {...preserveMessagePaneFocusProps}
                 onClick={() => {
                   history.selectBookmarksView();
-                  history.focusMessagePane();
+                  focusMessagePane();
                 }}
                 aria-label={`${history.currentViewBookmarkCount} ${history.currentViewBookmarkCount === 1 ? "bookmark" : "bookmarks"}`}
                 title="Open bookmarked messages"
@@ -298,21 +286,22 @@ export function HistoryDetailPane({
             <button
               type="button"
               className="toolbar-btn msg-sort-btn"
+              {...preserveMessagePaneFocusProps}
               onClick={() => {
                 if (history.historyMode === "project_all") {
                   history.setProjectAllSortDirection((value) => (value === "asc" ? "desc" : "asc"));
                   history.setSessionPage(0);
-                  history.focusMessagePane();
+                  focusMessagePane();
                   return;
                 }
                 if (history.historyMode === "bookmarks") {
                   history.setBookmarkSortDirection((value) => (value === "asc" ? "desc" : "asc"));
-                  history.focusMessagePane();
+                  focusMessagePane();
                   return;
                 }
                 history.setMessageSortDirection((value) => (value === "asc" ? "desc" : "asc"));
                 history.setSessionPage(0);
-                history.focusMessagePane();
+                focusMessagePane();
               }}
               aria-label={messageSortAriaLabel}
               title={history.messageSortTooltip}
@@ -325,9 +314,10 @@ export function HistoryDetailPane({
               <button
                 type="button"
                 className="toolbar-btn expand-scope-action"
+                {...preserveMessagePaneFocusProps}
                 onClick={() => {
                   history.handleToggleAllCategoryDefaultExpansion();
-                  history.focusMessagePane();
+                  focusMessagePane();
                 }}
                 aria-label={`${history.globalExpandCollapseLabel} all messages`}
                 title={formatTooltipLabel(
@@ -343,6 +333,7 @@ export function HistoryDetailPane({
               <button
                 type="button"
                 className="toolbar-btn zoom-btn"
+                {...preserveMessagePaneFocusProps}
                 onClick={() => void applyZoomAction("out")}
                 disabled={!canZoomOut}
                 aria-label="Zoom out"
@@ -361,6 +352,7 @@ export function HistoryDetailPane({
               <button
                 type="button"
                 className="toolbar-btn zoom-btn"
+                {...preserveMessagePaneFocusProps}
                 onClick={() => void applyZoomAction("in")}
                 disabled={!canZoomIn}
                 aria-label="Zoom in"
@@ -410,6 +402,7 @@ export function HistoryDetailPane({
             <button
               type="button"
               className="msg-filter-main"
+              {...preserveMessagePaneFocusProps}
               aria-label={getHistoryCategoryAriaLabel(history, category)}
               title={getHistoryCategoryTooltip(history, category, formatTooltipLabel)}
               onClick={() => {
@@ -417,7 +410,7 @@ export function HistoryDetailPane({
                   toggleValue<MessageCategory>(value, category),
                 );
                 history.setSessionPage(0);
-                history.focusMessagePane();
+                focusMessagePane();
               }}
             >
               <span className="filter-shortcut" aria-hidden="true">
@@ -433,6 +426,7 @@ export function HistoryDetailPane({
             <button
               type="button"
               className="msg-filter-expand-toggle"
+              {...preserveMessagePaneFocusProps}
               aria-label={getHistoryCategoryExpansionDefaultTooltip(
                 history,
                 category,
@@ -445,7 +439,7 @@ export function HistoryDetailPane({
               )}
               onClick={() => {
                 history.handleToggleCategoryDefaultExpansion(category);
-                history.focusMessagePane();
+                focusMessagePane();
               }}
             >
               <svg
@@ -507,7 +501,10 @@ export function HistoryDetailPane({
 
       <div
         className="msg-scroll message-list"
-        ref={history.refs.messageListRef}
+        ref={(element) => {
+          history.refs.messageListRef.current = element;
+          paneFocus.registerHistoryPaneTarget("message", element);
+        }}
         tabIndex={-1}
         onScroll={history.handleMessageListScroll}
       >
@@ -543,7 +540,6 @@ export function HistoryDetailPane({
               onRevealInProject={
                 history.historyMode === "project_all" ? undefined : history.handleRevealInProject
               }
-              onPreservePaneFocus={history.focusMessagePane}
               cardRef={
                 history.focusMessageId === message.id ? history.refs.focusedMessageRef : null
               }
@@ -558,15 +554,7 @@ export function HistoryDetailPane({
         )}
       </div>
 
-      <div
-        className="msg-pagination pagination-row"
-        onMouseDown={(event) => {
-          if (isInteractiveHeaderTarget(event.target)) {
-            return;
-          }
-          history.focusMessagePane();
-        }}
-      >
+      <div className="msg-pagination pagination-row" {...messagePaneChromeProps}>
         <div className="msg-pagination-group msg-pagination-summary">
           <span className="page-total">{`${paginationTotal} ${paginationUnit}`}</span>
         </div>
@@ -575,9 +563,10 @@ export function HistoryDetailPane({
           <button
             type="button"
             className="page-btn page-icon-btn"
+            {...preserveMessagePaneFocusProps}
             onClick={() => {
               history.goToFirstHistoryPage();
-              history.focusMessagePane();
+              focusMessagePane();
             }}
             disabled={!history.canGoToPreviousHistoryPage}
             title="First page"
@@ -588,9 +577,10 @@ export function HistoryDetailPane({
           <button
             type="button"
             className="page-btn page-icon-btn"
+            {...preserveMessagePaneFocusProps}
             onClick={() => {
               history.goToPreviousHistoryPage();
-              history.focusMessagePane();
+              focusMessagePane();
             }}
             disabled={!history.canGoToPreviousHistoryPage}
             title={formatTooltipLabel("Previous page", shortcuts.actions.previousPage)}
@@ -626,7 +616,7 @@ export function HistoryDetailPane({
                 if (event.key === "Escape" || event.key === "Tab") {
                   event.preventDefault();
                   resetPageInputValue();
-                  history.focusMessagePane();
+                  focusMessagePane();
                 }
               }}
               aria-label="Page number"
@@ -637,9 +627,10 @@ export function HistoryDetailPane({
           <button
             type="button"
             className="page-btn page-icon-btn"
+            {...preserveMessagePaneFocusProps}
             onClick={() => {
               history.goToNextHistoryPage();
-              history.focusMessagePane();
+              focusMessagePane();
             }}
             disabled={!history.canGoToNextHistoryPage}
             title={formatTooltipLabel("Next page", shortcuts.actions.nextPage)}
@@ -650,9 +641,10 @@ export function HistoryDetailPane({
           <button
             type="button"
             className="page-btn page-icon-btn"
+            {...preserveMessagePaneFocusProps}
             onClick={() => {
               history.goToLastHistoryPage();
-              history.focusMessagePane();
+              focusMessagePane();
             }}
             disabled={!history.canGoToNextHistoryPage}
             title="Last page"
@@ -678,7 +670,7 @@ export function HistoryDetailPane({
                       history.messagePageSize as MessagePageSize,
                     ),
                   );
-                  history.focusMessagePane();
+                  focusMessagePane();
                 }}
               >
                 {UI_MESSAGE_PAGE_SIZE_VALUES.map((value) => (

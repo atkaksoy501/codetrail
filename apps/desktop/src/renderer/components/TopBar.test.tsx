@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
+import { renderWithPaneFocus } from "../test/renderWithPaneFocus";
 import { TopBar } from "./TopBar";
 
 describe("TopBar", () => {
@@ -21,7 +22,7 @@ describe("TopBar", () => {
     const onToggleHelp = vi.fn();
     const onToggleSettings = vi.fn();
 
-    const { container } = render(
+    const { container } = renderWithPaneFocus(
       <TopBar
         mainView="history"
         theme="light"
@@ -90,7 +91,7 @@ describe("TopBar", () => {
     const onThemePreview = vi.fn();
     const onThemePreviewReset = vi.fn();
 
-    render(
+    renderWithPaneFocus(
       <TopBar
         mainView="history"
         theme="light"
@@ -135,7 +136,7 @@ describe("TopBar", () => {
     const onShikiThemePreview = vi.fn();
     const onShikiThemePreviewReset = vi.fn();
 
-    render(
+    renderWithPaneFocus(
       <TopBar
         mainView="history"
         theme="light"
@@ -179,7 +180,7 @@ describe("TopBar", () => {
     const onThemePreview = vi.fn();
     const onThemePreviewReset = vi.fn();
 
-    render(
+    renderWithPaneFocus(
       <TopBar
         mainView="history"
         theme="light"
@@ -222,11 +223,52 @@ describe("TopBar", () => {
     expect(onThemePreviewReset).toHaveBeenCalledTimes(1);
   });
 
+  it("returns focus to the regular theme trigger when the menu closes with Tab", async () => {
+    const user = userEvent.setup();
+
+    renderWithPaneFocus(
+      <TopBar
+        mainView="history"
+        theme="light"
+        shikiTheme="github-light-default"
+        indexing={false}
+        focusMode={false}
+        focusDisabled={false}
+        onToggleSearchView={vi.fn()}
+        onThemeChange={vi.fn()}
+        onThemePreview={vi.fn()}
+        onThemePreviewReset={vi.fn()}
+        onShikiThemeChange={vi.fn()}
+        onShikiThemePreview={vi.fn()}
+        onShikiThemePreviewReset={vi.fn()}
+        onIncrementalRefresh={vi.fn()}
+        refreshStrategy="off"
+        onRefreshStrategyChange={vi.fn()}
+        autoRefreshStatusLabel={null}
+        autoRefreshStatusTone={null}
+        autoRefreshStatusTooltip={null}
+        onToggleFocus={vi.fn()}
+        onToggleHelp={vi.fn()}
+        onToggleSettings={vi.fn()}
+      />,
+    );
+
+    const trigger = screen.getByRole("button", { name: "Choose theme" });
+    await user.click(trigger);
+
+    const selectedButton = screen.getByRole("button", { name: /Light/, pressed: true });
+    await waitFor(() => expect(selectedButton).toHaveFocus());
+
+    await user.keyboard("{Tab}");
+    await waitFor(() => expect(trigger).toHaveFocus());
+    expect(screen.queryByLabelText("Theme")).not.toBeInTheDocument();
+  });
+
   it("continues regular theme keyboard navigation from the hovered item", async () => {
     const user = userEvent.setup();
     const onThemePreview = vi.fn();
 
-    render(
+    renderWithPaneFocus(
       <TopBar
         mainView="history"
         theme="light"
@@ -265,7 +307,7 @@ describe("TopBar", () => {
     const user = userEvent.setup();
     const onThemePreview = vi.fn();
 
-    render(
+    renderWithPaneFocus(
       <TopBar
         mainView="history"
         theme="light"
@@ -309,7 +351,7 @@ describe("TopBar", () => {
     const onShikiThemePreview = vi.fn();
     const onShikiThemePreviewReset = vi.fn();
 
-    render(
+    renderWithPaneFocus(
       <TopBar
         mainView="history"
         theme="light"
@@ -361,7 +403,7 @@ describe("TopBar", () => {
     const user = userEvent.setup();
     const onShikiThemePreview = vi.fn();
 
-    render(
+    renderWithPaneFocus(
       <TopBar
         mainView="history"
         theme="light"
@@ -402,7 +444,7 @@ describe("TopBar", () => {
     const user = userEvent.setup();
     const onShikiThemePreview = vi.fn();
 
-    render(
+    renderWithPaneFocus(
       <TopBar
         mainView="history"
         theme="light"
@@ -444,7 +486,7 @@ describe("TopBar", () => {
   });
 
   it("reflects disabled and active states", () => {
-    render(
+    renderWithPaneFocus(
       <TopBar
         mainView="search"
         theme="dark"
@@ -490,7 +532,7 @@ describe("TopBar", () => {
   });
 
   it("shows contextual toolbar title suffixes for search, settings, and help", () => {
-    const { container, rerender } = render(
+    const { container, rerender } = renderWithPaneFocus(
       <TopBar
         mainView="search"
         theme="dark"
@@ -582,7 +624,7 @@ describe("TopBar", () => {
   it("shows the mixed watch and scan auto-refresh options", async () => {
     const user = userEvent.setup();
 
-    render(
+    renderWithPaneFocus(
       <TopBar
         mainView="history"
         theme="light"

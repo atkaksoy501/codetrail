@@ -24,19 +24,20 @@ function Harness(args: Parameters<typeof useKeyboardShortcuts>[0]) {
       <div ref={args.searchResultsViewRef} tabIndex={-1}>
         search-results
       </div>
-      <div className="history-focus-pane">
+      <div className="history-focus-pane" data-history-pane="project">
         <button type="button">project-toggle</button>
+        <input id="project-search-input" />
         <div ref={args.projectListRef} tabIndex={-1}>
           project
         </div>
       </div>
-      <div className="history-focus-pane">
+      <div className="history-focus-pane" data-history-pane="session">
         <button type="button">session-toggle</button>
         <div ref={args.sessionListRef} tabIndex={-1}>
           session
         </div>
       </div>
-      <div className="history-focus-pane">
+      <div className="history-focus-pane" data-history-pane="message">
         <button type="button">message-toggle</button>
         <div ref={args.messageListRef} tabIndex={-1}>
           message
@@ -52,6 +53,9 @@ function createProps(
 ): Parameters<typeof useKeyboardShortcuts>[0] {
   return {
     mainView: "history",
+    activeHistoryPane: "message",
+    lastHistoryPane: "message",
+    overlayOpen: false,
     hasFocusedHistoryMessage: false,
     projectListRef: createRef<HTMLDivElement>(),
     sessionListRef: createRef<HTMLDivElement>(),
@@ -63,7 +67,9 @@ function createProps(
     searchProjectSelectRef: createRef<HTMLButtonElement>(),
     searchResultsViewRef: createRef<HTMLDivElement>(),
     setMainView: vi.fn(),
-    returnToHistoryWithMessageFocus: vi.fn(),
+    openSettingsView: vi.fn(),
+    openHelpView: vi.fn(),
+    returnToHistoryWithPaneFocus: vi.fn(),
     clearFocusedHistoryMessage: vi.fn(),
     focusGlobalSearch: vi.fn(),
     focusSessionSearch: vi.fn(),
@@ -139,7 +145,7 @@ describe("useKeyboardShortcuts", () => {
 
     expect(props.focusGlobalSearch).toHaveBeenCalledTimes(1);
     expect(props.focusSessionSearch).toHaveBeenCalledTimes(1);
-    expect(props.setMainView).toHaveBeenCalledWith("settings");
+    expect(props.openSettingsView).toHaveBeenCalledTimes(1);
     expect(props.applyZoomAction).toHaveBeenCalledWith("in");
     expect(props.toggleFocusMode).toHaveBeenCalledTimes(1);
     expect(props.toggleAllMessagesExpanded).toHaveBeenCalledTimes(1);
@@ -195,9 +201,9 @@ describe("useKeyboardShortcuts", () => {
   });
 
   it("pages the currently focused history pane with bare PageUp and PageDown", () => {
-    const props = createProps();
+    const props = createProps({ activeHistoryPane: "project", lastHistoryPane: "project" });
 
-    render(<Harness {...props} />);
+    const { rerender } = render(<Harness {...props} />);
 
     const projectList = props.projectListRef.current;
     const sessionList = props.sessionListRef.current;
@@ -224,13 +230,12 @@ describe("useKeyboardShortcuts", () => {
       });
     }
 
-    projectList.focus();
     projectList.dispatchEvent(new KeyboardEvent("keydown", { key: "PageDown", bubbles: true }));
     expect(projectList.scrollTop).toBe(340);
     expect(sessionList.scrollTop).toBe(40);
     expect(messageList.scrollTop).toBe(40);
 
-    sessionList.focus();
+    rerender(<Harness {...{ ...props, activeHistoryPane: "session", lastHistoryPane: "session" }} />);
     sessionList.dispatchEvent(new KeyboardEvent("keydown", { key: "PageUp", bubbles: true }));
     expect(sessionList.scrollTop).toBe(0);
     expect(projectList.scrollTop).toBe(340);
@@ -241,9 +246,9 @@ describe("useKeyboardShortcuts", () => {
   });
 
   it("pages project and session panes when a toolbar button inside that pane is focused", () => {
-    const props = createProps();
+    const props = createProps({ activeHistoryPane: "project", lastHistoryPane: "project" });
 
-    const { getByText } = render(<Harness {...props} />);
+    const { getByText, rerender } = render(<Harness {...props} />);
 
     const projectList = props.projectListRef.current;
     const sessionList = props.sessionListRef.current;
@@ -271,12 +276,11 @@ describe("useKeyboardShortcuts", () => {
       });
     }
 
-    projectToggle.focus();
     projectToggle.dispatchEvent(new KeyboardEvent("keydown", { key: "PageDown", bubbles: true }));
     expect(projectList.scrollTop).toBe(340);
     expect(sessionList.scrollTop).toBe(40);
 
-    sessionToggle.focus();
+    rerender(<Harness {...{ ...props, activeHistoryPane: "session", lastHistoryPane: "session" }} />);
     sessionToggle.dispatchEvent(new KeyboardEvent("keydown", { key: "PageUp", bubbles: true }));
     expect(sessionList.scrollTop).toBe(0);
     expect(projectList.scrollTop).toBe(340);
@@ -362,22 +366,48 @@ describe("useKeyboardShortcuts", () => {
     expect(props.pageSearchResultsDown).toHaveBeenCalledTimes(1);
   });
 
+  it("suppresses app-level search shortcuts while a search overlay is open", () => {
+    const props = createProps({ mainView: "search", overlayOpen: true });
+
+    render(<Harness {...props} />);
+
+    const searchInput = props.searchInputRef.current;
+    const advancedToggle = props.searchAdvancedToggleRef.current;
+    if (!searchInput || !advancedToggle) {
+      throw new Error("Expected search refs to be attached");
+    }
+
+    searchInput.focus();
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "PageDown" }));
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", metaKey: true }));
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab" }));
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+
+    expect(props.pageSearchResultsDown).not.toHaveBeenCalled();
+    expect(props.focusNextSearchResult).not.toHaveBeenCalled();
+    expect(props.returnToHistoryWithPaneFocus).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(searchInput);
+    expect(document.activeElement).not.toBe(advancedToggle);
+  });
+
   it("handles escape and question-mark help shortcuts", () => {
     const setMainView = vi.fn();
-    const returnToHistoryWithMessageFocus = vi.fn();
+    const openHelpView = vi.fn();
+    const returnToHistoryWithPaneFocus = vi.fn();
 
     const { rerender } = render(
       <Harness
         {...createProps({
           mainView: "search",
           setMainView,
-          returnToHistoryWithMessageFocus,
+          openHelpView,
+          returnToHistoryWithPaneFocus,
         })}
       />,
     );
 
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
-    expect(returnToHistoryWithMessageFocus).toHaveBeenCalledTimes(1);
+    expect(returnToHistoryWithPaneFocus).toHaveBeenCalledTimes(1);
     expect(setMainView).not.toHaveBeenCalledWith("history");
 
     rerender(
@@ -385,13 +415,14 @@ describe("useKeyboardShortcuts", () => {
         {...createProps({
           mainView: "history",
           setMainView,
-          returnToHistoryWithMessageFocus,
+          openHelpView,
+          returnToHistoryWithPaneFocus,
         })}
       />,
     );
 
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "?" }));
-    expect(setMainView).toHaveBeenCalledWith("help");
+    expect(openHelpView).toHaveBeenCalledTimes(1);
   });
 
   it("does not open help or capture arrow navigation when typing in an input", () => {
@@ -489,9 +520,9 @@ describe("useKeyboardShortcuts", () => {
   });
 
   it("cycles pane focus with Tab and routes plain Up/Down on focused project and session panes", () => {
-    const props = createProps();
+    const props = createProps({ activeHistoryPane: "project", lastHistoryPane: "project" });
 
-    render(<Harness {...props} />);
+    const { rerender } = render(<Harness {...props} />);
 
     const projectList = props.projectListRef.current;
     const sessionList = props.sessionListRef.current;
@@ -500,10 +531,9 @@ describe("useKeyboardShortcuts", () => {
       throw new Error("Expected pane refs to be attached");
     }
 
-    projectList.focus();
     projectList.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
     projectList.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
-    sessionList.focus();
+    rerender(<Harness {...{ ...props, activeHistoryPane: "session", lastHistoryPane: "session" }} />);
     sessionList.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
 
     expect(props.selectNextFocusedProject).toHaveBeenCalledTimes(1);
@@ -525,7 +555,7 @@ describe("useKeyboardShortcuts", () => {
   });
 
   it("routes Enter on the focused project pane to the tree enter handler", () => {
-    const props = createProps();
+    const props = createProps({ activeHistoryPane: "project", lastHistoryPane: "project" });
 
     render(<Harness {...props} />);
 
@@ -538,6 +568,28 @@ describe("useKeyboardShortcuts", () => {
     projectList.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
 
     expect(props.handleProjectTreeEnter).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not route project pane arrow shortcuts while a project text input is focused", () => {
+    const props = createProps({ activeHistoryPane: "project", lastHistoryPane: "project" });
+
+    render(<Harness {...props} />);
+
+    const input = document.getElementById("project-search-input");
+    if (!(input instanceof HTMLInputElement)) {
+      throw new Error("Expected project search input to be rendered");
+    }
+
+    input.focus();
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true }));
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+
+    expect(props.selectPreviousFocusedProject).not.toHaveBeenCalled();
+    expect(props.selectNextFocusedProject).not.toHaveBeenCalled();
+    expect(props.handleProjectTreeArrow).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(input);
   });
 
   it("skips collapsed pane targets when cycling with Tab", () => {

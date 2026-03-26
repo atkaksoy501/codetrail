@@ -19,6 +19,13 @@ const EMPTY_INDEXER_CONFIG = Object.fromEntries(
 
 const SETTINGS_INFO = createSettingsInfoFixture();
 
+function cloneValue<T>(value: T): T {
+  if (typeof structuredClone === "function") {
+    return structuredClone(value);
+  }
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
 export function getFocusedHistoryMessageId(container: HTMLElement): string | null {
   return container.querySelector<HTMLElement>(".message.focused")?.dataset.historyMessageId ?? null;
 }
@@ -46,13 +53,13 @@ function createRendererClient(handlers: Record<string, ChannelHandler>) {
     }
 
     if (channel === "ui:getPaneState") {
-      return EMPTY_UI_STATE;
+      return cloneValue(EMPTY_UI_STATE);
     }
     if (channel === "ui:setPaneState") {
       return { ok: true };
     }
     if (channel === "indexer:getConfig") {
-      return EMPTY_INDEXER_CONFIG;
+      return cloneValue(EMPTY_INDEXER_CONFIG);
     }
     if (channel === "indexer:setConfig") {
       return { ok: true };
@@ -80,7 +87,7 @@ function createRendererClient(handlers: Record<string, ChannelHandler>) {
       return { ok: true };
     }
     if (channel === "app:getSettingsInfo") {
-      return SETTINGS_INFO;
+      return cloneValue(SETTINGS_INFO);
     }
     if (channel === "watcher:start") {
       return { ok: true, watchedRoots: [], backend: "default" };

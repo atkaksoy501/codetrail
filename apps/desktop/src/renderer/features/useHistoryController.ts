@@ -48,6 +48,7 @@ import { usePaneStateSync } from "../hooks/usePaneStateSync";
 import { useReconcileProviderSelection } from "../hooks/useReconcileProviderSelection";
 import { useResizablePanes } from "../hooks/useResizablePanes";
 import { useCodetrailClient } from "../lib/codetrailClient";
+import type { HistoryPaneId } from "../lib/paneFocusController";
 import {
   type StableListUpdateSource,
   mergeStableOrder,
@@ -57,7 +58,6 @@ import {
 import { clamp, compareRecent, sessionActivityOf } from "../lib/viewUtils";
 import {
   type AppearanceState,
-  focusHistoryList,
   getMessageListFingerprint,
 } from "./historyControllerShared";
 import {
@@ -71,9 +71,11 @@ import {
 import { useHistoryDataEffects } from "./useHistoryDataEffects";
 import { useHistoryDerivedState } from "./useHistoryDerivedState";
 import { useHistoryInteractions } from "./useHistoryInteractions";
-import { useHistorySelectionState } from "./useHistorySelectionState";
+import {
+  type HistorySelectionDebounceOverrides,
+  useHistorySelectionState,
+} from "./useHistorySelectionState";
 import { useHistoryViewportEffects } from "./useHistoryViewportEffects";
-export { setTestHistorySelectionDebounceOverrides } from "./useHistorySelectionState";
 
 export type RefreshContext = {
   refreshId: number;
@@ -259,6 +261,8 @@ export function useHistoryController({
   setSearchProviders,
   appearance,
   logError,
+  testHistorySelectionDebounceOverrides = null,
+  focusHistoryPane,
 }: {
   initialPaneState?: PaneStateSnapshot | null;
   isHistoryLayout: boolean;
@@ -269,6 +273,8 @@ export function useHistoryController({
   setSearchProviders: Dispatch<SetStateAction<Provider[]>>;
   appearance: AppearanceState;
   logError: (context: string, error: unknown) => void;
+  testHistorySelectionDebounceOverrides?: HistorySelectionDebounceOverrides | null;
+  focusHistoryPane: (pane: HistoryPaneId, options?: { preventScroll?: boolean }) => void;
 }) {
   const codetrail = useCodetrailClient();
   const initialProjectPaneWidth = clamp(initialPaneState?.projectPaneWidth ?? 300, 230, 520);
@@ -451,7 +457,6 @@ export function useHistoryController({
   const treeProjectSessionsLoadTokenRef = useRef<Record<string, number>>({});
   const treeProjectSessionsByProjectIdRef = useRef<Record<string, SessionSummary[]>>({});
   const treeProjectSessionsLoadingByProjectIdRef = useRef<Record<string, boolean>>({});
-  const initialHistoryPaneFocusAppliedRef = useRef(false);
   const projectsRef = useRef<ProjectSummary[]>([]);
   const projectUpdateTimeoutsRef = useRef<Map<string, number>>(new Map());
   const projectOrderControlKeyRef = useRef("");
@@ -476,7 +481,7 @@ export function useHistoryController({
     setHistorySelectionImmediate,
     setHistorySelectionWithCommitMode,
     consumeProjectPaneFocusSelectionBehavior,
-  } = useHistorySelectionState(initialPaneState);
+  } = useHistorySelectionState(initialPaneState, testHistorySelectionDebounceOverrides);
 
   const {
     projectPaneWidth,
@@ -1121,14 +1126,6 @@ export function useHistoryController({
     };
   }, [clearSelectionCommitTimer]);
 
-  useEffect(() => {
-    if (initialHistoryPaneFocusAppliedRef.current || !isHistoryLayout || !paneStateHydrated) {
-      return;
-    }
-    initialHistoryPaneFocusAppliedRef.current = true;
-    focusHistoryList(messageListRef.current);
-  }, [isHistoryLayout, paneStateHydrated]);
-
   const {
     activeMessageSortDirection,
     messageSortTooltip,
@@ -1398,6 +1395,7 @@ export function useHistoryController({
     queueProjectTreeNoopCommit,
     treeFocusedRow,
     setTreeFocusedRow,
+    focusSessionPane: () => focusHistoryPane("session"),
   });
 
   const pageHistoryMessages = useCallback(
@@ -1429,10 +1427,6 @@ export function useHistoryController({
     },
     [],
   );
-
-  const focusMessagePane = useCallback(() => {
-    focusHistoryList(messageListRef.current);
-  }, []);
 
   useEffect(() => {
     return codetrail.onHistoryExportProgress((progress: HistoryExportProgressPayload) => {
@@ -1659,7 +1653,6 @@ export function useHistoryController({
       pageHistoryMessages("up", options),
     pageHistoryMessagesDown: (options?: { preserveFocus?: boolean }) =>
       pageHistoryMessages("down", options),
-    focusMessagePane,
     handleExportMessages,
     historyExportState,
     selectProjectAllMessages,

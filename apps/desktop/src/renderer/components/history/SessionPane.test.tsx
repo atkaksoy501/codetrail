@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import type { SessionSummary } from "../../app/types";
+import { renderWithPaneFocus } from "../../test/renderWithPaneFocus";
 import { SessionPane } from "./SessionPane";
 
 function createSessionSummary(
@@ -64,7 +65,7 @@ describe("SessionPane", () => {
     const onSelectBookmarks = vi.fn();
     const onSelectSession = vi.fn();
 
-    render(
+    renderWithPaneFocus(
       <SessionPane
         sortedSessions={sessions}
         selectedSessionId="session_1"
@@ -116,7 +117,7 @@ describe("SessionPane", () => {
   });
 
   it("hides toolbar actions and quick-switch buttons when collapsed", () => {
-    render(
+    renderWithPaneFocus(
       <SessionPane
         sortedSessions={sessions}
         selectedSessionId=""
@@ -168,7 +169,7 @@ describe("SessionPane", () => {
     }) as typeof window.requestAnimationFrame;
     window.cancelAnimationFrame = vi.fn();
 
-    const { rerender } = render(
+    const { rerender } = renderWithPaneFocus(
       <SessionPane
         sortedSessions={sessions}
         selectedSessionId=""
@@ -233,7 +234,7 @@ describe("SessionPane", () => {
     const onOpenSessionLocation = vi.fn();
     const onDeleteSession = vi.fn();
 
-    render(
+    renderWithPaneFocus(
       <SessionPane
         sortedSessions={sessions}
         selectedSessionId="session_1"

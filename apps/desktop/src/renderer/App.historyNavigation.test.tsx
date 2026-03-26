@@ -2,9 +2,9 @@
 
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 
-import { App, setTestHistorySelectionDebounceOverrides } from "./App";
+import { App } from "./App";
 import { SEARCH_PLACEHOLDERS } from "./lib/searchLabels";
 import {
   createHistoryNavigationClient,
@@ -18,6 +18,10 @@ function expectDefined<T>(value: T | null | undefined, message: string): NonNull
     throw new Error(message);
   }
   return value as NonNullable<T>;
+}
+
+function activePane(container: HTMLElement): HTMLElement | null {
+  return container.querySelector('[data-pane-active="true"]');
 }
 
 function pressWindowArrow(
@@ -44,20 +48,15 @@ async function expandHistoryPanes() {
 }
 
 describe("App history navigation", () => {
-  beforeEach(() => {
-    setTestHistorySelectionDebounceOverrides({ project: 1, session: 1 });
-  });
-
-  afterEach(() => {
-    setTestHistorySelectionDebounceOverrides(null);
-  });
-
   it("navigates sessions with Option+Up/Down and projects with Ctrl+Up/Down without stealing focus", async () => {
     installScrollIntoViewMock();
 
     const user = userEvent.setup();
     const client = createHistoryNavigationClient();
-    const { container } = renderWithClient(<App />, client);
+    const { container } = renderWithClient(
+      <App testHistorySelectionDebounceOverrides={{ project: 0, session: 0 }} />,
+      client,
+    );
     const sessionList = () => container.querySelector<HTMLDivElement>(".list-scroll.session-list");
     const projectList = () => container.querySelector<HTMLDivElement>(".list-scroll.project-list");
     const messageList = () => container.querySelector<HTMLDivElement>(".msg-scroll.message-list");
@@ -104,7 +103,10 @@ describe("App history navigation", () => {
     installScrollIntoViewMock();
 
     const client = createHistoryNavigationClient();
-    const { container } = renderWithClient(<App />, client);
+    const { container } = renderWithClient(
+      <App testHistorySelectionDebounceOverrides={{ project: 0, session: 0 }} />,
+      client,
+    );
     const messageList = () => container.querySelector<HTMLDivElement>(".msg-scroll.message-list");
 
     await waitFor(() => {
@@ -124,7 +126,10 @@ describe("App history navigation", () => {
     installScrollIntoViewMock();
 
     const client = createHistoryNavigationClient();
-    const { container } = renderWithClient(<App />, client);
+    const { container } = renderWithClient(
+      <App testHistorySelectionDebounceOverrides={{ project: 0, session: 0 }} />,
+      client,
+    );
     const messageList = () => container.querySelector<HTMLDivElement>(".msg-scroll.message-list");
 
     await waitFor(() => {
@@ -151,7 +156,10 @@ describe("App history navigation", () => {
     installScrollIntoViewMock();
 
     const client = createHistoryNavigationClient();
-    const { container } = renderWithClient(<App />, client);
+    const { container } = renderWithClient(
+      <App testHistorySelectionDebounceOverrides={{ project: 0, session: 0 }} />,
+      client,
+    );
 
     await waitFor(() => {
       expect(screen.getByText("Project one first message")).toBeInTheDocument();
@@ -179,7 +187,10 @@ describe("App history navigation", () => {
     installScrollIntoViewMock();
 
     const client = createHistoryNavigationClient();
-    const { container } = renderWithClient(<App />, client);
+    const { container } = renderWithClient(
+      <App testHistorySelectionDebounceOverrides={{ project: 0, session: 0 }} />,
+      client,
+    );
     const messageList = () => container.querySelector<HTMLDivElement>(".msg-scroll.message-list");
 
     await waitFor(() => {
@@ -201,9 +212,15 @@ describe("App history navigation", () => {
 
     const user = userEvent.setup();
     const client = createHistoryNavigationClient();
-    const { container } = renderWithClient(<App />, client);
+    const { container } = renderWithClient(
+      <App testHistorySelectionDebounceOverrides={{ project: 0, session: 0 }} />,
+      client,
+    );
     const sessionList = () => container.querySelector<HTMLDivElement>(".list-scroll.session-list");
     const projectList = () => container.querySelector<HTMLDivElement>(".list-scroll.project-list");
+    const projectHeader = () => container.querySelector<HTMLElement>(".project-pane .panel-header");
+    const sessionHeader = () => container.querySelector<HTMLElement>(".session-pane .panel-header");
+    const activePane = () => container.querySelector<HTMLElement>('[data-pane-active="true"]');
 
     await waitFor(() => {
       expect(screen.getByText("Project one first message")).toBeInTheDocument();
@@ -216,29 +233,26 @@ describe("App history navigation", () => {
       expect(screen.getByText("Session one message")).toBeInTheDocument();
     });
 
-    const sessionPane = expectDefined(sessionList(), "Expected session list");
-    sessionPane.focus();
-    fireEvent.keyDown(sessionPane, { key: "ArrowUp" });
+    fireEvent.mouseDown(expectDefined(sessionHeader(), "Expected session pane header"));
+    fireEvent.click(expectDefined(sessionHeader(), "Expected session pane header"));
+    fireEvent.keyDown(expectDefined(sessionList(), "Expected session list"), { key: "ArrowUp" });
     fireEvent.keyUp(window, { key: "ArrowUp" });
     await waitFor(() => {
       expect(screen.getByPlaceholderText(SEARCH_PLACEHOLDERS.globalMessages)).toBeInTheDocument();
-      expect(document.activeElement).toBe(sessionList());
+      expect(activePane()).toHaveAttribute("data-history-pane", "session");
     });
 
-    const projectPane = expectDefined(projectList(), "Expected project list");
-    projectPane.focus();
-    fireEvent.keyDown(projectPane, { key: "ArrowDown" });
-    fireEvent.keyDown(projectPane, { key: "ArrowDown" });
+    fireEvent.mouseDown(expectDefined(projectHeader(), "Expected project pane header"));
+    fireEvent.click(expectDefined(projectHeader(), "Expected project pane header"));
+    fireEvent.keyDown(expectDefined(projectList(), "Expected project list"), { key: "ArrowDown" });
+    fireEvent.keyDown(expectDefined(projectList(), "Expected project list"), { key: "ArrowDown" });
     fireEvent.keyUp(window, { key: "ArrowDown" });
     await waitFor(() => {
       expect(screen.getByText("Project two combined message")).toBeInTheDocument();
-      expect(projectList()?.contains(document.activeElement)).toBe(true);
+      expect(activePane()).toHaveAttribute("data-history-pane", "project");
       expect(
-        document.activeElement?.getAttribute("data-project-nav-id") ??
-          document.activeElement
-            ?.closest("[data-project-nav-id]")
-            ?.getAttribute("data-project-nav-id"),
-      ).toBe("project_2");
+        container.querySelector('[data-project-nav-id="project_2"].active'),
+      ).toBeInTheDocument();
     });
   });
 
@@ -246,7 +260,10 @@ describe("App history navigation", () => {
     installScrollIntoViewMock();
 
     const client = createHistoryNavigationClient();
-    const { container } = renderWithClient(<App />, client);
+    const { container } = renderWithClient(
+      <App testHistorySelectionDebounceOverrides={{ project: 0, session: 0 }} />,
+      client,
+    );
     const messageList = () => container.querySelector<HTMLDivElement>(".msg-scroll.message-list");
 
     await waitFor(() => {
@@ -259,7 +276,10 @@ describe("App history navigation", () => {
     installScrollIntoViewMock();
 
     const client = createHistoryNavigationClient();
-    const { container } = renderWithClient(<App />, client);
+    const { container } = renderWithClient(
+      <App testHistorySelectionDebounceOverrides={{ project: 0, session: 0 }} />,
+      client,
+    );
     const sessionList = () => container.querySelector<HTMLDivElement>(".list-scroll.session-list");
     const projectList = () => container.querySelector<HTMLDivElement>(".list-scroll.project-list");
     const messageList = () => container.querySelector<HTMLDivElement>(".msg-scroll.message-list");
@@ -285,7 +305,10 @@ describe("App history navigation", () => {
 
     const user = userEvent.setup();
     const client = createHistoryNavigationClient();
-    const { container } = renderWithClient(<App />, client);
+    const { container } = renderWithClient(
+      <App testHistorySelectionDebounceOverrides={{ project: 0, session: 0 }} />,
+      client,
+    );
     const sessionList = () => container.querySelector<HTMLDivElement>(".list-scroll.session-list");
     const projectList = () => container.querySelector<HTMLDivElement>(".list-scroll.project-list");
     const projectHeader = () => container.querySelector<HTMLElement>(".project-pane .panel-header");
@@ -300,14 +323,20 @@ describe("App history navigation", () => {
     const projectHeaderElement = expectDefined(projectHeader(), "Expected project pane header");
     const sessionHeaderElement = expectDefined(sessionHeader(), "Expected session pane header");
 
-    await user.click(projectHeaderElement);
+    fireEvent.mouseDown(projectHeaderElement);
     await waitFor(() => {
-      expect(document.activeElement).toBe(projectList());
+      expect(container.querySelector('[data-pane-active="true"]')).toHaveAttribute(
+        "data-history-pane",
+        "project",
+      );
     });
 
-    await user.click(sessionHeaderElement);
+    fireEvent.mouseDown(sessionHeaderElement);
     await waitFor(() => {
-      expect(document.activeElement).toBe(sessionList());
+      expect(container.querySelector('[data-pane-active="true"]')).toHaveAttribute(
+        "data-history-pane",
+        "session",
+      );
     });
   });
 
@@ -315,7 +344,10 @@ describe("App history navigation", () => {
     installScrollIntoViewMock();
 
     const client = createHistoryNavigationClient();
-    const { container } = renderWithClient(<App />, client);
+    const { container } = renderWithClient(
+      <App testHistorySelectionDebounceOverrides={{ project: 0, session: 0 }} />,
+      client,
+    );
     const sessionList = () => container.querySelector<HTMLDivElement>(".list-scroll.session-list");
     const messageList = () => container.querySelector<HTMLDivElement>(".msg-scroll.message-list");
 
@@ -356,7 +388,10 @@ describe("App history navigation", () => {
 
     const user = userEvent.setup();
     const { client, delayedBookmarks } = createProjectSwitchBookmarksDelayClient();
-    const { container } = renderWithClient(<App />, client);
+    const { container } = renderWithClient(
+      <App testHistorySelectionDebounceOverrides={{ project: 0, session: 0 }} />,
+      client,
+    );
     const sessionList = () => container.querySelector<HTMLDivElement>(".list-scroll.session-list");
 
     await waitFor(() => {

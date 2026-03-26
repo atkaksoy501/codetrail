@@ -1,5 +1,7 @@
 import { useEffect, useRef } from "react";
 
+import { usePaneFocusOverlay } from "../lib/paneFocusController";
+
 export function ConfirmDialog({
   open,
   title,
@@ -21,6 +23,7 @@ export function ConfirmDialog({
   // Track whether the close was triggered by a confirm action so onClose doesn't
   // double-fire onCancel after a successful confirm.
   const confirmedRef = useRef(false);
+  usePaneFocusOverlay(open);
 
   useEffect(() => {
     const dialog = dialogRef.current;

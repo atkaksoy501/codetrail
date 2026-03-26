@@ -42,7 +42,6 @@ import {
 import type { StableListUpdateSource } from "../lib/projectUpdates";
 import { toggleValue } from "../lib/viewUtils";
 import { SIDEBAR_LIST_ROW_HEIGHT, scrollVirtualListIndexIntoView } from "../lib/virtualList";
-import { focusHistoryList } from "./historyControllerShared";
 import { formatProjectDetails, formatSessionDetails } from "./historyCopyFormat";
 
 function focusVisibleProjectTarget(
@@ -131,6 +130,7 @@ export function useHistoryInteractions({
   queueProjectTreeNoopCommit,
   treeFocusedRow,
   setTreeFocusedRow,
+  focusSessionPane,
 }: {
   codetrail: CodetrailClient;
   logError: (context: string, error: unknown) => void;
@@ -207,6 +207,7 @@ export function useHistoryInteractions({
   }) => void;
   treeFocusedRow: ProjectNavigationTarget | null;
   setTreeFocusedRow: Dispatch<SetStateAction<ProjectNavigationTarget | null>>;
+  focusSessionPane: () => void;
 }) {
   const messagesByCategory = useMemo(() => {
     const map = new Map<MessageCategory, HistoryMessage[]>();
@@ -724,7 +725,7 @@ export function useHistoryInteractions({
         return;
       }
       if (!preserveFocus) {
-        focusHistoryList(sessionListRef.current);
+        focusSessionPane();
       }
       if (nextNavigationId === PROJECT_ALL_NAV_ID) {
         selectProjectAllMessages(selectedProjectId, {
@@ -749,8 +750,8 @@ export function useHistoryInteractions({
       selectBookmarksView,
       selectProjectAllMessages,
       selectSessionView,
-      sessionListRef,
       sessionPaneNavigationItems,
+      focusSessionPane,
     ],
   );
 

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ProjectSummary, SessionSummary } from "../../app/types";
 import { useVirtualListWindow } from "../../hooks/useVirtualListWindow";
 import { formatCompactInteger, formatInteger } from "../../lib/numberFormatting";
+import { usePaneFocus } from "../../lib/paneFocusController";
 import { getProjectGroupId } from "../../lib/projectTree";
 import { SEARCH_PLACEHOLDERS } from "../../lib/searchLabels";
 import { compactPath, deriveSessionTitle, formatDate, prettyProvider } from "../../lib/viewUtils";
@@ -11,7 +12,6 @@ import {
   SIDEBAR_LIST_ROW_HEIGHT,
   SIDEBAR_LIST_VIRTUALIZATION_THRESHOLD,
 } from "../../lib/virtualList";
-import { focusHistoryList } from "../../features/historyControllerShared";
 import { ToolbarIcon } from "../ToolbarIcon";
 import { HistoryListContextMenu } from "./HistoryListContextMenu";
 import type { ProjectPaneContextMenuState, ProjectPaneProps } from "./ProjectPane.types";
@@ -26,17 +26,6 @@ function isTreeRowActionTarget(target: EventTarget | null): boolean {
   return (
     target instanceof HTMLElement &&
     Boolean(target.closest(".project-tree-toggle-btn, .project-tree-bookmark-btn"))
-  );
-}
-
-function isInteractivePaneControlTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) {
-    return false;
-  }
-  return Boolean(
-    target.closest(
-      'button, input, select, textarea, a, label, [role="button"], [role="menuitem"], [contenteditable="true"]',
-    ),
   );
 }
 
@@ -73,6 +62,7 @@ export function ProjectPane({
   capabilities,
   actions,
 }: ProjectPaneProps) {
+  const paneFocus = usePaneFocus();
   const {
     sortedProjects,
     selectedProjectId,
@@ -138,6 +128,7 @@ export function ProjectPane({
   const setProjectListRefs = useCallback(
     (element: HTMLDivElement | null) => {
       projectListContainerRef.current = element;
+      paneFocus.registerHistoryPaneTarget("project", element);
       if (!listRef) {
         return;
       }
@@ -147,7 +138,7 @@ export function ProjectPane({
       }
       listRef.current = element;
     },
-    [listRef],
+    [listRef, paneFocus],
   );
   const {
     setContainerRef,
@@ -223,10 +214,6 @@ export function ProjectPane({
     event.preventDefault();
     projectListContainerRef.current?.focus({ preventScroll: true });
   };
-
-  const focusProjectPane = useCallback(() => {
-    focusHistoryList(projectListContainerRef.current);
-  }, []);
 
   const renderFlatProjectRow = (project: ProjectSummary) => {
     const update = projectUpdates[project.id];
@@ -517,7 +504,13 @@ export function ProjectPane({
   };
 
   return (
-    <aside className={`panel history-focus-pane project-pane${collapsed ? " collapsed" : ""}`}>
+    <aside
+      className={`panel history-focus-pane project-pane${collapsed ? " collapsed" : ""}`}
+      {...paneFocus.getHistoryPaneRootProps("project")}
+      ref={(element) => {
+        paneFocus.registerHistoryPaneRoot("project", element);
+      }}
+    >
       <ProjectPaneHeader
         collapsed={collapsed}
         sortField={sortField}
@@ -531,7 +524,6 @@ export function ProjectPane({
         canCopyProjectDetails={canCopyProjectDetails}
         canOpenProjectLocation={canOpenProjectLocation}
         canDeleteProject={canDeleteProject}
-        onFocusPane={focusProjectPane}
         onToggleCollapsed={onToggleCollapsed}
         onSetSortField={onSetSortField}
         onToggleSortDirection={onToggleSortDirection}
@@ -561,12 +553,7 @@ export function ProjectPane({
       </div>
       <div
         className="tag-row"
-        onMouseDown={(event) => {
-          if (isInteractivePaneControlTarget(event.target)) {
-            return;
-          }
-          focusProjectPane();
-        }}
+        {...paneFocus.getPaneChromeProps("project")}
       >
         {providers.map((provider) => (
           <button
@@ -574,6 +561,7 @@ export function ProjectPane({
             type="button"
             className={`tag tag-${provider}${projectProviders.includes(provider) ? " active" : ""}`}
             onClick={() => onToggleProvider(provider)}
+            {...paneFocus.getPreservePaneFocusProps("project")}
           >
             {prettyProvider(provider)}
             <span className="count">{projectProviderCounts[provider]}</span>

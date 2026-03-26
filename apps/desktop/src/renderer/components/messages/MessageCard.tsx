@@ -2,6 +2,7 @@ import type { MessageCategory } from "@codetrail/core/browser";
 import { type KeyboardEvent, type MouseEvent, type Ref, memo, useMemo } from "react";
 
 import { copyTextToClipboard } from "../../lib/clipboard";
+import { usePaneFocus } from "../../lib/paneFocusController";
 import { useShortcutRegistry } from "../../lib/shortcutRegistry";
 import { compactPath, formatDate, prettyCategory } from "../../lib/viewUtils";
 
@@ -30,7 +31,6 @@ type MessageCardProps = {
   onToggleBookmark?: (message: SessionMessage) => void;
   onRevealInSession?: (messageId: string, sourceId: string) => void;
   onRevealInProject?: (messageId: string, sourceId: string, sessionId: string) => void;
-  onPreservePaneFocus?: () => void;
   cardRef?: Ref<HTMLDivElement> | null;
 };
 
@@ -48,10 +48,11 @@ function MessageCardComponent({
   onToggleBookmark,
   onRevealInSession,
   onRevealInProject,
-  onPreservePaneFocus,
   cardRef,
 }: MessageCardProps) {
+  const paneFocus = usePaneFocus();
   const shortcuts = useShortcutRegistry();
+  const preserveMessagePaneFocusProps = paneFocus.getPreservePaneFocusProps("message");
   const parsedToolPayload = useMemo(
     () => parseMessageToolPayload(message.category, message.content),
     [message.category, message.content],
@@ -78,11 +79,11 @@ function MessageCardComponent({
   const handleExpansionToggleClick = (event: MouseEvent<HTMLElement>) => {
     if (shortcuts.matches.isCategoryExpansionClick(event) && onToggleCategoryExpanded) {
       toggleCategoryExpanded();
-      onPreservePaneFocus?.();
+      paneFocus.focusHistoryPane("message");
       return;
     }
     toggleExpanded();
-    onPreservePaneFocus?.();
+    paneFocus.focusHistoryPane("message");
   };
 
   const handleHeaderClick = (event: MouseEvent<HTMLElement>) => {
@@ -99,31 +100,31 @@ function MessageCardComponent({
   const handleCopyRawButtonClick = (event: MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation();
     void copyTextToClipboard(JSON.stringify(message, null, 2));
-    onPreservePaneFocus?.();
+    paneFocus.focusHistoryPane("message");
   };
 
   const handleCopyBodyButtonClick = (event: MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation();
     void copyTextToClipboard(formatMessageBodyForClipboard(message, parsedToolPayload));
-    onPreservePaneFocus?.();
+    paneFocus.focusHistoryPane("message");
   };
 
   const handleRevealButtonClick = (event: MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation();
     onRevealInSession?.(message.id, message.sourceId);
-    onPreservePaneFocus?.();
+    paneFocus.focusHistoryPane("message");
   };
 
   const handleRevealInProjectButtonClick = (event: MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation();
     onRevealInProject?.(message.id, message.sourceId, message.sessionId);
-    onPreservePaneFocus?.();
+    paneFocus.focusHistoryPane("message");
   };
 
   const handleBookmarkButtonClick = (event: MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation();
     onToggleBookmark?.(message);
-    onPreservePaneFocus?.();
+    paneFocus.focusHistoryPane("message");
   };
 
   const handleHeaderKeyDown = (event: KeyboardEvent<HTMLElement>) => {
@@ -153,6 +154,7 @@ function MessageCardComponent({
         <button
           type="button"
           className="message-toggle-button"
+          {...preserveMessagePaneFocusProps}
           onClick={(event) => {
             event.stopPropagation();
             handleExpansionToggleClick(event);
@@ -192,6 +194,7 @@ function MessageCardComponent({
           <button
             type="button"
             className="message-action-button"
+            {...preserveMessagePaneFocusProps}
             onClick={handleCopyBodyButtonClick}
             aria-label="Copy formatted message body"
             title="Copy message"
@@ -201,6 +204,7 @@ function MessageCardComponent({
           <button
             type="button"
             className="message-action-button"
+            {...preserveMessagePaneFocusProps}
             onClick={handleCopyRawButtonClick}
             aria-label="Copy raw message data"
             title="Copy raw message"
@@ -211,6 +215,7 @@ function MessageCardComponent({
             <button
               type="button"
               className="message-action-button message-reveal-button"
+              {...preserveMessagePaneFocusProps}
               onClick={handleRevealButtonClick}
               aria-label="Reveal this message in session"
               title="Reveal in Session"
@@ -222,6 +227,7 @@ function MessageCardComponent({
             <button
               type="button"
               className="message-action-button message-reveal-button"
+              {...preserveMessagePaneFocusProps}
               onClick={handleRevealInProjectButtonClick}
               aria-label="Reveal this message in project"
               title="Reveal in Project"
@@ -235,6 +241,7 @@ function MessageCardComponent({
               className={`message-action-button message-bookmark-button${
                 isBookmarked ? " is-active" : ""
               }`}
+              {...preserveMessagePaneFocusProps}
               onClick={handleBookmarkButtonClick}
               aria-label={
                 isBookmarked ? "Remove bookmark from this message" : "Bookmark this message"

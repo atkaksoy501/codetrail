@@ -4,7 +4,7 @@ import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { App, setTestHistorySelectionDebounceOverrides } from "./App";
+import { App } from "./App";
 import { createAppClient, installScrollIntoViewMock } from "./test/appTestFixtures";
 import { renderWithClient } from "./test/renderWithClient";
 
@@ -50,15 +50,12 @@ function expectDefined<T>(value: T | null | undefined, message: string): NonNull
 
 describe("App history selection debounce", () => {
   afterEach(() => {
-    setTestHistorySelectionDebounceOverrides(null);
     vi.useRealTimers();
   });
 
   it("debounces project-to-project data loading by 100ms during keyboard navigation", async () => {
     installScrollIntoViewMock();
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    setTestHistorySelectionDebounceOverrides({ project: 100, session: 75 });
-
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     const client = createAppClient({
       "projects:list": () => ({
@@ -164,7 +161,10 @@ describe("App history selection debounce", () => {
       }),
     });
 
-    renderWithClient(<App />, client);
+    renderWithClient(
+      <App testHistorySelectionDebounceOverrides={{ project: 100, session: 75 }} />,
+      client,
+    );
 
     await waitFor(() => {
       expect(screen.getByText("Project one message")).toBeInTheDocument();
@@ -210,8 +210,6 @@ describe("App history selection debounce", () => {
   it("debounces session-to-session detail loading by 75ms during keyboard navigation", async () => {
     installScrollIntoViewMock();
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    setTestHistorySelectionDebounceOverrides({ project: 100, session: 75 });
-
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     const client = createAppClient({
       "sessions:list": () => ({
@@ -302,7 +300,10 @@ describe("App history selection debounce", () => {
       }),
     });
 
-    renderWithClient(<App />, client);
+    renderWithClient(
+      <App testHistorySelectionDebounceOverrides={{ project: 100, session: 75 }} />,
+      client,
+    );
 
     await waitFor(() => {
       expect(screen.getByText("Please review markdown table rendering")).toBeInTheDocument();
@@ -351,8 +352,6 @@ describe("App history selection debounce", () => {
   it("does not load an intermediate project when tree navigation ends on a folder", async () => {
     installScrollIntoViewMock();
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    setTestHistorySelectionDebounceOverrides({ project: 100, session: 75 });
-
     const client = createAppClient({
       "projects:list": () => ({
         projects: [
@@ -481,7 +480,10 @@ describe("App history selection debounce", () => {
       }),
     });
 
-    const { container } = renderWithClient(<App />, client);
+    const { container } = renderWithClient(
+      <App testHistorySelectionDebounceOverrides={{ project: 100, session: 75 }} />,
+      client,
+    );
 
     await waitFor(() => {
       expect(screen.getByText("Project one message")).toBeInTheDocument();

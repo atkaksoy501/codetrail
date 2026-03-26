@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Dispatch, ReactNode, SetStateAction } from "react";
 
 import type { MessageCategory, Provider } from "@codetrail/core/browser";
@@ -10,6 +10,7 @@ import { ToolbarIcon } from "../components/ToolbarIcon";
 import { HighlightedText } from "../components/messages/MessagePresentation";
 import { useClickOutside } from "../hooks/useClickOutside";
 import { formatCompactInteger, formatInteger } from "../lib/numberFormatting";
+import { usePaneFocusOverlay } from "../lib/paneFocusController";
 import {
   SEARCH_PLACEHOLDERS,
   getAdvancedSearchToggleTitle,
@@ -63,7 +64,30 @@ export function SearchView({
   const closeProjectMenu = useCallback(() => {
     setProjectMenuOpen(false);
   }, []);
+  usePaneFocusOverlay(projectMenuOpen);
   useClickOutside(projectMenuRef, projectMenuOpen, closeProjectMenu);
+
+  useEffect(() => {
+    if (!projectMenuOpen) {
+      return;
+    }
+    const onWindowKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") {
+        return;
+      }
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      setProjectMenuOpen(false);
+      window.requestAnimationFrame(() => {
+        search.searchProjectSelectRef.current?.focus();
+      });
+    };
+
+    window.addEventListener("keydown", onWindowKeyDown, true);
+    return () => {
+      window.removeEventListener("keydown", onWindowKeyDown, true);
+    };
+  }, [projectMenuOpen, search.searchProjectSelectRef]);
 
   return (
     <section className="pane content-pane">
