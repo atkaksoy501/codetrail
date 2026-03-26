@@ -1955,6 +1955,43 @@ describe("App shell", () => {
     expect(screen.getByRole("button", { name: /Project One/i })).toBeInTheDocument();
   });
 
+  it("reveals a session message in the project's all sessions view from the message card", async () => {
+    const user = userEvent.setup();
+    const client = createAppClient();
+
+    renderWithClient(
+      <App
+        initialPaneState={
+          {
+            selectedProjectId: "project_1",
+            selectedSessionId: "session_1",
+            historyMode: "session",
+          } as PaneStateSnapshot
+        }
+      />,
+      client,
+    );
+
+    let revealInProjectButton: HTMLElement | null = null;
+    await waitFor(() => {
+      const buttons = screen.getAllByRole("button", { name: "Reveal this message in project" });
+      expect(buttons.length).toBeGreaterThan(0);
+      revealInProjectButton = buttons[0] ?? null;
+    });
+
+    if (!revealInProjectButton) {
+      throw new Error("Expected reveal-in-project button");
+    }
+
+    await user.click(revealInProjectButton);
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: /first \(all sessions\)\. switch to/i }),
+      ).toBeInTheDocument();
+    });
+  });
+
   it("reveals session leaves in the project tree and keeps the Sessions pane collapsed", async () => {
     installScrollIntoViewMock();
     const user = userEvent.setup();

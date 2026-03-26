@@ -407,6 +407,33 @@ export function useHistoryInteractions({
     ],
   );
 
+  const handleRevealInProject = useCallback(
+    (messageId: string, sourceId: string, sessionId: string) => {
+      if (!selectedProjectId) {
+        return;
+      }
+      setProjectProviders((value) => (value.length === PROVIDERS.length ? value : [...PROVIDERS]));
+      setProjectQueryInput("");
+      setPendingSearchNavigation({
+        targetMode: "project_all",
+        projectId: selectedProjectId,
+        sessionId,
+        messageId,
+        sourceId,
+        historyCategories: [...historyCategories],
+      });
+      setHistorySelection(createHistorySelection("project_all", selectedProjectId));
+    },
+    [
+      historyCategories,
+      selectedProjectId,
+      setHistorySelection,
+      setPendingSearchNavigation,
+      setProjectProviders,
+      setProjectQueryInput,
+    ],
+  );
+
   const handleToggleBookmark = useCallback(
     async (message: HistoryMessage) => {
       if (!selectedProjectId) {
@@ -1119,6 +1146,7 @@ export function useHistoryInteractions({
     handleToggleAllCategoryDefaultExpansion,
     handleToggleMessageExpanded,
     handleRevealInSession,
+    handleRevealInProject,
     handleToggleBookmark,
     handleMessageListScroll,
     handleHistorySearchKeyDown,

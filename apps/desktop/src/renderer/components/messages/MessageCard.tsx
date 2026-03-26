@@ -29,6 +29,7 @@ type MessageCardProps = {
   onToggleCategoryExpanded?: (category: MessageCategory) => void;
   onToggleBookmark?: (message: SessionMessage) => void;
   onRevealInSession?: (messageId: string, sourceId: string) => void;
+  onRevealInProject?: (messageId: string, sourceId: string, sessionId: string) => void;
   onPreservePaneFocus?: () => void;
   cardRef?: Ref<HTMLDivElement> | null;
 };
@@ -46,6 +47,7 @@ function MessageCardComponent({
   onToggleCategoryExpanded,
   onToggleBookmark,
   onRevealInSession,
+  onRevealInProject,
   onPreservePaneFocus,
   cardRef,
 }: MessageCardProps) {
@@ -109,6 +111,12 @@ function MessageCardComponent({
   const handleRevealButtonClick = (event: MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation();
     onRevealInSession?.(message.id, message.sourceId);
+    onPreservePaneFocus?.();
+  };
+
+  const handleRevealInProjectButtonClick = (event: MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    onRevealInProject?.(message.id, message.sourceId, message.sessionId);
     onPreservePaneFocus?.();
   };
 
@@ -208,6 +216,17 @@ function MessageCardComponent({
               title="Reveal in Session"
             >
               Reveal in Session
+            </button>
+          ) : null}
+          {onRevealInProject ? (
+            <button
+              type="button"
+              className="message-action-button message-reveal-button"
+              onClick={handleRevealInProjectButtonClick}
+              aria-label="Reveal this message in project"
+              title="Reveal in Project"
+            >
+              Reveal in Project
             </button>
           ) : null}
           {onToggleBookmark ? (

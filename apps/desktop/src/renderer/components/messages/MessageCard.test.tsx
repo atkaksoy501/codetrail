@@ -36,6 +36,7 @@ describe("MessageCard", () => {
     const onToggleExpanded = vi.fn();
     const onToggleBookmark = vi.fn();
     const onRevealInSession = vi.fn();
+    const onRevealInProject = vi.fn();
 
     render(
       <MessageCard
@@ -49,6 +50,7 @@ describe("MessageCard", () => {
         onToggleExpanded={onToggleExpanded}
         onToggleBookmark={onToggleBookmark}
         onRevealInSession={onRevealInSession}
+        onRevealInProject={onRevealInProject}
       />,
     );
 
@@ -60,11 +62,13 @@ describe("MessageCard", () => {
     await user.click(screen.getByRole("button", { name: "Copy formatted message body" }));
     await user.click(screen.getByRole("button", { name: "Copy raw message data" }));
     await user.click(screen.getByRole("button", { name: "Reveal this message in session" }));
+    await user.click(screen.getByRole("button", { name: "Reveal this message in project" }));
     await user.click(screen.getByRole("button", { name: "Bookmark this message" }));
 
     expect(onToggleExpanded).toHaveBeenCalledWith("message_1", "assistant");
     expect(copyTextToClipboard).toHaveBeenCalledTimes(2);
     expect(onRevealInSession).toHaveBeenCalledWith("message_1", "source_1");
+    expect(onRevealInProject).toHaveBeenCalledWith("message_1", "source_1", "session_1");
     expect(onToggleBookmark).toHaveBeenCalledWith(message);
   });
 

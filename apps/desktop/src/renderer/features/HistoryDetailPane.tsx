@@ -538,6 +538,7 @@ export function HistoryDetailPane({
               onToggleCategoryExpanded={history.handleToggleVisibleCategoryMessagesExpanded}
               onToggleBookmark={history.handleToggleBookmark}
               onRevealInSession={history.handleRevealInSession}
+              onRevealInProject={history.handleRevealInProject}
               onPreservePaneFocus={history.focusMessagePane}
               cardRef={
                 history.focusMessageId === message.id ? history.refs.focusedMessageRef : null
