@@ -582,7 +582,7 @@ describe("liveSessions", () => {
       selectedSessionIdentity: "selected",
       displayedMatchType: "session",
       displayedRankingReason: "running_tool priority",
-      renderedSummary: "Live · Codex · Running command · bun run test",
+      renderedSummary: "Live · Running command · bun run test",
       displayedSession: {
         sessionIdentity: "selected",
         statusKind: "running_tool",

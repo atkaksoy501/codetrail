@@ -199,16 +199,10 @@ export function selectRelevantLiveSessionCandidate({
 }
 
 export function buildLiveSummary(
-  session: Pick<LiveSession, "provider" | "statusText" | "detailText">,
+  session: Pick<LiveSession, "statusText" | "detailText">,
   liveTimer?: string | null,
 ): string {
-  return [
-    "Live",
-    formatProviderLabel(session.provider),
-    liveTimer ?? "",
-    session.statusText,
-    session.detailText ?? "",
-  ]
+  return ["Live", liveTimer ?? "", session.statusText, session.detailText ?? ""]
     .filter(Boolean)
     .join(" · ");
 }
@@ -292,16 +286,6 @@ function getLiveSessionRankingReason(session: LiveSession): string {
 
 function getPrecisionWeight(session: LiveSession): number {
   return session.sourcePrecision === "hook" ? 1 : 0;
-}
-
-function formatProviderLabel(provider: LiveSession["provider"]): string {
-  if (provider === "codex") {
-    return "Codex";
-  }
-  if (provider === "claude") {
-    return "Claude";
-  }
-  return provider[0]?.toUpperCase() + provider.slice(1);
 }
 
 export function formatCompactLiveAge(isoTimestamp: string, nowMs = Date.now()): string {

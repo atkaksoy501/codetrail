@@ -420,16 +420,6 @@ export function HistoryDetailPane({
             <span className="msg-live-separator" aria-hidden="true">
               ·
             </span>
-            <span className={`msg-live-provider msg-live-provider-${liveSession.provider}`}>
-              {liveSession.provider === "codex"
-                ? "Codex"
-                : liveSession.provider === "claude"
-                  ? "Claude"
-                  : liveSession.provider}
-            </span>
-            <span className="msg-live-separator" aria-hidden="true">
-              ·
-            </span>
             <span className="msg-live-timer">{liveTimer}</span>
             <span className="msg-live-separator" aria-hidden="true">
               ·
