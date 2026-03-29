@@ -119,8 +119,47 @@ describe("App shell", () => {
       screen.getByRole("button", { name: "Show or hide User messages (18,457)" }),
     ).toHaveAttribute(
       "title",
-      "Show or hide User messages (18,457)  ⌘1\nFocus only User messages  ⌃1",
+      "Show or hide User messages (18,457)  ⌘1\nCtrl+Click Focus only User messages  ⌃1",
     );
+  });
+
+  it("ctrl-clicking a message filter pill focuses that category and restores on second ctrl-click", async () => {
+    installScrollIntoViewMock();
+
+    const client = createAppClient();
+    const { container } = renderWithClient(
+      <App
+        initialPaneState={
+          {
+            selectedProjectId: "project_1",
+            selectedSessionId: "session_1",
+            historyMode: "session",
+            historyCategories: ["user", "assistant", "tool_result"],
+          } as PaneStateSnapshot
+        }
+      />,
+      client,
+    );
+
+    const userFilterButton = await screen.findByRole("button", {
+      name: /Show or hide User messages \([\d,]+\)/,
+    });
+
+    fireEvent.click(userFilterButton, { ctrlKey: true });
+    await waitFor(() => {
+      expect(container.querySelector(".msg-filter.user-filter")).toHaveClass("active");
+      expect(container.querySelector(".msg-filter.assistant-filter")).not.toHaveClass("active");
+      expect(container.querySelector(".msg-filter.tool_result-filter")).not.toHaveClass("active");
+      expect(container.querySelector(".msg-filter.tool_edit-filter")).not.toHaveClass("active");
+    });
+
+    fireEvent.click(userFilterButton, { ctrlKey: true });
+    await waitFor(() => {
+      expect(container.querySelector(".msg-filter.user-filter")).toHaveClass("active");
+      expect(container.querySelector(".msg-filter.assistant-filter")).toHaveClass("active");
+      expect(container.querySelector(".msg-filter.tool_result-filter")).toHaveClass("active");
+      expect(container.querySelector(".msg-filter.tool_edit-filter")).not.toHaveClass("active");
+    });
   });
 
   it("uses plain preset toggles for Cmd shortcuts and reversible focus for Ctrl shortcuts", async () => {

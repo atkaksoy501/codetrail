@@ -52,7 +52,7 @@ function getHistoryCategoryTooltip(
       history.historyCategoriesShortcutMap[category],
     ),
     formatTooltipLabel(
-      `Focus only ${label} messages`,
+      `Ctrl+Click Focus only ${label} messages`,
       history.historyCategorySoloShortcutMap[category],
     ),
   ].join("\n");
@@ -172,6 +172,7 @@ export function HistoryDetailPane({
   const [pageInputValue, setPageInputValue] = useState(() => `${history.sessionPage + 1}`);
   const skipNextPageInputBlurResetRef = useRef(false);
   const lastLiveUiTraceRef = useRef<string | null>(null);
+  const handledCtrlFilterMouseDownRef = useRef<MessageCategory | null>(null);
   const liveSessionSelection = useMemo(
     () =>
       selectRelevantLiveSessionCandidate({
@@ -462,8 +463,32 @@ export function HistoryDetailPane({
               {...preserveMessagePaneFocusProps}
               aria-label={getHistoryCategoryAriaLabel(history, category)}
               title={getHistoryCategoryTooltip(history, category, formatTooltipLabel)}
-              onClick={() => {
-                history.handleToggleHistoryCategoryShortcut(category);
+              onMouseDown={(event) => {
+                if (!event.ctrlKey || event.button !== 0) {
+                  handledCtrlFilterMouseDownRef.current = null;
+                  return;
+                }
+                handledCtrlFilterMouseDownRef.current = category;
+                event.preventDefault();
+                history.handleSoloHistoryCategoryShortcut(category);
+                focusMessagePane();
+              }}
+              onContextMenu={(event) => {
+                if (event.ctrlKey) {
+                  event.preventDefault();
+                }
+              }}
+              onClick={(event) => {
+                if (event.ctrlKey) {
+                  if (handledCtrlFilterMouseDownRef.current === category) {
+                    handledCtrlFilterMouseDownRef.current = null;
+                    return;
+                  }
+                  history.handleSoloHistoryCategoryShortcut(category);
+                } else {
+                  handledCtrlFilterMouseDownRef.current = null;
+                  history.handleToggleHistoryCategoryShortcut(category);
+                }
                 focusMessagePane();
               }}
             >
