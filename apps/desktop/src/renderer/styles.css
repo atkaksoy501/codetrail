@@ -143,6 +143,7 @@
   --help-success-dim: rgba(13, 148, 136, 0.12);
   --help-warn: #d97706;
   --help-warn-dim: rgba(217, 119, 6, 0.12);
+  --live-status-idle: color-mix(in srgb, var(--accent-green) 76%, var(--text-secondary));
   --pane-focus-line-idle: rgba(0, 0, 0, 0.08);
   --pane-focus-line-active: var(--accent-blue);
 }
@@ -2561,10 +2562,13 @@ body.platform-macos .titlebar-left {
 }
 
 .msg-live-status-waiting_for_input,
-.msg-live-status-idle,
 .msg-live-status-active_recently,
 .msg-live-status-unknown {
   color: var(--text-secondary);
+}
+
+.msg-live-status-idle {
+  color: var(--live-status-idle);
 }
 
 .msg-live-status-waiting_for_approval {

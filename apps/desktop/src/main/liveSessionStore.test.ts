@@ -5,6 +5,7 @@ import {
   readFileSync,
   rmSync,
   truncateSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -415,6 +416,103 @@ describe("LiveSessionStore", () => {
     expect(getSingleSession(store).detailText).toBe("Seeded activity");
   });
 
+  it("only seeds startup transcripts for enabled providers", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-live-store-provider-seed-"));
+    tempDirs.push(dir);
+    const config = {
+      ...makeConfig(dir),
+      enabledProviders: ["claude"] satisfies DiscoveryConfig["enabledProviders"],
+    };
+    const codexPath = join(config.codexRoot, "2026", "03", "24", "codex-session.jsonl");
+    const claudePath = join(config.claudeRoot, "project-a", "claude-session.jsonl");
+    createCodexTranscript(codexPath);
+    createClaudeTranscript(claudePath);
+    appendFileSync(
+      codexPath,
+      `${JSON.stringify({
+        timestamp: "2026-03-24T09:00:00.000Z",
+        type: "event_msg",
+        payload: { type: "agent_message", text: "Codex seed" },
+      })}\n`,
+      "utf8",
+    );
+    appendFileSync(
+      claudePath,
+      `${JSON.stringify({
+        parentUuid: "assistant-1",
+        sessionId: "claude-session",
+        cwd: "/workspace/codetrail",
+        type: "assistant",
+        message: { content: [{ type: "text", text: "Claude seed" }] },
+      })}\n`,
+      "utf8",
+    );
+
+    const store = new LiveSessionStore({
+      queryService: {
+        listRecentLiveSessionFiles: vi.fn(() => [
+          {
+            filePath: codexPath,
+            provider: "codex" as const,
+            fileMtimeMs: Date.parse("2026-03-24T09:00:00.000Z"),
+          },
+          {
+            filePath: claudePath,
+            provider: "claude" as const,
+            fileMtimeMs: Date.parse("2026-03-24T09:00:00.000Z"),
+          },
+        ]),
+      } satisfies Pick<QueryService, "listRecentLiveSessionFiles">,
+      userDataDir: join(dir, "user-data"),
+      homeDir: join(dir, "home"),
+      now: () => Date.parse("2026-03-24T09:00:30.000Z"),
+    });
+
+    await store.start({ discoveryConfig: config });
+
+    expect(store.snapshot().sessions).toHaveLength(1);
+    expect(getSingleSession(store).provider).toBe("claude");
+    expect(getSingleSession(store).detailText).toBe("Claude seed");
+  });
+
+  it("marks startup-seeded sessions as best-effort when the initial tail window is applied", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-live-store-seed-large-"));
+    tempDirs.push(dir);
+    const config = makeConfig(dir);
+    const filePath = join(config.codexRoot, "2026", "03", "24", "codex-session.jsonl");
+    createCodexTranscript(filePath);
+    appendFileSync(filePath, `${"x".repeat(70_000)}\n`, "utf8");
+    appendFileSync(
+      filePath,
+      `${JSON.stringify({
+        timestamp: "2026-03-24T09:00:00.000Z",
+        type: "event_msg",
+        payload: { type: "agent_message", text: "Recent large tail" },
+      })}\n`,
+      "utf8",
+    );
+
+    const store = new LiveSessionStore({
+      queryService: {
+        listRecentLiveSessionFiles: vi.fn(() => [
+          {
+            filePath,
+            provider: "codex" as const,
+            fileMtimeMs: Date.parse("2026-03-24T09:00:00.000Z"),
+          },
+        ]),
+      } satisfies Pick<QueryService, "listRecentLiveSessionFiles">,
+      userDataDir: join(dir, "user-data"),
+      homeDir: join(dir, "home"),
+      now: () => Date.parse("2026-03-24T09:00:30.000Z"),
+    });
+
+    await store.start({ discoveryConfig: config });
+
+    expect(getSingleSession(store).bestEffort).toBe(true);
+    expect(getSingleSession(store).detailText).toBe("Recent large tail");
+  });
+
   it("updates Claude sessions from the dedicated hook watcher", async () => {
     const dir = mkdtempSync(join(tmpdir(), "codetrail-live-store-hooks-"));
     tempDirs.push(dir);
@@ -462,6 +560,50 @@ describe("LiveSessionStore", () => {
     expect(session.statusKind).toBe("waiting_for_approval");
     expect(session.sourcePrecision).toBe("hook");
     expect(records[0]!.roots[0]).toBe(join(userDataDir, "live-status"));
+  });
+
+  it("uses file mtime fallback so stale untimestamped Claude transcripts do not appear fresh when seeded", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-live-store-claude-stale-"));
+    tempDirs.push(dir);
+    const config = makeConfig(dir);
+    const transcriptPath = join(config.claudeRoot, "project-a", "claude-session.jsonl");
+    createClaudeTranscript(transcriptPath);
+    appendFileSync(
+      transcriptPath,
+      `${JSON.stringify({
+        parentUuid: "assistant-1",
+        sessionId: "claude-session",
+        cwd: "/workspace/codetrail",
+        type: "assistant",
+        message: {
+          content: [{ type: "text", text: "Old assistant message without timestamp" }],
+        },
+      })}\n`,
+      "utf8",
+    );
+    const oldActivityMs = Date.parse("2026-03-24T08:00:00.000Z");
+    utimesSync(transcriptPath, oldActivityMs / 1000, oldActivityMs / 1000);
+    const listRecentLiveSessionFiles = vi.fn(() => [
+      {
+        filePath: transcriptPath,
+        provider: "claude" as const,
+        fileMtimeMs: oldActivityMs,
+      },
+    ]);
+
+    const store = new LiveSessionStore({
+      queryService: {
+        listRecentLiveSessionFiles,
+      } satisfies Pick<QueryService, "listRecentLiveSessionFiles">,
+      userDataDir: join(dir, "user-data"),
+      homeDir: join(dir, "home"),
+      now: () => Date.parse("2026-03-24T09:00:30.000Z"),
+    });
+
+    await store.start({ discoveryConfig: config });
+
+    expect(listRecentLiveSessionFiles).toHaveBeenCalledOnce();
+    expect(store.snapshot().sessions).toHaveLength(0);
   });
 
   it("parses concatenated Claude hook objects across partial writes without skipping events", async () => {
@@ -545,7 +687,7 @@ describe("LiveSessionStore", () => {
 
     const hookLogPath = join(userDataDir, "live-status", "claude-hooks.jsonl");
     mkdirSync(dirname(hookLogPath), { recursive: true });
-    writeFileSync(hookLogPath, `${"x".repeat(50_000)}\n`, "utf8");
+    writeFileSync(hookLogPath, `${"x".repeat(80_000)}\n`, "utf8");
     await records[0]!.callback(makeBatch(hookLogPath));
 
     const bogusLeadingObject = JSON.stringify({
@@ -562,7 +704,7 @@ describe("LiveSessionStore", () => {
       message: "Allow edit",
     });
     truncateSync(hookLogPath, 0);
-    writeFileSync(hookLogPath, `${"x".repeat(40_000)}${bogusLeadingObject}${validObject}`, "utf8");
+    writeFileSync(hookLogPath, `${"x".repeat(70_000)}${bogusLeadingObject}${validObject}`, "utf8");
 
     await records[0]!.callback(makeBatch(hookLogPath));
 

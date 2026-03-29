@@ -190,6 +190,7 @@ export async function bootstrapMainProcess(
   const getEnabledProviders = () =>
     resolveEnabledProviders(options.appStateStore?.getIndexingState()?.enabledProviders);
   const liveInstrumentationEnabled = options.instrumentationEnabled ?? false;
+  const liveUiTraceLogPath = getLiveUiTraceLogPath(app.getPath("userData"));
   const getRemoveMissingSessionsDuringIncrementalIndexing = () =>
     options.appStateStore?.getIndexingState()?.removeMissingSessionsDuringIncrementalIndexing ??
     false;
@@ -885,7 +886,7 @@ export async function bootstrapMainProcess(
         if (!liveInstrumentationEnabled) {
           return { ok: true as const };
         }
-        appendLiveInstrumentationRecord(getLiveUiTraceLogPath(app.getPath("userData")), {
+        appendLiveInstrumentationRecord(liveUiTraceLogPath, {
           recordedAt: new Date().toISOString(),
           kind: "ui_live_row",
           ...payload,

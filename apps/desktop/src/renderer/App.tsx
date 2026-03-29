@@ -221,6 +221,7 @@ export function App({
   const {
     liveStatus,
     liveStatusError,
+    refreshLiveStatus,
     claudeHookActionPending,
     showClaudeHooksPrompt,
     setShowClaudeHooksPrompt,
@@ -876,7 +877,9 @@ export function App({
       .then((result) => {
         if (!result.ok) {
           logError("File watcher started but no roots were watched", new Error("ok=false"));
+          return;
         }
+        void refreshLiveStatus();
       })
       .catch((error: unknown) => {
         logError("Failed to start file watcher", error);
@@ -887,7 +890,7 @@ export function App({
         logError("Failed to stop file watcher", error);
       });
     };
-  }, [codetrail, logError, refreshStrategy]);
+  }, [codetrail, logError, refreshLiveStatus, refreshStrategy]);
 
   useEffect(() => {
     if (mainView !== "history" || paneFocus.activeDomain.kind === "overlay") {

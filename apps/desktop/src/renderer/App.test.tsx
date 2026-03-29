@@ -3,6 +3,7 @@
 import { createClaudeHookStateFixture, createLiveStatusFixture } from "@codetrail/core/testing";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { StrictMode } from "react";
 import { describe, expect, it, vi } from "vitest";
 
 const { copyTextToClipboard, openInFileManager, openPath } = vi.hoisted(() => ({
@@ -1790,6 +1791,201 @@ describe("App shell", () => {
       );
       expect(client.invoke).toHaveBeenCalledWith("watcher:start", { debounceMs: 3000 });
     });
+  });
+
+  it("refreshes live status immediately after watcher startup instead of waiting for the poll interval", async () => {
+    installScrollIntoViewMock();
+
+    let liveStatusCallCount = 0;
+    const client = createAppClient({
+      "watcher:getLiveStatus": () => {
+        liveStatusCallCount += 1;
+        if (liveStatusCallCount === 1) {
+          return createLiveStatusFixture({
+            enabled: true,
+            revision: 1,
+            providerCounts: {
+              claude: 0,
+              codex: 0,
+              gemini: 0,
+              cursor: 0,
+              copilot: 0,
+            },
+            sessions: [],
+            claudeHookState: createClaudeHookStateFixture(),
+          });
+        }
+        return createLiveStatusFixture({
+          enabled: true,
+          revision: 2,
+          providerCounts: {
+            claude: 1,
+            codex: 0,
+            gemini: 0,
+            cursor: 0,
+            copilot: 0,
+          },
+          sessions: [
+            {
+              provider: "claude",
+              sessionIdentity: "live-session-1",
+              sourceSessionId: "provider-session-1",
+              filePath: "/workspace/project-one/session-1.jsonl",
+              projectName: "Project One",
+              projectPath: "/workspace/project-one",
+              cwd: "/workspace/project-one",
+              statusKind: "working",
+              statusText: "Working",
+              detailText: "Seeded on startup",
+              sourcePrecision: "passive",
+              lastActivityAt: new Date(Date.now() - 4_000).toISOString(),
+              bestEffort: false,
+            },
+          ],
+          claudeHookState: createClaudeHookStateFixture(),
+        });
+      },
+    });
+
+    const { container } = renderWithClient(
+      <App
+        initialPaneState={
+          {
+            selectedProjectId: "project_1",
+            selectedSessionId: "session_1",
+            historyMode: "session",
+            liveWatchEnabled: true,
+            currentAutoRefreshStrategy: "watch-1s",
+            preferredAutoRefreshStrategy: "watch-1s",
+          } as PaneStateSnapshot
+        }
+      />,
+      client,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Please review markdown table rendering")).toBeInTheDocument();
+      expect(container.querySelector(".msg-live-row")).not.toBeNull();
+    });
+
+    expect(container.querySelector(".msg-live-row")).toHaveTextContent("Seeded on startup");
+    expect(liveStatusCallCount).toBeGreaterThanOrEqual(2);
+    expect(client.invoke).toHaveBeenCalledWith("watcher:start", { debounceMs: 1000 });
+  });
+
+  it("does not get stuck on a stale startup live-status revision under StrictMode", async () => {
+    installScrollIntoViewMock();
+
+    let liveStatusCallCount = 0;
+    const client = createAppClient({
+      "projects:list": () => ({
+        projects: [
+          {
+            id: "project_1",
+            provider: "codex",
+            name: "Project One",
+            path: "/workspace/project-one",
+            sessionCount: 1,
+            messageCount: 1,
+            bookmarkCount: 0,
+            lastActivity: "2026-03-01T10:00:05.000Z",
+          },
+        ],
+      }),
+      "sessions:list": () => ({
+        sessions: [
+          {
+            id: "session_1",
+            projectId: "project_1",
+            provider: "codex",
+            filePath: "/workspace/project-one/session-1.jsonl",
+            title: "Investigate markdown rendering",
+            modelNames: "gpt-5",
+            startedAt: "2026-03-01T10:00:00.000Z",
+            endedAt: "2026-03-01T10:00:05.000Z",
+            durationMs: 5000,
+            gitBranch: "main",
+            cwd: "/workspace/project-one",
+            messageCount: 2,
+            bookmarkCount: 0,
+            tokenInputTotal: 14,
+            tokenOutputTotal: 8,
+          },
+        ],
+      }),
+      "watcher:getLiveStatus": () => {
+        liveStatusCallCount += 1;
+        if (liveStatusCallCount === 1) {
+          return createLiveStatusFixture({
+            enabled: false,
+            revision: 1,
+            providerCounts: {
+              claude: 0,
+              codex: 0,
+              gemini: 0,
+              cursor: 0,
+              copilot: 0,
+            },
+            sessions: [],
+            claudeHookState: createClaudeHookStateFixture(),
+          });
+        }
+        return createLiveStatusFixture({
+          enabled: true,
+          revision: 2,
+          providerCounts: {
+            claude: 0,
+            codex: 1,
+            gemini: 0,
+            cursor: 0,
+            copilot: 0,
+          },
+          sessions: [
+            {
+              provider: "codex",
+              sessionIdentity: "live-session-1",
+              sourceSessionId: "provider-session-1",
+              filePath: "/workspace/project-one/session-1.jsonl",
+              projectName: "Project One",
+              projectPath: "/workspace/project-one",
+              cwd: "/workspace/project-one",
+              statusKind: "idle",
+              statusText: "Idle",
+              detailText: "Detected on startup",
+              sourcePrecision: "passive",
+              lastActivityAt: new Date(Date.now() - 5_000).toISOString(),
+              bestEffort: false,
+            },
+          ],
+          claudeHookState: createClaudeHookStateFixture(),
+        });
+      },
+    });
+
+    const { container } = renderWithClient(
+      <StrictMode>
+        <App
+          initialPaneState={
+            {
+              selectedProjectId: "project_1",
+              selectedSessionId: "session_1",
+              historyMode: "session",
+              liveWatchEnabled: true,
+              currentAutoRefreshStrategy: "watch-1s",
+              preferredAutoRefreshStrategy: "watch-1s",
+            } as PaneStateSnapshot
+          }
+        />
+      </StrictMode>,
+      client,
+    );
+
+    await waitFor(() => {
+      expect(container.querySelector(".msg-live-row")).not.toBeNull();
+    });
+
+    expect(container.querySelector(".msg-live-row")).toHaveTextContent("Detected on startup");
+    expect(liveStatusCallCount).toBeGreaterThanOrEqual(2);
   });
 
   it("sends watcher stop IPC on unmount when watch mode is active", async () => {

@@ -1,12 +1,4 @@
-import {
-  type Dispatch,
-  type MutableRefObject,
-  type SetStateAction,
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-} from "react";
+import { type Dispatch, type SetStateAction, useCallback, useEffect, useState } from "react";
 
 import { isWatchRefreshStrategy } from "../app/autoRefresh";
 import type { RefreshStrategy } from "../app/autoRefresh";
@@ -48,7 +40,6 @@ export function useLiveWatchController({
     "install" | "remove" | null
   >(null);
   const [showClaudeHooksPrompt, setShowClaudeHooksPrompt] = useState(false);
-  const liveStatusRevisionRef = useRef<number | null>(null);
 
   const liveWatchActive = isWatchRefreshStrategy(refreshStrategy) && liveWatchEnabled;
   const settingsViewOpen = mainView === "settings";
@@ -61,10 +52,9 @@ export function useLiveWatchController({
     try {
       const response = await codetrail.invoke("watcher:getLiveStatus", {});
       setLiveStatus((current) => {
-        if (liveStatusRevisionRef.current === response.revision && current) {
+        if (current?.revision === response.revision) {
           return current;
         }
-        liveStatusRevisionRef.current = response.revision;
         return response;
       });
       setLiveStatusError(null);
@@ -80,28 +70,17 @@ export function useLiveWatchController({
       return;
     }
 
-    let cancelled = false;
-    const syncLiveStatus = async () => {
-      const response = await loadLiveStatus();
-      if (cancelled || response) {
-        return;
-      }
-    };
-
-    void syncLiveStatus();
+    void loadLiveStatus();
     const pollMs = LIVE_STATUS_ACTIVE_POLL_MS;
     if (pollMs <= 0) {
-      return () => {
-        cancelled = true;
-      };
+      return;
     }
 
     const intervalId = window.setInterval(() => {
-      void syncLiveStatus();
+      void loadLiveStatus();
     }, pollMs);
 
     return () => {
-      cancelled = true;
       window.clearInterval(intervalId);
     };
   }, [liveWatchActive, loadLiveStatus]);
@@ -133,7 +112,7 @@ export function useLiveWatchController({
     setClaudeHookActionPending("install");
     try {
       const response = await codetrail.invoke("claudeHooks:install", {});
-      updateClaudeHookState(setLiveStatus, liveStatusRevisionRef, response.state);
+      updateClaudeHookState(setLiveStatus, response.state);
       setLiveStatusError(null);
     } catch (error) {
       logError("Failed installing Claude hooks", error);
@@ -149,7 +128,7 @@ export function useLiveWatchController({
     setClaudeHookActionPending("remove");
     try {
       const response = await codetrail.invoke("claudeHooks:remove", {});
-      updateClaudeHookState(setLiveStatus, liveStatusRevisionRef, response.state);
+      updateClaudeHookState(setLiveStatus, response.state);
       setLiveStatusError(null);
     } catch (error) {
       logError("Failed removing Claude hooks", error);
@@ -162,6 +141,7 @@ export function useLiveWatchController({
     liveStatus,
     liveStatusError,
     liveWatchActive,
+    refreshLiveStatus: loadLiveStatus,
     claudeHookActionPending,
     showClaudeHooksPrompt,
     setShowClaudeHooksPrompt,
@@ -172,12 +152,11 @@ export function useLiveWatchController({
 
 function updateClaudeHookState(
   setLiveStatus: Dispatch<SetStateAction<WatchLiveStatusResponse | null>>,
-  liveStatusRevisionRef: MutableRefObject<number | null>,
   claudeHookState: WatchLiveStatusResponse["claudeHookState"],
 ): void {
   setLiveStatus((current) => {
-    const nextRevision = (current?.revision ?? liveStatusRevisionRef.current ?? 0) + 1;
-    const nextStatus = {
+    const nextRevision = (current?.revision ?? 0) + 1;
+    return {
       enabled: current?.enabled ?? false,
       instrumentationEnabled: current?.instrumentationEnabled ?? false,
       updatedAt: new Date().toISOString(),
@@ -186,7 +165,5 @@ function updateClaudeHookState(
       revision: nextRevision,
       claudeHookState,
     };
-    liveStatusRevisionRef.current = nextRevision;
-    return nextStatus;
   });
 }

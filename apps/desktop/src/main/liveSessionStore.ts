@@ -1,5 +1,5 @@
 import { mkdir, open, stat } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname } from "node:path";
 
 import {
   CLAUDE_HOOK_EVENT_NAME_VALUES,
@@ -57,6 +57,12 @@ type FileCursorState = {
   lastMtimeMs: number;
   partialLineBuffer: string;
   session: LiveSessionState;
+};
+
+type StartupSeedCandidate = {
+  filePath: string;
+  provider: "claude" | "codex";
+  fileMtimeMs: number;
 };
 
 export type LiveSessionStoreOptions = {
@@ -342,16 +348,21 @@ export class LiveSessionStore {
       providers,
       minFileMtimeMs: cutoffMs,
       limit: STARTUP_SEED_LIMIT,
-    });
-
-    const candidatePaths = [...new Set(candidates.map((candidate) => candidate.filePath))];
-    await Promise.all(
-      candidatePaths.map((filePath) =>
-        this.processTranscriptPath(filePath, {
+    }) as StartupSeedCandidate[];
+    const results = await Promise.allSettled(
+      candidates.map((candidate) =>
+        this.processTranscriptPath(candidate.filePath, {
           initialTailBytes: INITIAL_TAIL_BYTES,
         }),
       ),
     );
+    results.forEach((result, index) => {
+      if (result.status === "rejected") {
+        this.reportBackgroundError("Failed seeding startup live transcript", result.reason, {
+          filePath: candidates[index]?.filePath,
+        });
+      }
+    });
   }
 
   private async processTranscriptPath(
@@ -466,13 +477,18 @@ export class LiveSessionStore {
       previousPartialLine: cursor.partialLineBuffer,
       ignoreLeadingPartialLine,
     });
+    const passiveFallbackTimestampMs = Math.trunc(fileStat.mtimeMs) || this.now();
 
     for (const line of completeLines.lines) {
       const before = this.instrumentationEnabled ? summarizeLiveSessionState(cursor.session) : null;
       if (discovered.provider === "codex") {
-        cursor.session = applyCodexLiveLine(cursor.session, line, this.now());
+        cursor.session = applyCodexLiveLine(cursor.session, line, passiveFallbackTimestampMs);
       } else {
-        cursor.session = applyClaudeTranscriptLine(cursor.session, line, this.now());
+        cursor.session = applyClaudeTranscriptLine(
+          cursor.session,
+          line,
+          passiveFallbackTimestampMs,
+        );
       }
       if (this.instrumentationEnabled) {
         const after = summarizeLiveSessionState(cursor.session);
