@@ -1,8 +1,13 @@
 import type { MessageCategory } from "@codetrail/core/browser";
-import { useState } from "react";
+import {
+  type Dispatch,
+  type SetStateAction,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 
-import { getCodetrailClient } from "../../lib/codetrailClient";
-import { openFileInEditor } from "../../lib/pathActions";
 import type { ParsedMessageToolPayload } from "./messageToolPayload";
 import { parseMessageToolPayload } from "./messageToolPayload";
 import {
@@ -18,6 +23,7 @@ import {
   tryFormatJson,
   useDocumentCollapseMultiFileToolDiffs,
 } from "./textRendering";
+import { formatToolEditFileSummary, toolEditFileHasCollapsibleDiff } from "./toolEditUtils";
 import {
   type ParsedToolEditFile,
   asNonEmptyString,
@@ -26,8 +32,6 @@ import {
   buildUnifiedDiffFromTextPair,
   tryParseJsonRecord,
 } from "./toolParsing";
-import { trimProjectPrefixFromPath } from "./viewerDiffModel";
-import { getPathBaseName } from "./viewerDiffModel";
 
 export function MessageContent({
   text,
@@ -36,6 +40,8 @@ export function MessageContent({
   highlightPatterns = [],
   pathRoots = [],
   parsedToolPayload,
+  writeDiffExpansionRequest,
+  onWriteDiffStateChange,
 }: {
   text: string;
   category: MessageCategory;
@@ -43,6 +49,11 @@ export function MessageContent({
   highlightPatterns?: string[];
   pathRoots?: string[];
   parsedToolPayload?: ParsedMessageToolPayload;
+  writeDiffExpansionRequest?: { expanded: boolean; version: number };
+  onWriteDiffStateChange?: (state: {
+    hasCollapsibleDiffs: boolean;
+    allExpanded: boolean;
+  }) => void;
 }) {
   const resolvedParsedToolPayload = parsedToolPayload ?? parseMessageToolPayload(category, text);
   if (category === "thinking") {
@@ -61,6 +72,8 @@ export function MessageContent({
         highlightPatterns={highlightPatterns}
         pathRoots={pathRoots}
         parsedToolPayload={resolvedParsedToolPayload}
+        {...(writeDiffExpansionRequest ? { writeDiffExpansionRequest } : {})}
+        {...(onWriteDiffStateChange ? { onWriteDiffStateChange } : {})}
       />
     );
   }
@@ -73,6 +86,8 @@ export function MessageContent({
         highlightPatterns={highlightPatterns}
         pathRoots={pathRoots}
         parsedToolPayload={resolvedParsedToolPayload}
+        {...(writeDiffExpansionRequest ? { writeDiffExpansionRequest } : {})}
+        {...(onWriteDiffStateChange ? { onWriteDiffStateChange } : {})}
       />
     );
   }
@@ -107,12 +122,19 @@ function ToolUseContent({
   highlightPatterns,
   pathRoots,
   parsedToolPayload,
+  writeDiffExpansionRequest,
+  onWriteDiffStateChange,
 }: {
   text: string;
   query: string;
   highlightPatterns: string[];
   pathRoots: string[];
   parsedToolPayload: ParsedMessageToolPayload;
+  writeDiffExpansionRequest?: { expanded: boolean; version: number };
+  onWriteDiffStateChange?: (state: {
+    hasCollapsibleDiffs: boolean;
+    allExpanded: boolean;
+  }) => void;
 }) {
   const parsed = parsedToolPayload.toolInvocation;
   if (!parsed) {
@@ -132,6 +154,8 @@ function ToolUseContent({
         highlightPatterns={highlightPatterns}
         pathRoots={pathRoots}
         parsedToolPayload={parsedToolPayload}
+        {...(writeDiffExpansionRequest ? { writeDiffExpansionRequest } : {})}
+        {...(onWriteDiffStateChange ? { onWriteDiffStateChange } : {})}
       />
     );
   }
@@ -257,15 +281,21 @@ function ToolEditContent({
   highlightPatterns,
   pathRoots,
   parsedToolPayload,
+  writeDiffExpansionRequest,
+  onWriteDiffStateChange,
 }: {
   text: string;
   query: string;
   highlightPatterns: string[];
   pathRoots: string[];
   parsedToolPayload: ParsedMessageToolPayload;
+  writeDiffExpansionRequest?: { expanded: boolean; version: number };
+  onWriteDiffStateChange?: (state: {
+    hasCollapsibleDiffs: boolean;
+    allExpanded: boolean;
+  }) => void;
 }) {
   const parsed = parsedToolPayload.toolEdit;
-  const collapseMultiFileToolDiffs = useDocumentCollapseMultiFileToolDiffs();
   if (!parsed) {
     const formatted = tryFormatJson(text);
     return (
@@ -275,76 +305,145 @@ function ToolEditContent({
     );
   }
 
+  return (
+    <ParsedToolEditContent
+      text={text}
+      parsed={parsed}
+      query={query}
+      highlightPatterns={highlightPatterns}
+      pathRoots={pathRoots}
+      {...(writeDiffExpansionRequest ? { writeDiffExpansionRequest } : {})}
+      {...(onWriteDiffStateChange ? { onWriteDiffStateChange } : {})}
+    />
+  );
+}
+
+function ParsedToolEditContent({
+  text,
+  parsed,
+  query,
+  highlightPatterns,
+  pathRoots,
+  writeDiffExpansionRequest,
+  onWriteDiffStateChange,
+}: {
+  text: string;
+  parsed: NonNullable<ParsedMessageToolPayload["toolEdit"]>;
+  query: string;
+  highlightPatterns: string[];
+  pathRoots: string[];
+  writeDiffExpansionRequest?: { expanded: boolean; version: number };
+  onWriteDiffStateChange?: (state: {
+    hasCollapsibleDiffs: boolean;
+    allExpanded: boolean;
+  }) => void;
+}) {
+  const collapseMultiFileToolDiffs = useDocumentCollapseMultiFileToolDiffs();
+  const defaultDiffExpanded = parsed.files.length > 1 ? !collapseMultiFileToolDiffs : true;
+  const collapsibleDiffKeysSignature = useMemo(
+    () => buildToolEditCollapsibleDiffKeys(parsed.files).join("\n"),
+    [parsed.files],
+  );
+  const collapsibleDiffKeys = useMemo(
+    () => (collapsibleDiffKeysSignature ? collapsibleDiffKeysSignature.split("\n") : []),
+    [collapsibleDiffKeysSignature],
+  );
+  const [expandedDiffs, setExpandedDiffs] = useState<Record<string, boolean>>(() =>
+    buildToolEditDiffExpansionState(collapsibleDiffKeys, defaultDiffExpanded),
+  );
+
+  useEffect(() => {
+    const nextKeys = collapsibleDiffKeysSignature ? collapsibleDiffKeysSignature.split("\n") : [];
+    setExpandedDiffs(buildToolEditDiffExpansionState(nextKeys, defaultDiffExpanded));
+  }, [collapsibleDiffKeysSignature, defaultDiffExpanded]);
+
+  useEffect(() => {
+    const nextKeys = collapsibleDiffKeysSignature ? collapsibleDiffKeysSignature.split("\n") : [];
+    if (!writeDiffExpansionRequest || nextKeys.length === 0) {
+      return;
+    }
+    setExpandedDiffs(buildToolEditDiffExpansionState(nextKeys, writeDiffExpansionRequest.expanded));
+  }, [collapsibleDiffKeysSignature, writeDiffExpansionRequest]);
+
+  useEffect(() => {
+    const nextKeys = collapsibleDiffKeysSignature ? collapsibleDiffKeysSignature.split("\n") : [];
+    const hasCollapsibleDiffs = nextKeys.length > 0;
+    const allExpanded =
+      hasCollapsibleDiffs && nextKeys.every((key) => expandedDiffs[key] ?? defaultDiffExpanded);
+    onWriteDiffStateChange?.({ hasCollapsibleDiffs, allExpanded });
+  }, [collapsibleDiffKeysSignature, defaultDiffExpanded, expandedDiffs, onWriteDiffStateChange]);
+
+  const singleFile = parsed.files[0];
+  const singleFileKey = singleFile ? buildToolEditFileKey(singleFile, 0) : null;
+  const handleSingleFileExpandedChange = useToolEditDiffExpansionHandler(
+    singleFileKey,
+    setExpandedDiffs,
+  );
+
   if (parsed.files.length > 1) {
     return (
       <div className="tool-edit-view">
         <div className="tool-edit-summary">
-          {renderToolEditSummary(parsed.files, pathRoots, query, highlightPatterns)}
+          {renderToolEditSummary(parsed.files, query, highlightPatterns)}
         </div>
-        {parsed.files.map((file) => (
-          <ToolEditFileBody
-            key={`${file.changeType}:${file.filePath}:${collapseMultiFileToolDiffs ? "collapsed" : "expanded"}`}
-            file={file}
-            query={query}
-            highlightPatterns={highlightPatterns}
-            pathRoots={pathRoots}
-            defaultExpanded={!collapseMultiFileToolDiffs}
-          />
-        ))}
+        {parsed.files.map((file, index) => {
+          const fileKey = buildToolEditFileKey(file, index);
+          return (
+            <ToolEditFileBody
+              key={fileKey}
+              file={file}
+              query={query}
+              highlightPatterns={highlightPatterns}
+              pathRoots={pathRoots}
+              defaultExpanded={defaultDiffExpanded}
+              expanded={expandedDiffs[fileKey] ?? defaultDiffExpanded}
+              onExpandedChange={(expanded) => {
+                setExpandedDiffs((current) => ({ ...current, [fileKey]: expanded }));
+              }}
+            />
+          );
+        })}
       </div>
     );
   }
 
-  if (parsed.diff && isLikelyDiff("diff", parsed.diff)) {
+  if (singleFile && singleFile.newText !== null && !toolEditFileHasCollapsibleDiff(singleFile)) {
     return (
       <div className="tool-edit-view">
-        <DiffBlock
-          codeValue={parsed.diff}
-          filePath={parsed.filePath}
-          pathRoots={pathRoots}
-          query={query}
-          highlightPatterns={highlightPatterns}
-          collapsible
-        />
-      </div>
-    );
-  }
-
-  if (parsed.oldText !== null && parsed.newText !== null) {
-    const diff = buildUnifiedDiffFromTextPair({
-      oldText: parsed.oldText,
-      newText: parsed.newText,
-      filePath: parsed.filePath,
-    });
-    return (
-      <div className="tool-edit-view">
-        <DiffBlock
-          codeValue={diff}
-          filePath={parsed.filePath}
-          pathRoots={pathRoots}
-          query={query}
-          highlightPatterns={highlightPatterns}
-          collapsible
-        />
-      </div>
-    );
-  }
-
-  if (parsed.newText !== null) {
-    return (
-      <div className="tool-edit-view">
-        {parsed.filePath ? <div className="tool-edit-path">{parsed.filePath}</div> : null}
+        {singleFile.filePath ? <div className="tool-edit-path">{singleFile.filePath}</div> : null}
         <div className="tool-use-section">
           <div className="tool-use-section-label">Written Content</div>
           <CodeBlock
-            language={detectLanguageFromFilePath(parsed.filePath)}
-            codeValue={parsed.newText}
-            filePath={parsed.filePath}
+            language={detectLanguageFromFilePath(singleFile.filePath)}
+            codeValue={singleFile.newText}
+            filePath={singleFile.filePath}
             pathRoots={pathRoots}
             query={query}
             highlightPatterns={highlightPatterns}
           />
         </div>
+      </div>
+    );
+  }
+
+  if (singleFile) {
+    const controlledExpansionProps =
+      singleFileKey !== null
+        ? {
+            expanded: expandedDiffs[singleFileKey] ?? defaultDiffExpanded,
+            onExpandedChange: handleSingleFileExpandedChange,
+          }
+        : {};
+    return (
+      <div className="tool-edit-view">
+        <ToolEditFileBody
+          file={singleFile}
+          query={query}
+          highlightPatterns={highlightPatterns}
+          pathRoots={pathRoots}
+          defaultExpanded={defaultDiffExpanded}
+          {...controlledExpansionProps}
+        />
       </div>
     );
   }
@@ -363,12 +462,16 @@ function ToolEditFileBody({
   highlightPatterns,
   pathRoots,
   defaultExpanded = true,
+  expanded,
+  onExpandedChange,
 }: {
   file: ParsedToolEditFile;
   query: string;
   highlightPatterns: string[];
   pathRoots: string[];
   defaultExpanded?: boolean;
+  expanded?: boolean;
+  onExpandedChange?: (expanded: boolean) => void;
 }) {
   if (file.diff && isLikelyDiff("diff", file.diff)) {
     return (
@@ -380,6 +483,8 @@ function ToolEditFileBody({
         highlightPatterns={highlightPatterns}
         collapsible
         defaultExpanded={defaultExpanded}
+        {...(expanded !== undefined ? { expanded } : {})}
+        {...(onExpandedChange ? { onExpandedChange } : {})}
       />
     );
   }
@@ -399,6 +504,8 @@ function ToolEditFileBody({
         highlightPatterns={highlightPatterns}
         collapsible
         defaultExpanded={defaultExpanded}
+        {...(expanded !== undefined ? { expanded } : {})}
+        {...(onExpandedChange ? { onExpandedChange } : {})}
       />
     );
   }
@@ -421,42 +528,41 @@ function ToolEditFileBody({
 
 function renderToolEditSummary(
   files: ParsedToolEditFile[],
-  pathRoots: string[],
   query: string,
   highlightPatterns: string[],
 ): React.ReactNode {
-  const labels = files.map((file) => ({
-    filePath: file.filePath,
-    label: getToolEditSummaryFileLabel(file.filePath, pathRoots),
-  }));
-  const nodes: React.ReactNode[] = [<span key="prefix">{`${files.length} files changed: `}</span>];
-
-  labels.forEach((entry, index) => {
-    if (index > 0) {
-      nodes.push(
-        <span key={`sep:${entry.filePath}`}>
-          {index === labels.length - 1 ? (labels.length === 2 ? " and " : ", and ") : ", "}
-        </span>,
-      );
-    }
-    nodes.push(
-      <button
-        type="button"
-        className="tool-edit-summary-link"
-        key={`file:${entry.filePath}`}
-        onClick={() => {
-          void openFileInEditor(entry.filePath, undefined, getCodetrailClient());
-        }}
-      >
-        {buildHighlightedTextNodes(entry.label, query, "tool-edit-summary-link", highlightPatterns)}
-      </button>,
-    );
-  });
-
-  return nodes;
+  const summary = formatToolEditFileSummary(files);
+  return buildHighlightedTextNodes(summary, query, "tool-edit-summary", highlightPatterns);
 }
 
-function getToolEditSummaryFileLabel(filePath: string, pathRoots: string[]): string {
-  const trimmed = trimProjectPrefixFromPath(filePath, pathRoots);
-  return getPathBaseName(trimmed) ?? trimmed;
+function useToolEditDiffExpansionHandler(
+  fileKey: string | null,
+  setExpandedDiffs: Dispatch<SetStateAction<Record<string, boolean>>>,
+) {
+  return useCallback(
+    (expanded: boolean) => {
+      if (!fileKey) {
+        return;
+      }
+      setExpandedDiffs((current) => ({ ...current, [fileKey]: expanded }));
+    },
+    [fileKey, setExpandedDiffs],
+  );
+}
+
+function buildToolEditFileKey(file: ParsedToolEditFile, index: number): string {
+  return `${index}:${file.changeType}:${file.filePath}`;
+}
+
+function buildToolEditDiffExpansionState(
+  keys: string[],
+  expanded: boolean,
+): Record<string, boolean> {
+  return Object.fromEntries(keys.map((key) => [key, expanded]));
+}
+
+function buildToolEditCollapsibleDiffKeys(files: ParsedToolEditFile[]): string[] {
+  return files.flatMap((file, index) =>
+    toolEditFileHasCollapsibleDiff(file) ? [buildToolEditFileKey(file, index)] : [],
+  );
 }

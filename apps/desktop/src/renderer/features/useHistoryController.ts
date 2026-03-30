@@ -770,7 +770,7 @@ export function useHistoryController({
     setTreeFocusedRow,
     handleToggleFolder,
     handleToggleAllFolders,
-    handleToggleProjectExpansion,
+    handleToggleProjectExpansion: toggleTreeProjectExpansion,
   } = useProjectPaneTreeState({
     sortedProjects,
     selectedProjectId: uiSelectedProjectId,
@@ -1416,6 +1416,30 @@ export function useHistoryController({
     setTreeFocusedRow,
     focusSessionPane: () => focusHistoryPane("session"),
   });
+
+  const handleToggleProjectExpansion = useCallback(
+    (projectId: string) => {
+      const collapsingSelectedSessionProject =
+        expandedProjectIds.includes(projectId) &&
+        uiHistoryMode === "session" &&
+        uiSelectedProjectId === projectId &&
+        uiSelectedSessionId.length > 0;
+
+      if (collapsingSelectedSessionProject) {
+        selectProjectAllMessages(projectId, { commitMode: "immediate" });
+      }
+
+      toggleTreeProjectExpansion(projectId);
+    },
+    [
+      expandedProjectIds,
+      selectProjectAllMessages,
+      toggleTreeProjectExpansion,
+      uiHistoryMode,
+      uiSelectedProjectId,
+      uiSelectedSessionId,
+    ],
+  );
 
   const pageHistoryMessages = useCallback(
     (direction: "up" | "down", { preserveFocus = false }: { preserveFocus?: boolean } = {}) => {

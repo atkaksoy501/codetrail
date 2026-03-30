@@ -4,14 +4,6 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { openFileInEditorMock } = vi.hoisted(() => ({
-  openFileInEditorMock: vi.fn(async () => ({ ok: true, error: null })),
-}));
-
-vi.mock("../../lib/pathActions", () => ({
-  openFileInEditor: openFileInEditorMock,
-}));
-
 vi.mock("../../lib/codetrailClient", () => ({
   getCodetrailClient: () => ({
     platform: "darwin",
@@ -100,7 +92,7 @@ describe("MessageContent", () => {
     expect(document.body.textContent).toContain("new content");
   });
 
-  it("renders multi-file tool edits as clickable filename summary links", async () => {
+  it("renders multi-file tool edit summaries with collapsible diffs", async () => {
     const user = userEvent.setup();
     document.documentElement.dataset.collapseMultiFileToolDiffs = "true";
 
@@ -126,11 +118,7 @@ describe("MessageContent", () => {
 
     const summary = document.querySelector(".tool-edit-summary");
     expect(summary).not.toBeNull();
-    expect(summary?.textContent).toBe("2 files changed: new.ts and parser.ts");
-    const newFileButton = screen.getByRole("button", { name: "new.ts" });
-    const parserFileButton = screen.getByRole("button", { name: "parser.ts" });
-    expect(newFileButton.className).toContain("tool-edit-summary-link");
-    expect(parserFileButton.className).toContain("tool-edit-summary-link");
+    expect(summary?.textContent).toBe("1 file added, 1 file changed");
     expect(screen.getByRole("button", { name: "Expand diff for new.ts" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Expand diff for parser.ts" })).toBeInTheDocument();
     expect(document.body.textContent).not.toContain("export const created = true;");
@@ -151,13 +139,6 @@ describe("MessageContent", () => {
       expect(screen.getByRole("button", { name: "Expand diff for parser.ts" })).toBeInTheDocument();
       expect(document.body.textContent).not.toContain("const value = next();");
     });
-
-    await user.click(parserFileButton);
-    expect(openFileInEditorMock).toHaveBeenCalledWith(
-      "/workspace/src/parser.ts",
-      undefined,
-      expect.objectContaining({ platform: "darwin" }),
-    );
   });
 
   it("renders single-file tool-edit diffs as collapsible viewers", async () => {

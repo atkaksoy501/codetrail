@@ -1,5 +1,14 @@
 import type { MessageCategory } from "@codetrail/core/browser";
-import { type KeyboardEvent, type MouseEvent, type Ref, memo, useMemo } from "react";
+import {
+  type KeyboardEvent,
+  type MouseEvent,
+  type Ref,
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 
 import { copyTextToClipboard } from "../../lib/clipboard";
 import { usePaneFocus } from "../../lib/paneFocusController";
@@ -7,7 +16,9 @@ import { useShortcutRegistry } from "../../lib/shortcutRegistry";
 import { compactPath, formatDate, prettyCategory } from "../../lib/viewUtils";
 
 import { MessageContent } from "./MessageContent";
-import { parseMessageToolPayload } from "./messageToolPayload";
+import { type ParsedMessageToolPayload, parseMessageToolPayload } from "./messageToolPayload";
+import { useDocumentCollapseMultiFileToolDiffs } from "./textRendering";
+import { formatToolEditFileSummary, toolEditFileHasCollapsibleDiff } from "./toolEditUtils";
 import {
   asNonEmptyString,
   asObject,
@@ -16,7 +27,6 @@ import {
   tryParseJsonRecord,
 } from "./toolParsing";
 import type { SessionMessage } from "./types";
-import { getPathBaseName } from "./viewerDiffModel";
 
 type MessageCardProps = {
   message: SessionMessage;
@@ -58,6 +68,7 @@ function MessageCardComponent({
     () => parseMessageToolPayload(message.category, message.content),
     [message.category, message.content],
   );
+  const collapseMultiFileToolDiffs = useDocumentCollapseMultiFileToolDiffs();
   const typeLabel = useMemo(
     () => formatMessageTypeLabel(message.category, parsedToolPayload),
     [message.category, parsedToolPayload],
@@ -74,8 +85,30 @@ function MessageCardComponent({
       ),
     [message.operationDurationConfidence, message.operationDurationMs],
   );
+  const writeDiffCount = useMemo(
+    () => countCollapsibleWriteDiffs(parsedToolPayload),
+    [parsedToolPayload],
+  );
+  const defaultWriteDiffsExpanded =
+    writeDiffCount > 0 && (writeDiffCount === 1 || !collapseMultiFileToolDiffs);
+  const [allWriteDiffsExpanded, setAllWriteDiffsExpanded] = useState(defaultWriteDiffsExpanded);
+  const [writeDiffExpansionRequest, setWriteDiffExpansionRequest] = useState({
+    expanded: defaultWriteDiffsExpanded,
+    version: 0,
+  });
   const toggleExpanded = () => onToggleExpanded(message.id, message.category);
   const toggleCategoryExpanded = () => onToggleCategoryExpanded?.(message.category);
+  const handleWriteDiffStateChange = useCallback(({ allExpanded }: { allExpanded: boolean }) => {
+    setAllWriteDiffsExpanded(allExpanded);
+  }, []);
+
+  useEffect(() => {
+    setAllWriteDiffsExpanded(defaultWriteDiffsExpanded);
+    setWriteDiffExpansionRequest((current) => ({
+      expanded: defaultWriteDiffsExpanded,
+      version: current.version + 1,
+    }));
+  }, [defaultWriteDiffsExpanded]);
 
   const handleExpansionToggleClick = (event: MouseEvent<HTMLElement>) => {
     if (shortcuts.matches.isCategoryExpansionClick(event) && onToggleCategoryExpanded) {
@@ -107,6 +140,17 @@ function MessageCardComponent({
   const handleCopyBodyButtonClick = (event: MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation();
     void copyTextToClipboard(formatMessageBodyForClipboard(message, parsedToolPayload));
+    paneFocus.focusHistoryPane("message");
+  };
+
+  const handleToggleDiffsButtonClick = (event: MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    const nextExpanded = !allWriteDiffsExpanded;
+    setAllWriteDiffsExpanded(nextExpanded);
+    setWriteDiffExpansionRequest((current) => ({
+      expanded: nextExpanded,
+      version: current.version + 1,
+    }));
     paneFocus.focusHistoryPane("message");
   };
 
@@ -192,6 +236,18 @@ function MessageCardComponent({
           {!isExpanded ? <span className="message-preview">{previewLabel}</span> : null}
         </button>
         <div className="message-header-actions">
+          {writeDiffCount > 0 ? (
+            <button
+              type="button"
+              className="message-action-button"
+              {...preserveMessagePaneFocusProps}
+              onClick={handleToggleDiffsButtonClick}
+              aria-label={allWriteDiffsExpanded ? "Collapse Diffs" : "Expand Diffs"}
+              title={allWriteDiffsExpanded ? "Collapse all diffs" : "Expand all diffs"}
+            >
+              {allWriteDiffsExpanded ? "Collapse Diffs" : "Expand Diffs"}
+            </button>
+          ) : null}
           <button
             type="button"
             className="message-action-button"
@@ -264,12 +320,20 @@ function MessageCardComponent({
               highlightPatterns={highlightPatterns}
               pathRoots={pathRoots}
               parsedToolPayload={parsedToolPayload}
+              {...(writeDiffCount > 0 ? { writeDiffExpansionRequest } : {})}
+              {...(writeDiffCount > 0
+                ? { onWriteDiffStateChange: handleWriteDiffStateChange }
+                : {})}
             />
           </div>
         </div>
       ) : null}
     </article>
   );
+}
+
+function countCollapsibleWriteDiffs(parsedToolPayload: ParsedMessageToolPayload): number {
+  return parsedToolPayload.toolEdit?.files.filter(toolEditFileHasCollapsibleDiff).length ?? 0;
 }
 
 export const MessageCard = memo(MessageCardComponent);
@@ -330,14 +394,7 @@ function formatMessagePreview(
   if (category === "tool_edit") {
     const parsed = parsedToolPayload.toolEdit;
     if (parsed && parsed.files.length > 1) {
-      const previewFiles = parsed.files
-        .slice(0, 3)
-        .map((file) => getPathBaseName(file.filePath) ?? compactPath(file.filePath))
-        .join(", ");
-      const remainingCount = parsed.files.length - 3;
-      return remainingCount > 0
-        ? `Write ${parsed.files.length} files: ${previewFiles}...`
-        : `Write ${parsed.files.length} files: ${previewFiles}`;
+      return `Write ${formatToolEditFileSummary(parsed.files)}`;
     }
     if (parsed?.filePath) {
       return `${prettyCategory(category)} ${compactPath(parsed.filePath)}`;

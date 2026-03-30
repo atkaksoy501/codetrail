@@ -3324,25 +3324,7 @@ button svg *,
   font-family: var(--font-mono);
   font-size: var(--message-mono-font-size);
   line-height: 1.45;
-  white-space: nowrap;
-  overflow-x: auto;
-  overflow-y: hidden;
-  scrollbar-width: thin;
-}
-
-.tool-edit-summary-link {
-  border: none;
-  background: transparent;
-  color: var(--accent-blue);
-  font: inherit;
-  padding: 0;
-  cursor: pointer;
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-
-.tool-edit-summary-link:hover {
-  color: var(--text-primary);
+  white-space: normal;
 }
 
 .md-p {
@@ -3749,6 +3731,12 @@ button svg *,
 
 .diff-context {
   color: var(--diff-context-text);
+}
+
+.diff-table-split:not(.wrap) .diff-split-row {
+  grid-template-columns: 56px max-content 56px max-content;
+  width: max-content;
+  min-width: 100%;
 }
 
 .diff-table-split .diff-code {

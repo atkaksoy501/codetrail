@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 
-import { fireEvent, screen } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { copyTextToClipboard } = vi.hoisted(() => ({
   copyTextToClipboard: vi.fn(async () => true),
@@ -32,6 +32,10 @@ const message: SessionMessage = {
 };
 
 describe("MessageCard", () => {
+  beforeEach(() => {
+    document.documentElement.dataset.collapseMultiFileToolDiffs = "false";
+  });
+
   it("renders expanded message and handles action buttons", async () => {
     const user = userEvent.setup();
     const onToggleExpanded = vi.fn();
@@ -142,7 +146,209 @@ describe("MessageCard", () => {
       />,
     );
 
-    expect(screen.getByText("Write 4 files: new.ts, parser.ts, third.ts...")).toBeInTheDocument();
+    expect(screen.getByText("Write 1 file added, 3 files changed")).toBeInTheDocument();
+  });
+
+  it("toggles all write diffs from the message header action", async () => {
+    const user = userEvent.setup();
+    const onToggleExpanded = vi.fn();
+
+    renderWithPaneFocus(
+      <MessageCard
+        message={{
+          ...message,
+          category: "tool_edit",
+          content: JSON.stringify({
+            name: "apply_patch",
+            input: [
+              "*** Begin Patch",
+              "*** Add File: /Users/tcmudemirhan/project/src/new.ts",
+              "+export const created = true;",
+              "*** Update File: /Users/tcmudemirhan/project/src/parser.ts",
+              "@@",
+              "-const value = old();",
+              "+const value = next();",
+              "*** End Patch",
+            ].join("\n"),
+          }),
+        }}
+        query=""
+        pathRoots={[]}
+        isFocused={false}
+        isExpanded={true}
+        onToggleExpanded={onToggleExpanded}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Collapse Diffs" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Collapse diff for parser.ts" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Collapse Diffs" }));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Expand Diffs" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Expand diff for parser.ts" })).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: "Expand Diffs" }));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Collapse Diffs" })).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "Collapse diff for parser.ts" }),
+      ).toBeInTheDocument();
+      expect(document.body.textContent).toContain("const value = next();");
+    });
+  });
+
+  it("starts multi-file diff cards collapsed when the setting is enabled", () => {
+    const onToggleExpanded = vi.fn();
+    document.documentElement.dataset.collapseMultiFileToolDiffs = "true";
+
+    renderWithPaneFocus(
+      <MessageCard
+        message={{
+          ...message,
+          category: "tool_edit",
+          content: JSON.stringify({
+            name: "apply_patch",
+            input: [
+              "*** Begin Patch",
+              "*** Add File: /Users/tcmudemirhan/project/src/new.ts",
+              "+export const created = true;",
+              "*** Update File: /Users/tcmudemirhan/project/src/parser.ts",
+              "@@",
+              "-const value = old();",
+              "+const value = next();",
+              "*** End Patch",
+            ].join("\n"),
+          }),
+        }}
+        query=""
+        pathRoots={[]}
+        isFocused={false}
+        isExpanded={true}
+        onToggleExpanded={onToggleExpanded}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Expand Diffs" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Expand diff for new.ts" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Expand diff for parser.ts" })).toBeInTheDocument();
+    expect(document.body.textContent).not.toContain("export const created = true;");
+    expect(document.body.textContent).not.toContain("const value = next();");
+  });
+
+  it("shows the header diff toggle for single-file diff messages", () => {
+    const onToggleExpanded = vi.fn();
+
+    renderWithPaneFocus(
+      <MessageCard
+        message={{
+          ...message,
+          category: "tool_edit",
+          content: JSON.stringify({
+            input: {
+              path: "/Users/tcmudemirhan/project/src/file.ts",
+              old_string: "const beforeValue = 1;",
+              new_string: "const afterValue = 2;",
+            },
+          }),
+        }}
+        query=""
+        pathRoots={[]}
+        isFocused={false}
+        isExpanded={true}
+        onToggleExpanded={onToggleExpanded}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Collapse Diffs" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Collapse diff for file.ts" })).toBeInTheDocument();
+  });
+
+  it("does not show the header diff toggle for single-file write-only messages", () => {
+    const onToggleExpanded = vi.fn();
+
+    renderWithPaneFocus(
+      <MessageCard
+        message={{
+          ...message,
+          category: "tool_edit",
+          content: JSON.stringify({
+            input: {
+              path: "/Users/tcmudemirhan/project/src/file.ts",
+              content: "export const value = 1;",
+            },
+          }),
+        }}
+        query=""
+        pathRoots={[]}
+        isFocused={false}
+        isExpanded={true}
+        onToggleExpanded={onToggleExpanded}
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: "Collapse Diffs" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Expand Diffs" })).toBeNull();
+  });
+
+  it("applies the global header toggle after individual diff changes", async () => {
+    const user = userEvent.setup();
+    const onToggleExpanded = vi.fn();
+
+    renderWithPaneFocus(
+      <MessageCard
+        message={{
+          ...message,
+          category: "tool_edit",
+          content: JSON.stringify({
+            name: "apply_patch",
+            input: [
+              "*** Begin Patch",
+              "*** Add File: /Users/tcmudemirhan/project/src/new.ts",
+              "+export const created = true;",
+              "*** Update File: /Users/tcmudemirhan/project/src/parser.ts",
+              "@@",
+              "-const value = old();",
+              "+const value = next();",
+              "*** End Patch",
+            ].join("\n"),
+          }),
+        }}
+        query=""
+        pathRoots={[]}
+        isFocused={false}
+        isExpanded={true}
+        onToggleExpanded={onToggleExpanded}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Collapse diff for parser.ts" }));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Expand diff for parser.ts" })).toBeInTheDocument();
+      expect(document.body.textContent).not.toContain("const value = next();");
+      expect(document.body.textContent).toContain("export const created = true;");
+    });
+
+    await user.click(screen.getByRole("button", { name: "Expand Diffs" }));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Collapse Diffs" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Collapse diff for new.ts" })).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "Collapse diff for parser.ts" }),
+      ).toBeInTheDocument();
+      expect(document.body.textContent).toContain("export const created = true;");
+      expect(document.body.textContent).toContain("const value = next();");
+    });
+
+    await user.click(screen.getByRole("button", { name: "Collapse Diffs" }));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Expand Diffs" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Expand diff for new.ts" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Expand diff for parser.ts" })).toBeInTheDocument();
+      expect(document.body.textContent).not.toContain("export const created = true;");
+      expect(document.body.textContent).not.toContain("const value = next();");
+    });
   });
 
   it("uses Cmd+click to toggle all messages of the same type", async () => {

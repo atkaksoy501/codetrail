@@ -717,8 +717,8 @@ function ensureViewerExternalAppsLoaded(): void {
     .then(async (nextPreferences) => {
       const nextTools = await getCachedAvailableEditors(nextPreferences.externalTools);
       viewerExternalAppsStore.snapshot = {
-        editors: nextTools.editors,
-        diffTools: nextTools.diffTools,
+        editors: Array.isArray(nextTools.editors) ? nextTools.editors : [],
+        diffTools: Array.isArray(nextTools.diffTools) ? nextTools.diffTools : [],
         preferences: nextPreferences,
       };
       emitViewerExternalAppsStore();
@@ -925,14 +925,17 @@ function normalizeBadgeLabel(value: string): string {
   return value.trim().toLowerCase();
 }
 
-function getEnabledAppsForRole(editors: EditorInfo[]): EditorInfo[] {
-  return editors.filter((editor) => editor.detected);
+function getEnabledAppsForRole(editors: EditorInfo[] | null | undefined): EditorInfo[] {
+  return Array.isArray(editors) ? editors.filter((editor) => editor.detected) : [];
 }
 
 function sortAppsByPreferenceOrder(
-  apps: EditorInfo[],
+  apps: EditorInfo[] | null | undefined,
   preferences: ViewerToolPreferences,
 ): EditorInfo[] {
+  if (!Array.isArray(apps)) {
+    return [];
+  }
   if (preferences.orderedToolIds.length === 0) {
     return apps;
   }
@@ -981,6 +984,8 @@ function ContentViewer({
   startLine,
   collapsible = false,
   defaultExpanded = true,
+  expanded,
+  onExpandedChange,
 }: {
   kind: ViewerKind;
   language: string;
@@ -993,6 +998,8 @@ function ContentViewer({
   startLine?: number;
   collapsible?: boolean;
   defaultExpanded?: boolean;
+  expanded?: boolean;
+  onExpandedChange?: (expanded: boolean) => void;
 }) {
   const { editors, diffTools, preferences } = useViewerExternalApps();
   const tokenColorResolver = useTokenColorResolver();
@@ -1015,9 +1022,19 @@ function ContentViewer({
   const [visibleCount, setVisibleCount] = useState(
     isLarge ? Math.min(totalLines, INITIAL_EXPANDED_LINES) : totalLines,
   );
-  const [isExpanded, setIsExpanded] = useState(defaultExpanded);
+  const [uncontrolledExpanded, setUncontrolledExpanded] = useState(defaultExpanded);
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const [scrollTop, setScrollTop] = useState(0);
+  const isExpanded = expanded ?? uncontrolledExpanded;
+
+  const setExpandedState = (nextExpanded: boolean | ((current: boolean) => boolean)) => {
+    const resolvedExpanded =
+      typeof nextExpanded === "function" ? nextExpanded(isExpanded) : nextExpanded;
+    if (expanded === undefined) {
+      setUncontrolledExpanded(resolvedExpanded);
+    }
+    onExpandedChange?.(resolvedExpanded);
+  };
 
   useEffect(() => {
     setWrap(defaultViewerWrapMode === "wrap");
@@ -1099,6 +1116,9 @@ function ContentViewer({
   const isCollapsibleDiff = kind === "diff" && collapsible;
   const diffToggleLabelTarget = getPathBaseName(displayedMetaPath) ?? "diff";
   const diffToggleLabel = `${isExpanded ? "Collapse" : "Expand"} diff for ${diffToggleLabelTarget}`;
+  const handleDiffToggle = () => {
+    setExpandedState((value) => !value);
+  };
 
   const buildDiffPayload = () => {
     if (!diffModel) {
@@ -1246,9 +1266,7 @@ function ContentViewer({
               aria-expanded={isExpanded}
               aria-label={diffToggleLabel}
               title={diffToggleLabel}
-              onClick={() => {
-                setIsExpanded((value) => !value);
-              }}
+              onClick={handleDiffToggle}
             >
               <svg
                 className="content-viewer-toggle-icon"
@@ -2883,6 +2901,8 @@ export function DiffBlock({
   highlightPatterns = [],
   collapsible = false,
   defaultExpanded = true,
+  expanded,
+  onExpandedChange,
 }: {
   codeValue: string;
   filePath?: string | null;
@@ -2891,6 +2911,8 @@ export function DiffBlock({
   highlightPatterns?: string[];
   collapsible?: boolean;
   defaultExpanded?: boolean;
+  expanded?: boolean;
+  onExpandedChange?: (expanded: boolean) => void;
 }) {
   return (
     <ContentViewer
@@ -2904,6 +2926,8 @@ export function DiffBlock({
       highlightPatterns={highlightPatterns}
       collapsible={collapsible}
       defaultExpanded={defaultExpanded}
+      {...(expanded !== undefined ? { expanded } : {})}
+      {...(onExpandedChange ? { onExpandedChange } : {})}
     />
   );
 }

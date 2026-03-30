@@ -2509,6 +2509,158 @@ describe("App shell", () => {
     expect(screen.queryByRole("button", { name: /Switch to All Sessions/i })).toBeNull();
   });
 
+  it("switches to the project's all-sessions view when collapsing the selected session's project in the tree", async () => {
+    installScrollIntoViewMock();
+    const user = userEvent.setup();
+    const client = createAppClient();
+
+    renderWithClient(
+      <App
+        initialPaneState={
+          {
+            projectViewMode: "tree",
+            hideSessionsPaneInTreeView: true,
+            selectedProjectId: "project_1",
+            selectedSessionId: "session_1",
+            historyMode: "session",
+          } as PaneStateSnapshot
+        }
+      />,
+      client,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("2 of 2 messages")).toBeInTheDocument();
+    });
+
+    fireEvent.doubleClick(screen.getByRole("button", { name: /Project One/i }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: /Investigate markdown rendering/i }),
+      ).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Collapse project sessions" })).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: /Investigate markdown rendering/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText("2 of 2 messages")).toBeInTheDocument();
+    });
+
+    const projectDetailCallsBeforeCollapse = client.invoke.mock.calls.filter(
+      ([channel, payload]) =>
+        channel === "projects:getCombinedDetail" &&
+        (payload as { projectId?: string }).projectId === "project_1",
+    ).length;
+
+    await user.click(screen.getByRole("button", { name: "Collapse project sessions" }));
+
+    await waitFor(() => {
+      const projectDetailCallsAfterCollapse = client.invoke.mock.calls.filter(
+        ([channel, payload]) =>
+          channel === "projects:getCombinedDetail" &&
+          (payload as { projectId?: string }).projectId === "project_1",
+      ).length;
+      expect(projectDetailCallsAfterCollapse).toBeGreaterThan(projectDetailCallsBeforeCollapse);
+      expect(
+        screen.getByRole("button", {
+          name: "Newest first (all sessions). Switch to oldest first",
+        }),
+      ).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /Switch to All Sessions/i })).toBeNull();
+    });
+
+    expect(screen.queryByRole("button", { name: /Investigate markdown rendering/i })).toBeNull();
+  });
+
+  it("keeps the selected session view when collapsing a different project in the tree", async () => {
+    installScrollIntoViewMock();
+    const user = userEvent.setup();
+    const client = createAppClient({
+      "projects:list": () => ({
+        projects: [
+          {
+            id: "project_1",
+            provider: "claude",
+            name: "Project One",
+            path: "/workspace/project-one",
+            sessionCount: 2,
+            messageCount: 4,
+            lastActivity: "2026-03-01T10:00:05.000Z",
+          },
+          {
+            id: "project_2",
+            provider: "codex",
+            name: "Project Two",
+            path: "/workspace/project-two",
+            sessionCount: 1,
+            messageCount: 1,
+            lastActivity: "2026-03-01T10:00:06.000Z",
+          },
+        ],
+      }),
+    });
+
+    renderWithClient(
+      <App
+        initialPaneState={
+          {
+            projectViewMode: "tree",
+            hideSessionsPaneInTreeView: true,
+            selectedProjectId: "project_1",
+            selectedSessionId: "session_1",
+            historyMode: "session",
+          } as PaneStateSnapshot
+        }
+      />,
+      client,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("2 of 2 messages")).toBeInTheDocument();
+      expect(document.querySelector('[data-project-expand-toggle-for="project_2"]')).not.toBeNull();
+    });
+
+    const projectOneDetailCallsBefore = client.invoke.mock.calls.filter(
+      ([channel, payload]) =>
+        channel === "projects:getCombinedDetail" &&
+        (payload as { projectId?: string }).projectId === "project_1",
+    ).length;
+
+    const projectTwoToggle = document.querySelector<HTMLButtonElement>(
+      '[data-project-expand-toggle-for="project_2"]',
+    );
+    expect(projectTwoToggle).not.toBeNull();
+    if (!projectTwoToggle) {
+      throw new Error("Expected project-two expand toggle");
+    }
+
+    await user.click(projectTwoToggle);
+    await waitFor(() => {
+      expect(projectTwoToggle.getAttribute("aria-label")).toBe("Collapse project sessions");
+    });
+
+    await user.click(projectTwoToggle);
+    await waitFor(() => {
+      expect(projectTwoToggle.getAttribute("aria-label")).toBe("Expand project sessions");
+      expect(screen.getByText("2 of 2 messages")).toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", {
+          name: "Newest first (all sessions). Switch to oldest first",
+        }),
+      ).toBeNull();
+    });
+
+    const projectOneDetailCallsAfter = client.invoke.mock.calls.filter(
+      ([channel, payload]) =>
+        channel === "projects:getCombinedDetail" &&
+        (payload as { projectId?: string }).projectId === "project_1",
+    ).length;
+
+    expect(projectOneDetailCallsAfter).toBe(projectOneDetailCallsBefore);
+  });
+
   it("does not start resizing the Sessions pane while it is collapsed", async () => {
     installScrollIntoViewMock();
     const client = createAppClient();
