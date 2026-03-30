@@ -96,6 +96,7 @@ export function usePaneStateSync(args: {
   setAutoHideViewerHeaderActions: Dispatch<SetStateAction<boolean>>;
   setDefaultViewerWrapMode: Dispatch<SetStateAction<"nowrap" | "wrap">>;
   setDefaultDiffViewMode: Dispatch<SetStateAction<"unified" | "split">>;
+  setCollapseMultiFileToolDiffs: Dispatch<SetStateAction<boolean>>;
   setPreferredExternalEditor: Dispatch<SetStateAction<ExternalEditorId>>;
   setPreferredExternalDiffTool: Dispatch<SetStateAction<ExternalEditorId>>;
   setTerminalAppCommand: Dispatch<SetStateAction<string>>;
@@ -151,6 +152,7 @@ export function usePaneStateSync(args: {
     setAutoHideViewerHeaderActions,
     setDefaultViewerWrapMode,
     setDefaultDiffViewMode,
+    setCollapseMultiFileToolDiffs,
     setPreferredExternalEditor,
     setPreferredExternalDiffTool,
     setTerminalAppCommand,
@@ -261,6 +263,7 @@ export function usePaneStateSync(args: {
         hydrateIfPresent(paneResponse.autoHideViewerHeaderActions, setAutoHideViewerHeaderActions);
         hydrateIfPresent(paneResponse.defaultViewerWrapMode, setDefaultViewerWrapMode);
         hydrateIfPresent(paneResponse.defaultDiffViewMode, setDefaultDiffViewMode);
+        hydrateIfPresent(paneResponse.collapseMultiFileToolDiffs, setCollapseMultiFileToolDiffs);
         hydrateIfPresent(paneResponse.preferredExternalEditor, setPreferredExternalEditor);
         hydrateIfPresent(paneResponse.preferredExternalDiffTool, setPreferredExternalDiffTool);
         hydrateIfPresent(paneResponse.terminalAppCommand, setTerminalAppCommand);
@@ -376,6 +379,7 @@ export function usePaneStateSync(args: {
     setAutoHideViewerHeaderActions,
     setDefaultViewerWrapMode,
     setDefaultDiffViewMode,
+    setCollapseMultiFileToolDiffs,
     setPreferredExternalEditor,
     setPreferredExternalDiffTool,
     setTerminalAppCommand,
@@ -413,6 +417,7 @@ export function usePaneStateSync(args: {
       autoHideViewerHeaderActions: paneState.autoHideViewerHeaderActions,
       defaultViewerWrapMode: paneState.defaultViewerWrapMode,
       defaultDiffViewMode: paneState.defaultDiffViewMode,
+      collapseMultiFileToolDiffs: paneState.collapseMultiFileToolDiffs,
       preferredExternalEditor: paneState.preferredExternalEditor,
       preferredExternalDiffTool: paneState.preferredExternalDiffTool,
       terminalAppCommand: paneState.terminalAppCommand,

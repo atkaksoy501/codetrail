@@ -1,5 +1,8 @@
 import type { MessageCategory } from "@codetrail/core/browser";
+import { useState } from "react";
 
+import { getCodetrailClient } from "../../lib/codetrailClient";
+import { openFileInEditor } from "../../lib/pathActions";
 import type { ParsedMessageToolPayload } from "./messageToolPayload";
 import { parseMessageToolPayload } from "./messageToolPayload";
 import {
@@ -13,14 +16,18 @@ import {
   renderPlainText,
   renderRichText,
   tryFormatJson,
+  useDocumentCollapseMultiFileToolDiffs,
 } from "./textRendering";
 import {
+  type ParsedToolEditFile,
   asNonEmptyString,
   asObject,
   asString,
   buildUnifiedDiffFromTextPair,
   tryParseJsonRecord,
 } from "./toolParsing";
+import { trimProjectPrefixFromPath } from "./viewerDiffModel";
+import { getPathBaseName } from "./viewerDiffModel";
 
 export function MessageContent({
   text,
@@ -258,12 +265,33 @@ function ToolEditContent({
   parsedToolPayload: ParsedMessageToolPayload;
 }) {
   const parsed = parsedToolPayload.toolEdit;
+  const collapseMultiFileToolDiffs = useDocumentCollapseMultiFileToolDiffs();
   if (!parsed) {
     const formatted = tryFormatJson(text);
     return (
       <pre className="tool-block tool-edit-block">
         {buildHighlightedTextNodes(formatted, query, "tool-edit", highlightPatterns)}
       </pre>
+    );
+  }
+
+  if (parsed.files.length > 1) {
+    return (
+      <div className="tool-edit-view">
+        <div className="tool-edit-summary">
+          {renderToolEditSummary(parsed.files, pathRoots, query, highlightPatterns)}
+        </div>
+        {parsed.files.map((file) => (
+          <ToolEditFileBody
+            key={`${file.changeType}:${file.filePath}:${collapseMultiFileToolDiffs ? "collapsed" : "expanded"}`}
+            file={file}
+            query={query}
+            highlightPatterns={highlightPatterns}
+            pathRoots={pathRoots}
+            defaultExpanded={!collapseMultiFileToolDiffs}
+          />
+        ))}
+      </div>
     );
   }
 
@@ -276,6 +304,7 @@ function ToolEditContent({
           pathRoots={pathRoots}
           query={query}
           highlightPatterns={highlightPatterns}
+          collapsible
         />
       </div>
     );
@@ -295,6 +324,7 @@ function ToolEditContent({
           pathRoots={pathRoots}
           query={query}
           highlightPatterns={highlightPatterns}
+          collapsible
         />
       </div>
     );
@@ -325,4 +355,108 @@ function ToolEditContent({
       {buildHighlightedTextNodes(formatted, query, "tool-edit", highlightPatterns)}
     </pre>
   );
+}
+
+function ToolEditFileBody({
+  file,
+  query,
+  highlightPatterns,
+  pathRoots,
+  defaultExpanded = true,
+}: {
+  file: ParsedToolEditFile;
+  query: string;
+  highlightPatterns: string[];
+  pathRoots: string[];
+  defaultExpanded?: boolean;
+}) {
+  if (file.diff && isLikelyDiff("diff", file.diff)) {
+    return (
+      <DiffBlock
+        codeValue={file.diff}
+        filePath={file.filePath}
+        pathRoots={pathRoots}
+        query={query}
+        highlightPatterns={highlightPatterns}
+        collapsible
+        defaultExpanded={defaultExpanded}
+      />
+    );
+  }
+
+  if (file.oldText !== null && file.newText !== null) {
+    const diff = buildUnifiedDiffFromTextPair({
+      oldText: file.oldText,
+      newText: file.newText,
+      filePath: file.filePath,
+    });
+    return (
+      <DiffBlock
+        codeValue={diff}
+        filePath={file.filePath}
+        pathRoots={pathRoots}
+        query={query}
+        highlightPatterns={highlightPatterns}
+        collapsible
+        defaultExpanded={defaultExpanded}
+      />
+    );
+  }
+
+  if (file.newText !== null) {
+    return (
+      <CodeBlock
+        language={detectLanguageFromFilePath(file.filePath)}
+        codeValue={file.newText}
+        filePath={file.filePath}
+        pathRoots={pathRoots}
+        query={query}
+        highlightPatterns={highlightPatterns}
+      />
+    );
+  }
+
+  return null;
+}
+
+function renderToolEditSummary(
+  files: ParsedToolEditFile[],
+  pathRoots: string[],
+  query: string,
+  highlightPatterns: string[],
+): React.ReactNode {
+  const labels = files.map((file) => ({
+    filePath: file.filePath,
+    label: getToolEditSummaryFileLabel(file.filePath, pathRoots),
+  }));
+  const nodes: React.ReactNode[] = [<span key="prefix">{`${files.length} files changed: `}</span>];
+
+  labels.forEach((entry, index) => {
+    if (index > 0) {
+      nodes.push(
+        <span key={`sep:${entry.filePath}`}>
+          {index === labels.length - 1 ? (labels.length === 2 ? " and " : ", and ") : ", "}
+        </span>,
+      );
+    }
+    nodes.push(
+      <button
+        type="button"
+        className="tool-edit-summary-link"
+        key={`file:${entry.filePath}`}
+        onClick={() => {
+          void openFileInEditor(entry.filePath, undefined, getCodetrailClient());
+        }}
+      >
+        {buildHighlightedTextNodes(entry.label, query, "tool-edit-summary-link", highlightPatterns)}
+      </button>,
+    );
+  });
+
+  return nodes;
+}
+
+function getToolEditSummaryFileLabel(filePath: string, pathRoots: string[]): string {
+  const trimmed = trimProjectPrefixFromPath(filePath, pathRoots);
+  return getPathBaseName(trimmed) ?? trimmed;
 }

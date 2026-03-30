@@ -107,6 +107,7 @@ function Harness({ logError }: { logError: (context: string, error: unknown) => 
   const [autoHideViewerHeaderActions, setAutoHideViewerHeaderActions] = useState(false);
   const [defaultViewerWrapMode, setDefaultViewerWrapMode] = useState<"nowrap" | "wrap">("nowrap");
   const [defaultDiffViewMode, setDefaultDiffViewMode] = useState<"unified" | "split">("unified");
+  const [collapseMultiFileToolDiffs, setCollapseMultiFileToolDiffs] = useState(true);
   const [preferredExternalEditor, setPreferredExternalEditor] = useState<ExternalEditorId>(
     createKnownToolId("vscode"),
   );
@@ -180,6 +181,7 @@ function Harness({ logError }: { logError: (context: string, error: unknown) => 
       autoHideViewerHeaderActions,
       defaultViewerWrapMode,
       defaultDiffViewMode,
+      collapseMultiFileToolDiffs,
       preferredExternalEditor,
       preferredExternalDiffTool,
       terminalAppCommand,
@@ -228,6 +230,7 @@ function Harness({ logError }: { logError: (context: string, error: unknown) => 
     setAutoHideViewerHeaderActions,
     setDefaultViewerWrapMode,
     setDefaultDiffViewMode,
+    setCollapseMultiFileToolDiffs,
     setPreferredExternalEditor,
     setPreferredExternalDiffTool,
     setTerminalAppCommand,
@@ -310,6 +313,7 @@ describe("usePaneStateSync", () => {
             autoHideViewerHeaderActions: true,
             defaultViewerWrapMode: "wrap",
             defaultDiffViewMode: "split",
+            collapseMultiFileToolDiffs: false,
             preferredExternalEditor: createKnownToolId("zed"),
             preferredExternalDiffTool: createKnownToolId("cursor"),
             terminalAppCommand: "/Applications/iTerm.app",
@@ -377,6 +381,7 @@ describe("usePaneStateSync", () => {
         autoHideViewerHeaderActions: true,
         defaultViewerWrapMode: "wrap",
         defaultDiffViewMode: "split",
+        collapseMultiFileToolDiffs: false,
         terminalAppCommand: "/Applications/iTerm.app",
         externalTools: hydratedTools,
         systemMessageRegexRules: {
@@ -459,6 +464,7 @@ describe("usePaneStateSync", () => {
             autoHideViewerHeaderActions: null,
             defaultViewerWrapMode: null,
             defaultDiffViewMode: null,
+            collapseMultiFileToolDiffs: null,
             preferredExternalEditor: null,
             preferredExternalDiffTool: null,
             terminalAppCommand: null,

@@ -1,5 +1,21 @@
 import { isLikelyEditOperation } from "@codetrail/core/tooling/editOperations";
 
+export type ParsedToolEditFile = {
+  filePath: string;
+  changeType: "add" | "update" | "delete";
+  oldText: string | null;
+  newText: string | null;
+  diff: string | null;
+};
+
+export type ParsedToolEditPayload = {
+  filePath: string | null;
+  oldText: string | null;
+  newText: string | null;
+  diff: string | null;
+  files: ParsedToolEditFile[];
+};
+
 export function parseToolInvocationPayload(text: string): {
   record: Record<string, unknown>;
   name: string | null;
@@ -63,12 +79,7 @@ function prettyToolName(name: string): string {
     .replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
-export function parseToolEditPayload(text: string): {
-  filePath: string | null;
-  oldText: string | null;
-  newText: string | null;
-  diff: string | null;
-} | null {
+export function parseToolEditPayload(text: string): ParsedToolEditPayload | null {
   const parsed = tryParseJsonRecord(text);
   if (!parsed) {
     return null;
@@ -111,14 +122,22 @@ export function parseToolEditPayload(text: string): {
     asNonEmptyString(payload.input) ??
     asNonEmptyString(parsed.arguments) ??
     null;
-  const normalizedDiff =
-    diff ??
-    (looksLikeApplyPatchPayload(parsed, payload)
-      ? convertApplyPatchToUnifiedDiff(applyPatchInput)
-      : null);
-  const normalizedFilePath = filePath ?? extractApplyPatchFirstPath(applyPatchInput);
+  const applyPatchFiles = looksLikeApplyPatchPayload(parsed, payload)
+    ? parseApplyPatchFiles(applyPatchInput)
+    : [];
+  const normalizedDiff = diff ?? buildApplyPatchDiff(applyPatchFiles);
+  const normalizedFilePath = filePath ?? applyPatchFiles[0]?.filePath ?? null;
+  const files =
+    applyPatchFiles.length > 0
+      ? applyPatchFiles
+      : buildSingleToolEditFiles({
+          filePath: normalizedFilePath,
+          oldText,
+          newText,
+          diff: normalizedDiff,
+        });
 
-  return { filePath: normalizedFilePath, oldText, newText, diff: normalizedDiff };
+  return { filePath: normalizedFilePath, oldText, newText, diff: normalizedDiff, files };
 }
 
 export function buildUnifiedDiffFromTextPair(args: {
@@ -354,57 +373,104 @@ function looksLikeApplyPatchPayload(
   );
 }
 
-function extractApplyPatchFirstPath(patchText: string | null): string | null {
-  if (!patchText) {
-    return null;
+function buildSingleToolEditFiles(args: {
+  filePath: string | null;
+  oldText: string | null;
+  newText: string | null;
+  diff: string | null;
+}): ParsedToolEditFile[] {
+  if (!args.filePath) {
+    return [];
   }
-  for (const line of patchText.split(/\r?\n/)) {
-    if (line.startsWith("*** Update File: ")) {
-      return line.slice("*** Update File: ".length).trim() || null;
-    }
-    if (line.startsWith("*** Add File: ")) {
-      return line.slice("*** Add File: ".length).trim() || null;
-    }
-    if (line.startsWith("*** Delete File: ")) {
-      return line.slice("*** Delete File: ".length).trim() || null;
-    }
-  }
-  return null;
+  const changeType: ParsedToolEditFile["changeType"] =
+    args.oldText === null && args.newText !== null
+      ? "add"
+      : args.oldText !== null && args.newText === null
+        ? "delete"
+        : "update";
+  return [
+    {
+      filePath: args.filePath,
+      changeType,
+      oldText: args.oldText,
+      newText: args.newText,
+      diff: args.diff,
+    },
+  ];
 }
 
-function convertApplyPatchToUnifiedDiff(patchText: string | null): string | null {
+function buildApplyPatchDiff(files: ParsedToolEditFile[]): string | null {
+  const diffs = files
+    .map((file) => file.diff)
+    .filter((diff): diff is string => typeof diff === "string" && diff.length > 0);
+  return diffs.length > 0 ? diffs.join("\n") : null;
+}
+
+function parseApplyPatchFiles(patchText: string | null): ParsedToolEditFile[] {
   if (!patchText) {
-    return null;
+    return [];
   }
 
-  const lines = patchText.split(/\r?\n/);
-  const output: string[] = [];
-  let headerDiffIndex = -1;
-  let headerNewIndex = -1;
-  let oldPath = "";
-  let newPath = "";
-  let hasDiffRows = false;
-
-  const startFile = (mode: "update" | "add" | "delete", path: string) => {
-    const normalized = path.trim();
-    if (!normalized) {
-      return;
-    }
-
-    oldPath = mode === "add" ? "/dev/null" : `a/${normalized}`;
-    newPath = mode === "delete" ? "/dev/null" : `b/${normalized}`;
-    headerDiffIndex = output.length;
-    output.push(`diff --git ${oldPath} ${newPath}`);
-    output.push(`--- ${oldPath}`);
-    headerNewIndex = output.length;
-    output.push(`+++ ${newPath}`);
+  type ApplyPatchFileAccumulator = {
+    filePath: string;
+    changeType: ParsedToolEditFile["changeType"];
+    oldPath: string;
+    newPath: string;
+    lines: string[];
+    hasDiffRows: boolean;
   };
 
-  for (const line of lines) {
+  const files: ParsedToolEditFile[] = [];
+  let current: ApplyPatchFileAccumulator | null = null;
+
+  const moveCurrentFile = (file: ApplyPatchFileAccumulator, destination: string) => {
+    file.filePath = destination;
+    file.newPath = `b/${destination}`;
+    file.lines[0] = `diff --git ${file.oldPath} ${file.newPath}`;
+    file.lines[2] = `+++ ${file.newPath}`;
+  };
+
+  const appendDiffLine = (file: ApplyPatchFileAccumulator, diffLine: string) => {
+    file.lines.push(diffLine);
+    file.hasDiffRows = true;
+  };
+
+  const finishCurrent = () => {
+    if (!current) {
+      return;
+    }
+    files.push({
+      filePath: current.filePath,
+      changeType: current.changeType,
+      oldText: null,
+      newText: null,
+      diff: current.hasDiffRows ? current.lines.join("\n") : null,
+    });
+    current = null;
+  };
+
+  const startFile = (changeType: ParsedToolEditFile["changeType"], rawPath: string) => {
+    finishCurrent();
+    const filePath = rawPath.trim();
+    if (!filePath) {
+      return;
+    }
+    const oldPath = changeType === "add" ? "/dev/null" : `a/${filePath}`;
+    const newPath = changeType === "delete" ? "/dev/null" : `b/${filePath}`;
+    current = {
+      filePath,
+      changeType,
+      oldPath,
+      newPath,
+      lines: [`diff --git ${oldPath} ${newPath}`, `--- ${oldPath}`, `+++ ${newPath}`],
+      hasDiffRows: false,
+    };
+  };
+
+  for (const line of patchText.split(/\r?\n/)) {
     if (line === "*** Begin Patch" || line === "*** End Patch" || line === "*** End of File") {
       continue;
     }
-
     if (line.startsWith("*** Update File: ")) {
       startFile("update", line.slice("*** Update File: ".length));
       continue;
@@ -419,29 +485,23 @@ function convertApplyPatchToUnifiedDiff(patchText: string | null): string | null
     }
     if (line.startsWith("*** Move to: ")) {
       const destination = line.slice("*** Move to: ".length).trim();
-      if (!destination) {
+      if (!current || !destination) {
         continue;
       }
-      newPath = `b/${destination}`;
-      if (headerDiffIndex >= 0) {
-        output[headerDiffIndex] = `diff --git ${oldPath} ${newPath}`;
-      }
-      if (headerNewIndex >= 0) {
-        output[headerNewIndex] = `+++ ${newPath}`;
-      }
+      moveCurrentFile(current, destination);
       continue;
     }
-
     if (
-      line.startsWith("@@") ||
-      line.startsWith("+") ||
-      line.startsWith("-") ||
-      line.startsWith(" ")
+      current &&
+      (line.startsWith("@@") ||
+        line.startsWith("+") ||
+        line.startsWith("-") ||
+        line.startsWith(" "))
     ) {
-      output.push(line);
-      hasDiffRows = true;
+      appendDiffLine(current, line);
     }
   }
 
-  return hasDiffRows && output.length > 0 ? output.join("\n") : null;
+  finishCurrent();
+  return files;
 }

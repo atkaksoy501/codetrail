@@ -78,6 +78,7 @@ describe("AppStateStore", () => {
       autoHideViewerHeaderActions: true,
       defaultViewerWrapMode: "wrap",
       defaultDiffViewMode: "split",
+      collapseMultiFileToolDiffs: false,
       preferredExternalEditor: createKnownToolId("zed"),
       preferredExternalDiffTool: createKnownToolId("vscode"),
       terminalAppCommand: "/Applications/iTerm.app",
@@ -132,6 +133,7 @@ describe("AppStateStore", () => {
       autoHideViewerHeaderActions: true,
       defaultViewerWrapMode: "wrap",
       defaultDiffViewMode: "split",
+      collapseMultiFileToolDiffs: false,
       preferredExternalEditor: createKnownToolId("zed"),
       preferredExternalDiffTool: createKnownToolId("vscode"),
       terminalAppCommand: "/Applications/iTerm.app",
@@ -208,6 +210,7 @@ describe("AppStateStore", () => {
       messagePageSize: 50,
       defaultViewerWrapMode: "nowrap",
       defaultDiffViewMode: "unified",
+      collapseMultiFileToolDiffs: false,
       externalTools: createDefaultExternalTools(),
     });
   });
@@ -232,6 +235,7 @@ describe("AppStateStore", () => {
       messagePageSize: 50,
       defaultViewerWrapMode: "nowrap",
       defaultDiffViewMode: "unified",
+      collapseMultiFileToolDiffs: false,
       externalTools: createDefaultExternalTools(),
     });
     expect(fakeTimer.timer.setTimeout).not.toHaveBeenCalled();
@@ -262,6 +266,7 @@ describe("AppStateStore", () => {
       messagePageSize: 50,
       defaultViewerWrapMode: "nowrap",
       defaultDiffViewMode: "unified",
+      collapseMultiFileToolDiffs: false,
       externalTools: createDefaultExternalTools(),
     });
     expect(JSON.parse(fs.files.get(filePath) ?? "{}")).toEqual({
@@ -274,6 +279,7 @@ describe("AppStateStore", () => {
         messagePageSize: 50,
         defaultViewerWrapMode: "nowrap",
         defaultDiffViewMode: "unified",
+        collapseMultiFileToolDiffs: false,
         externalTools: createDefaultExternalTools(),
       },
     });
@@ -340,6 +346,7 @@ describe("AppStateStore", () => {
       messagePageSize: 50,
       defaultViewerWrapMode: "nowrap",
       defaultDiffViewMode: "unified",
+      collapseMultiFileToolDiffs: false,
       projectProviders: ["claude"],
       historyCategories: ["assistant"],
       externalTools: createDefaultExternalTools(),
@@ -375,6 +382,7 @@ describe("AppStateStore", () => {
       messagePageSize: 50,
       defaultViewerWrapMode: "nowrap",
       defaultDiffViewMode: "unified",
+      collapseMultiFileToolDiffs: false,
       projectProviders: ["claude", "cursor"],
       searchProviders: ["cursor", "claude"],
       externalTools: createDefaultExternalTools(),
@@ -409,6 +417,7 @@ describe("AppStateStore", () => {
       messagePageSize: 50,
       defaultViewerWrapMode: "nowrap",
       defaultDiffViewMode: "unified",
+      collapseMultiFileToolDiffs: false,
       externalTools: createDefaultExternalTools(),
     });
     expect(reloaded.getWindowState()).toEqual({
@@ -443,6 +452,7 @@ describe("AppStateStore", () => {
       messagePageSize: 50,
       defaultViewerWrapMode: "nowrap",
       defaultDiffViewMode: "unified",
+      collapseMultiFileToolDiffs: false,
       externalTools: createDefaultExternalTools(),
     });
     expect(store.getPaneState()?.preferredExternalEditor ?? null).toBeNull();

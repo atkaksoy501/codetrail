@@ -49,6 +49,15 @@ describe("toolParsing", () => {
       oldText: "const a = 1;",
       newText: "const a = 2;",
       diff: null,
+      files: [
+        {
+          filePath: "src/app.ts",
+          changeType: "update",
+          oldText: "const a = 1;",
+          newText: "const a = 2;",
+          diff: null,
+        },
+      ],
     });
   });
 
@@ -73,6 +82,83 @@ describe("toolParsing", () => {
     expect(payload?.diff).toContain("diff --git a/src/parser.ts b/src/parser.ts");
     expect(payload?.diff).toContain("-const value = old();");
     expect(payload?.diff).toContain("+const value = next();");
+    expect(payload?.files).toEqual([
+      {
+        filePath: "src/parser.ts",
+        changeType: "update",
+        oldText: null,
+        newText: null,
+        diff: expect.stringContaining("diff --git a/src/parser.ts b/src/parser.ts"),
+      },
+    ]);
+  });
+
+  it("parses multi-file apply_patch payloads into per-file entries", () => {
+    const patch = [
+      "*** Begin Patch",
+      "*** Add File: src/new.ts",
+      "+export const created = true;",
+      "*** Update File: src/parser.ts",
+      "@@",
+      "-const value = old();",
+      "+const value = next();",
+      "*** End Patch",
+    ].join("\n");
+
+    const payload = parseToolEditPayload(
+      JSON.stringify({
+        name: "apply_patch",
+        input: patch,
+      }),
+    );
+
+    expect(payload?.filePath).toBe("src/new.ts");
+    expect(payload?.files).toHaveLength(2);
+    expect(payload?.files[0]).toMatchObject({
+      filePath: "src/new.ts",
+      changeType: "add",
+    });
+    expect(payload?.files[1]).toMatchObject({
+      filePath: "src/parser.ts",
+      changeType: "update",
+    });
+    expect(payload?.diff).toContain("diff --git /dev/null b/src/new.ts");
+    expect(payload?.diff).toContain("diff --git a/src/parser.ts b/src/parser.ts");
+  });
+
+  it("parses delete and move apply_patch entries into per-file diffs", () => {
+    const patch = [
+      "*** Begin Patch",
+      "*** Delete File: src/obsolete.ts",
+      "@@",
+      "-export const obsolete = true;",
+      "*** Update File: src/old-name.ts",
+      "*** Move to: src/new-name.ts",
+      "@@",
+      "-export const before = oldName();",
+      "+export const after = newName();",
+      "*** End Patch",
+    ].join("\n");
+
+    const payload = parseToolEditPayload(
+      JSON.stringify({
+        name: "apply_patch",
+        input: patch,
+      }),
+    );
+
+    expect(payload?.files).toHaveLength(2);
+    expect(payload?.files[0]).toMatchObject({
+      filePath: "src/obsolete.ts",
+      changeType: "delete",
+    });
+    expect(payload?.files[0]?.diff).toContain("diff --git a/src/obsolete.ts /dev/null");
+    expect(payload?.files[1]).toMatchObject({
+      filePath: "src/new-name.ts",
+      changeType: "update",
+    });
+    expect(payload?.files[1]?.diff).toContain("diff --git a/src/old-name.ts b/src/new-name.ts");
+    expect(payload?.files[1]?.diff).toContain("+++ b/src/new-name.ts");
   });
 
   it("builds unified diff hunks from text pairs", () => {

@@ -341,6 +341,7 @@ const channelExamples: Record<IpcChannel, ChannelExample> = {
       autoHideViewerHeaderActions: false,
       defaultViewerWrapMode: "nowrap",
       defaultDiffViewMode: "unified",
+      collapseMultiFileToolDiffs: true,
       preferredExternalEditor: "tool:vscode",
       preferredExternalDiffTool: "tool:cursor",
       terminalAppCommand: "/Applications/iTerm.app",

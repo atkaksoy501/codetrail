@@ -63,6 +63,7 @@ import {
 import {
   buildDiffRenderSource,
   buildDiffViewModel,
+  getPathBaseName,
   trimProjectPrefixFromPath,
 } from "./viewerDiffModel";
 
@@ -216,11 +217,17 @@ const viewerExternalAppsStore = {
   unsubscribePaneState: null as (() => void) | null,
 };
 
-const themeVariantStore = {
+const themeStore = {
   current: getCurrentThemeVariant(),
   shikiTheme: getCurrentShikiTheme(),
+  listeners: new Set<() => void>(),
+  observer: null as MutationObserver | null,
+};
+
+const viewerPreferenceStore = {
   defaultViewerWrapMode: getCurrentDefaultViewerWrapMode(),
   defaultDiffViewMode: getCurrentDefaultDiffViewMode(),
+  collapseMultiFileToolDiffs: getCurrentCollapseMultiFileToolDiffs(),
   listeners: new Set<() => void>(),
   observer: null as MutationObserver | null,
 };
@@ -241,10 +248,11 @@ export function resetContentViewerCachesForTests(): void {
   viewerExternalAppsStore.unsubscribePaneState = null;
   viewerExternalAppsStore.snapshot = defaultViewerExternalAppsSnapshot;
   viewerExternalAppsStore.promise = null;
-  themeVariantStore.current = getCurrentThemeVariant();
-  themeVariantStore.shikiTheme = getCurrentShikiTheme();
-  themeVariantStore.defaultViewerWrapMode = getCurrentDefaultViewerWrapMode();
-  themeVariantStore.defaultDiffViewMode = getCurrentDefaultDiffViewMode();
+  themeStore.current = getCurrentThemeVariant();
+  themeStore.shikiTheme = getCurrentShikiTheme();
+  viewerPreferenceStore.defaultViewerWrapMode = getCurrentDefaultViewerWrapMode();
+  viewerPreferenceStore.defaultDiffViewMode = getCurrentDefaultDiffViewMode();
+  viewerPreferenceStore.collapseMultiFileToolDiffs = getCurrentCollapseMultiFileToolDiffs();
   tokenLineCache.clear();
 }
 
@@ -336,6 +344,13 @@ function getCurrentDefaultDiffViewMode(): "unified" | "split" {
   return document.documentElement.dataset.defaultDiffViewMode === "split" ? "split" : "unified";
 }
 
+function getCurrentCollapseMultiFileToolDiffs(): boolean {
+  if (typeof document === "undefined") {
+    return false;
+  }
+  return document.documentElement.dataset.collapseMultiFileToolDiffs === "true";
+}
+
 function emitViewerExternalAppsStore(): void {
   for (const listener of viewerExternalAppsStore.listeners) {
     listener();
@@ -350,99 +365,138 @@ function refreshViewerExternalApps(): void {
   ensureViewerExternalAppsLoaded();
 }
 
-function emitThemeVariantStore(): void {
-  for (const listener of themeVariantStore.listeners) {
+function emitThemeStore(): void {
+  for (const listener of themeStore.listeners) {
     listener();
   }
 }
 
-function ensureThemeVariantObserver(): void {
-  if (typeof document === "undefined" || themeVariantStore.observer) {
+function emitViewerPreferenceStore(): void {
+  for (const listener of viewerPreferenceStore.listeners) {
+    listener();
+  }
+}
+
+function ensureThemeObserver(): void {
+  if (typeof document === "undefined" || themeStore.observer) {
     return;
   }
-  themeVariantStore.current = getCurrentThemeVariant();
-  themeVariantStore.shikiTheme = getCurrentShikiTheme();
-  themeVariantStore.defaultViewerWrapMode = getCurrentDefaultViewerWrapMode();
-  themeVariantStore.defaultDiffViewMode = getCurrentDefaultDiffViewMode();
-  themeVariantStore.observer = new MutationObserver((mutations) => {
+  themeStore.current = getCurrentThemeVariant();
+  themeStore.shikiTheme = getCurrentShikiTheme();
+  themeStore.observer = new MutationObserver((mutations) => {
     if (
       mutations.some(
         (mutation) =>
           mutation.type === "attributes" &&
           (mutation.attributeName === "data-theme" ||
             mutation.attributeName === "data-theme-variant" ||
-            mutation.attributeName === "data-shiki-theme" ||
-            mutation.attributeName === "data-default-viewer-wrap-mode" ||
-            mutation.attributeName === "data-default-diff-view-mode"),
+            mutation.attributeName === "data-shiki-theme"),
       )
     ) {
       const next = getCurrentThemeVariant();
       const nextShikiTheme = getCurrentShikiTheme();
-      const nextViewerWrapMode = getCurrentDefaultViewerWrapMode();
-      const nextDiffViewMode = getCurrentDefaultDiffViewMode();
-      if (
-        next !== themeVariantStore.current ||
-        nextShikiTheme !== themeVariantStore.shikiTheme ||
-        nextViewerWrapMode !== themeVariantStore.defaultViewerWrapMode ||
-        nextDiffViewMode !== themeVariantStore.defaultDiffViewMode
-      ) {
-        themeVariantStore.current = next;
-        themeVariantStore.shikiTheme = nextShikiTheme;
-        themeVariantStore.defaultViewerWrapMode = nextViewerWrapMode;
-        themeVariantStore.defaultDiffViewMode = nextDiffViewMode;
-        emitThemeVariantStore();
+      if (next !== themeStore.current || nextShikiTheme !== themeStore.shikiTheme) {
+        themeStore.current = next;
+        themeStore.shikiTheme = nextShikiTheme;
+        emitThemeStore();
       }
     }
   });
-  themeVariantStore.observer.observe(document.documentElement, {
+  themeStore.observer.observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ["data-theme", "data-theme-variant", "data-shiki-theme"],
+  });
+}
+
+function ensureViewerPreferenceObserver(): void {
+  if (typeof document === "undefined" || viewerPreferenceStore.observer) {
+    return;
+  }
+  viewerPreferenceStore.defaultViewerWrapMode = getCurrentDefaultViewerWrapMode();
+  viewerPreferenceStore.defaultDiffViewMode = getCurrentDefaultDiffViewMode();
+  viewerPreferenceStore.collapseMultiFileToolDiffs = getCurrentCollapseMultiFileToolDiffs();
+  viewerPreferenceStore.observer = new MutationObserver((mutations) => {
+    if (
+      mutations.some(
+        (mutation) =>
+          mutation.type === "attributes" &&
+          (mutation.attributeName === "data-default-viewer-wrap-mode" ||
+            mutation.attributeName === "data-default-diff-view-mode" ||
+            mutation.attributeName === "data-collapse-multi-file-tool-diffs"),
+      )
+    ) {
+      const nextViewerWrapMode = getCurrentDefaultViewerWrapMode();
+      const nextDiffViewMode = getCurrentDefaultDiffViewMode();
+      const nextCollapseMultiFileToolDiffs = getCurrentCollapseMultiFileToolDiffs();
+      if (
+        nextViewerWrapMode !== viewerPreferenceStore.defaultViewerWrapMode ||
+        nextDiffViewMode !== viewerPreferenceStore.defaultDiffViewMode ||
+        nextCollapseMultiFileToolDiffs !== viewerPreferenceStore.collapseMultiFileToolDiffs
+      ) {
+        viewerPreferenceStore.defaultViewerWrapMode = nextViewerWrapMode;
+        viewerPreferenceStore.defaultDiffViewMode = nextDiffViewMode;
+        viewerPreferenceStore.collapseMultiFileToolDiffs = nextCollapseMultiFileToolDiffs;
+        emitViewerPreferenceStore();
+      }
+    }
+  });
+  viewerPreferenceStore.observer.observe(document.documentElement, {
     attributes: true,
     attributeFilter: [
-      "data-theme",
-      "data-theme-variant",
-      "data-shiki-theme",
       "data-default-viewer-wrap-mode",
       "data-default-diff-view-mode",
+      "data-collapse-multi-file-tool-diffs",
     ],
   });
 }
 
-function subscribeToThemeVariant(listener: () => void): () => void {
-  ensureThemeVariantObserver();
-  themeVariantStore.listeners.add(listener);
+function subscribeToThemeStore(listener: () => void): () => void {
+  ensureThemeObserver();
+  themeStore.listeners.add(listener);
   return () => {
-    themeVariantStore.listeners.delete(listener);
+    themeStore.listeners.delete(listener);
+  };
+}
+
+function subscribeToViewerPreferences(listener: () => void): () => void {
+  ensureViewerPreferenceObserver();
+  viewerPreferenceStore.listeners.add(listener);
+  return () => {
+    viewerPreferenceStore.listeners.delete(listener);
   };
 }
 
 function useDocumentThemeVariant(): string {
-  return useSyncExternalStore(
-    subscribeToThemeVariant,
-    () => themeVariantStore.current,
-    () => "light",
-  );
+  return useSyncExternalStore(subscribeToThemeStore, getCurrentThemeVariant, () => "light");
 }
 
 function useDocumentShikiTheme(): string {
-  return useSyncExternalStore(
-    subscribeToThemeVariant,
-    () => themeVariantStore.shikiTheme,
-    () => getDefaultShikiThemeForUiTheme("light"),
+  return useSyncExternalStore(subscribeToThemeStore, getCurrentShikiTheme, () =>
+    getDefaultShikiThemeForUiTheme("light"),
   );
 }
 
 function useDocumentDefaultViewerWrapMode(): "nowrap" | "wrap" {
   return useSyncExternalStore(
-    subscribeToThemeVariant,
-    () => themeVariantStore.defaultViewerWrapMode,
+    subscribeToViewerPreferences,
+    getCurrentDefaultViewerWrapMode,
     () => "nowrap",
   );
 }
 
 function useDocumentDefaultDiffViewMode(): "unified" | "split" {
   return useSyncExternalStore(
-    subscribeToThemeVariant,
-    () => themeVariantStore.defaultDiffViewMode,
+    subscribeToViewerPreferences,
+    getCurrentDefaultDiffViewMode,
     () => "unified",
+  );
+}
+
+export function useDocumentCollapseMultiFileToolDiffs(): boolean {
+  return useSyncExternalStore(
+    subscribeToViewerPreferences,
+    getCurrentCollapseMultiFileToolDiffs,
+    () => false,
   );
 }
 
@@ -925,6 +979,8 @@ function ContentViewer({
   query = "",
   highlightPatterns = [],
   startLine,
+  collapsible = false,
+  defaultExpanded = true,
 }: {
   kind: ViewerKind;
   language: string;
@@ -935,6 +991,8 @@ function ContentViewer({
   query?: string;
   highlightPatterns?: string[];
   startLine?: number;
+  collapsible?: boolean;
+  defaultExpanded?: boolean;
 }) {
   const { editors, diffTools, preferences } = useViewerExternalApps();
   const tokenColorResolver = useTokenColorResolver();
@@ -957,6 +1015,7 @@ function ContentViewer({
   const [visibleCount, setVisibleCount] = useState(
     isLarge ? Math.min(totalLines, INITIAL_EXPANDED_LINES) : totalLines,
   );
+  const [isExpanded, setIsExpanded] = useState(defaultExpanded);
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const [scrollTop, setScrollTop] = useState(0);
 
@@ -1037,6 +1096,9 @@ function ContentViewer({
     normalizeBadgeLabel(metaPath) !== normalizedKind &&
     normalizeBadgeLabel(metaPath) !== normalizedLanguage;
   const displayedMetaPath = showMetaPath ? metaPath : null;
+  const isCollapsibleDiff = kind === "diff" && collapsible;
+  const diffToggleLabelTarget = getPathBaseName(displayedMetaPath) ?? "diff";
+  const diffToggleLabel = `${isExpanded ? "Collapse" : "Expand"} diff for ${diffToggleLabelTarget}`;
 
   const buildDiffPayload = () => {
     if (!diffModel) {
@@ -1176,27 +1238,66 @@ function ContentViewer({
       className={`code-block${kind === "diff" ? " diff-block" : ""} content-viewer content-viewer-${kind}${wrap ? " wrap" : ""}`}
     >
       <div className="code-meta content-viewer-header">
-        <div className="content-viewer-meta">
-          {kind === "diff" ? null : <span className="content-viewer-badge">{kind}</span>}
-          {showLanguageBadge ? (
-            <span className="content-viewer-badge secondary">{language}</span>
-          ) : null}
-          {kind === "diff" && diffModel ? (
-            <span
-              className="content-viewer-diff-counts"
-              aria-label={`${diffModel.addedLineCount} added lines and ${diffModel.removedLineCount} removed lines`}
-              title={`${diffModel.addedLineCount} added, ${diffModel.removedLineCount} removed`}
+        {isCollapsibleDiff ? (
+          <div className="content-viewer-meta">
+            <button
+              type="button"
+              className="content-viewer-meta-toggle"
+              aria-expanded={isExpanded}
+              aria-label={diffToggleLabel}
+              title={diffToggleLabel}
+              onClick={() => {
+                setIsExpanded((value) => !value);
+              }}
             >
-              <span className="diff-meta-added">+{diffModel.addedLineCount}</span>
-              <span className="diff-meta-removed">-{diffModel.removedLineCount}</span>
-            </span>
-          ) : null}
-          {displayedMetaPath ? (
-            <span className="content-viewer-path" title={metaPath ?? undefined}>
-              {displayedMetaPath}
-            </span>
-          ) : null}
-        </div>
+              <svg
+                className="content-viewer-toggle-icon"
+                fill="none"
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+              >
+                <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2" />
+              </svg>
+            </button>
+            {kind === "diff" && diffModel ? (
+              <span
+                className="content-viewer-diff-counts"
+                aria-label={`${diffModel.addedLineCount} added lines and ${diffModel.removedLineCount} removed lines`}
+                title={`${diffModel.addedLineCount} added, ${diffModel.removedLineCount} removed`}
+              >
+                <span className="diff-meta-added">+{diffModel.addedLineCount}</span>
+                <span className="diff-meta-removed">-{diffModel.removedLineCount}</span>
+              </span>
+            ) : null}
+            {displayedMetaPath ? (
+              <span className="content-viewer-path" title={metaPath ?? undefined}>
+                {displayedMetaPath}
+              </span>
+            ) : null}
+          </div>
+        ) : (
+          <div className="content-viewer-meta">
+            {kind === "diff" ? null : <span className="content-viewer-badge">{kind}</span>}
+            {showLanguageBadge ? (
+              <span className="content-viewer-badge secondary">{language}</span>
+            ) : null}
+            {kind === "diff" && diffModel ? (
+              <span
+                className="content-viewer-diff-counts"
+                aria-label={`${diffModel.addedLineCount} added lines and ${diffModel.removedLineCount} removed lines`}
+                title={`${diffModel.addedLineCount} added, ${diffModel.removedLineCount} removed`}
+              >
+                <span className="diff-meta-added">+{diffModel.addedLineCount}</span>
+                <span className="diff-meta-removed">-{diffModel.removedLineCount}</span>
+              </span>
+            ) : null}
+            {displayedMetaPath ? (
+              <span className="content-viewer-path" title={metaPath ?? undefined}>
+                {displayedMetaPath}
+              </span>
+            ) : null}
+          </div>
+        )}
         <div className="content-viewer-actions">
           {kind === "diff" ? (
             <button
@@ -1294,36 +1395,38 @@ function ContentViewer({
         </div>
       </div>
       {kind === "diff" && diffModel ? (
-        <div
-          ref={bodyRef}
-          className={`content-viewer-body${virtualizeDiff ? " virtualized" : ""}`}
-          onScroll={(event) => {
-            if (virtualizeDiff) {
-              setScrollTop(event.currentTarget.scrollTop);
-            }
-          }}
-        >
-          <DiffViewerBody
-            diffModel={diffModel}
-            diffMode={diffMode}
-            wrap={wrap}
-            syntaxLanguage={syntaxLanguage}
-            query={query}
-            highlightActive={highlightActive}
-            highlightPatterns={highlightPatterns}
-            visibleCount={visibleCount}
-            startIndex={diffRenderStartIndex}
-            endIndex={diffRenderEndIndex}
-            virtualize={virtualizeDiff}
-            topSpacerHeight={diffTopSpacerHeight}
-            bottomSpacerHeight={diffBottomSpacerHeight}
-            unifiedTokenLines={diffUnifiedTokenLines}
-            splitLeftTokenLines={diffSplitLeftTokenLines}
-            splitRightTokenLines={diffSplitRightTokenLines}
-            allowFallbackSyntax={allowFallbackSyntax}
-            tokenColorResolver={tokenColorResolver}
-          />
-        </div>
+        isExpanded ? (
+          <div
+            ref={bodyRef}
+            className={`content-viewer-body${virtualizeDiff ? " virtualized" : ""}`}
+            onScroll={(event) => {
+              if (virtualizeDiff) {
+                setScrollTop(event.currentTarget.scrollTop);
+              }
+            }}
+          >
+            <DiffViewerBody
+              diffModel={diffModel}
+              diffMode={diffMode}
+              wrap={wrap}
+              syntaxLanguage={syntaxLanguage}
+              query={query}
+              highlightActive={highlightActive}
+              highlightPatterns={highlightPatterns}
+              visibleCount={visibleCount}
+              startIndex={diffRenderStartIndex}
+              endIndex={diffRenderEndIndex}
+              virtualize={virtualizeDiff}
+              topSpacerHeight={diffTopSpacerHeight}
+              bottomSpacerHeight={diffBottomSpacerHeight}
+              unifiedTokenLines={diffUnifiedTokenLines}
+              splitLeftTokenLines={diffSplitLeftTokenLines}
+              splitRightTokenLines={diffSplitRightTokenLines}
+              allowFallbackSyntax={allowFallbackSyntax}
+              tokenColorResolver={tokenColorResolver}
+            />
+          </div>
+        ) : null
       ) : (
         <div
           ref={bodyRef}
@@ -1374,7 +1477,7 @@ function ContentViewer({
           ) : null}
         </div>
       )}
-      {visibleCount < totalLines ? (
+      {visibleCount < totalLines && (!isCollapsibleDiff || isExpanded) ? (
         <div className="content-viewer-footer">
           <button
             type="button"
@@ -2778,12 +2881,16 @@ export function DiffBlock({
   pathRoots = [],
   query = "",
   highlightPatterns = [],
+  collapsible = false,
+  defaultExpanded = true,
 }: {
   codeValue: string;
   filePath?: string | null;
   pathRoots?: string[];
   query?: string;
   highlightPatterns?: string[];
+  collapsible?: boolean;
+  defaultExpanded?: boolean;
 }) {
   return (
     <ContentViewer
@@ -2795,6 +2902,8 @@ export function DiffBlock({
       pathRoots={pathRoots}
       query={query}
       highlightPatterns={highlightPatterns}
+      collapsible={collapsible}
+      defaultExpanded={defaultExpanded}
     />
   );
 }

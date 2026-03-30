@@ -7,3 +7,5 @@ export {
   parseToolInvocationPayload,
   tryParseJsonRecord,
 } from "../../../shared/toolParsing";
+
+export type { ParsedToolEditFile, ParsedToolEditPayload } from "../../../shared/toolParsing";

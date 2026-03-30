@@ -347,6 +347,8 @@ function sanitizePaneState(
     sanitizeStringValue(record.defaultViewerWrapMode, VIEWER_WRAP_MODE_VALUES) ?? "nowrap";
   const defaultDiffViewMode =
     sanitizeStringValue(record.defaultDiffViewMode, DIFF_VIEW_MODE_VALUES) ?? "unified";
+  const collapseMultiFileToolDiffs =
+    sanitizeOptionalBoolean(record.collapseMultiFileToolDiffs) ?? false;
   const externalTools =
     sanitizeExternalToolConfigs(record.externalTools, platform) ??
     createDefaultExternalTools(platform);
@@ -432,6 +434,7 @@ function sanitizePaneState(
     ...(autoHideViewerHeaderActions === null ? {} : { autoHideViewerHeaderActions }),
     defaultViewerWrapMode,
     defaultDiffViewMode,
+    collapseMultiFileToolDiffs,
     ...(preferredExternalEditor ? { preferredExternalEditor } : {}),
     ...(preferredExternalDiffTool ? { preferredExternalDiffTool } : {}),
     ...(terminalAppCommand ? { terminalAppCommand } : {}),

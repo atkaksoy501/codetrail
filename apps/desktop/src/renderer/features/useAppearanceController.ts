@@ -103,6 +103,9 @@ export function useAppearanceController({
   const [defaultDiffViewMode, setDefaultDiffViewMode] = useState<DiffViewMode>(
     initialPaneState?.defaultDiffViewMode ?? "unified",
   );
+  const [collapseMultiFileToolDiffs, setCollapseMultiFileToolDiffs] = useState(
+    initialPaneState?.collapseMultiFileToolDiffs ?? false,
+  );
   const [externalTools, setExternalTools] = useState<ExternalToolConfig[]>(
     initialPaneState?.externalTools ?? defaultExternalTools,
   );
@@ -308,6 +311,12 @@ export function useAppearanceController({
     document.documentElement.dataset.defaultDiffViewMode = defaultDiffViewMode;
   }, [defaultDiffViewMode]);
 
+  useEffect(() => {
+    document.documentElement.dataset.collapseMultiFileToolDiffs = collapseMultiFileToolDiffs
+      ? "true"
+      : "false";
+  }, [collapseMultiFileToolDiffs]);
+
   const previewTheme = useCallback(
     (nextTheme: ThemeMode) => {
       applyDocumentAppearance(
@@ -404,6 +413,8 @@ export function useAppearanceController({
     setDefaultViewerWrapMode,
     defaultDiffViewMode,
     setDefaultDiffViewMode,
+    collapseMultiFileToolDiffs,
+    setCollapseMultiFileToolDiffs,
     preferredExternalEditor,
     setPreferredExternalEditor,
     preferredExternalDiffTool,

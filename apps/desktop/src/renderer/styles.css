@@ -3320,6 +3320,31 @@ button svg *,
   overflow-wrap: anywhere;
 }
 
+.tool-edit-summary {
+  font-family: var(--font-mono);
+  font-size: var(--message-mono-font-size);
+  line-height: 1.45;
+  white-space: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+}
+
+.tool-edit-summary-link {
+  border: none;
+  background: transparent;
+  color: var(--accent-blue);
+  font: inherit;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.tool-edit-summary-link:hover {
+  color: var(--text-primary);
+}
+
 .md-p {
   margin: 0;
   font-size: calc(var(--message-font-size) - 0.5px);
@@ -3483,6 +3508,40 @@ button svg *,
 
 .content-viewer-meta {
   overflow: hidden;
+}
+
+.content-viewer-meta-toggle {
+  border: none;
+  background: transparent;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.content-viewer-meta-toggle:hover .content-viewer-toggle-icon {
+  color: var(--text-primary);
+}
+
+.content-viewer-meta-toggle:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+.content-viewer-toggle-icon {
+  width: 16px;
+  height: 16px;
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+  transition: transform 0.2s ease, color 0.2s ease;
+}
+
+.content-viewer-meta-toggle[aria-expanded="false"] .content-viewer-toggle-icon {
+  transform: rotate(-90deg);
 }
 
 .content-viewer-badge {

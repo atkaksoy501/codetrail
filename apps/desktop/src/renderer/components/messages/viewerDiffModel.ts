@@ -309,6 +309,15 @@ export function trimProjectPrefixFromPath(filePath: string, pathRoots: string[])
   return normalizedFilePath;
 }
 
+export function getPathBaseName(path: string | null | undefined): string | null {
+  if (!path) {
+    return null;
+  }
+  const normalized = path.replace(/\\/g, "/");
+  const fileName = normalized.split("/").pop();
+  return fileName && fileName.length > 0 ? fileName : normalized;
+}
+
 function normalizeRelativePath(value: string): string | null {
   const normalized = value.replace(/\\/g, "/");
   if (normalized.startsWith("/") || /^[A-Za-z]:\//.test(normalized)) {

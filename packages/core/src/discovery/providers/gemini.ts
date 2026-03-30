@@ -159,6 +159,8 @@ export function discoverSingleGeminiFile(
     filePath,
     dependencies,
     getCachedGeminiProjectResolution(config, dependencies),
-    shouldRefreshOnMiss ? () => refreshCachedGeminiProjectResolution(config, dependencies) : undefined,
+    shouldRefreshOnMiss
+      ? () => refreshCachedGeminiProjectResolution(config, dependencies)
+      : undefined,
   );
 }

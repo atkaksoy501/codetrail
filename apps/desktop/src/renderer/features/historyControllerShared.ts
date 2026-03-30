@@ -43,6 +43,8 @@ export type AppearanceState = {
   setDefaultViewerWrapMode: Dispatch<SetStateAction<ViewerWrapMode>>;
   defaultDiffViewMode: DiffViewMode;
   setDefaultDiffViewMode: Dispatch<SetStateAction<DiffViewMode>>;
+  collapseMultiFileToolDiffs: boolean;
+  setCollapseMultiFileToolDiffs: Dispatch<SetStateAction<boolean>>;
   preferredExternalEditor: ExternalEditorId;
   setPreferredExternalEditor: Dispatch<SetStateAction<ExternalEditorId>>;
   preferredExternalDiffTool: ExternalEditorId;

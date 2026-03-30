@@ -201,6 +201,7 @@ function createBaseProps(): Omit<
       autoHideViewerHeaderActions: false,
       defaultViewerWrapMode: "nowrap" as ViewerWrapMode,
       defaultDiffViewMode: "unified" as DiffViewMode,
+      collapseMultiFileToolDiffs: false,
       preferredExternalEditor: createKnownToolId("vscode") as ExternalEditorId,
       preferredExternalDiffTool: createKnownToolId("vscode") as ExternalEditorId,
       terminalAppCommand: "",
@@ -282,6 +283,7 @@ function createBaseProps(): Omit<
       onAutoHideViewerHeaderActionsChange: vi.fn(),
       onDefaultViewerWrapModeChange: vi.fn(),
       onDefaultDiffViewModeChange: vi.fn(),
+      onCollapseMultiFileToolDiffsChange: vi.fn(),
       onPreferredExternalEditorChange: vi.fn(),
       onPreferredExternalDiffToolChange: vi.fn(),
       onTerminalAppCommandChange: vi.fn(),
@@ -379,6 +381,11 @@ describe("SettingsView", () => {
     await user.click(
       screen.getByRole("checkbox", { name: "Auto-hide text viewer header actions" }),
     );
+    await user.click(
+      screen.getByRole("checkbox", {
+        name: "Collapse diffs when a write message changes multiple files",
+      }),
+    );
 
     const presetToolsList = screen.getByRole("list", { name: "Preset tools" });
     const cursorPresetRow = within(presetToolsList)
@@ -448,6 +455,7 @@ describe("SettingsView", () => {
     expect(baseProps.appearance.onDefaultDiffViewModeChange).toHaveBeenCalledWith("split");
     expect(baseProps.appearance.onAutoHideMessageActionsChange).toHaveBeenCalledWith(false);
     expect(baseProps.appearance.onAutoHideViewerHeaderActionsChange).toHaveBeenCalledWith(true);
+    expect(baseProps.appearance.onCollapseMultiFileToolDiffsChange).toHaveBeenCalledWith(true);
     expect(baseProps.appearance.onPreferredExternalEditorChange).toHaveBeenCalledWith("custom:1");
     expect(baseProps.appearance.onPreferredExternalDiffToolChange).toHaveBeenCalledWith("");
     const onExternalToolsChange = vi.mocked(baseProps.appearance.onExternalToolsChange);
@@ -596,6 +604,11 @@ describe("SettingsView", () => {
               setAppearanceState((current) => ({ ...current, defaultViewerWrapMode: mode })),
             onDefaultDiffViewModeChange: (mode) =>
               setAppearanceState((current) => ({ ...current, defaultDiffViewMode: mode })),
+            onCollapseMultiFileToolDiffsChange: (enabled) =>
+              setAppearanceState((current) => ({
+                ...current,
+                collapseMultiFileToolDiffs: enabled,
+              })),
             onPreferredExternalEditorChange: (editor) =>
               setAppearanceState((current) => ({ ...current, preferredExternalEditor: editor })),
             onPreferredExternalDiffToolChange: (editor) =>

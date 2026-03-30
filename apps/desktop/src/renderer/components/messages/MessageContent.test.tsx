@@ -1,11 +1,31 @@
 // @vitest-environment jsdom
 
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const { openFileInEditorMock } = vi.hoisted(() => ({
+  openFileInEditorMock: vi.fn(async () => ({ ok: true, error: null })),
+}));
+
+vi.mock("../../lib/pathActions", () => ({
+  openFileInEditor: openFileInEditorMock,
+}));
+
+vi.mock("../../lib/codetrailClient", () => ({
+  getCodetrailClient: () => ({
+    platform: "darwin",
+    invoke: vi.fn(async () => ({ ok: true })),
+  }),
+}));
 
 import { MessageContent } from "./MessageContent";
 
 describe("MessageContent", () => {
+  beforeEach(() => {
+    document.documentElement.dataset.collapseMultiFileToolDiffs = "false";
+  });
+
   it("renders thinking messages as highlighted pre blocks", () => {
     render(<MessageContent text="thinking text" category="thinking" query="" />);
 
@@ -78,6 +98,171 @@ describe("MessageContent", () => {
     expect(document.querySelector(".tool-edit-view .tool-edit-path")).not.toBeNull();
     expect(screen.getByText("Written Content")).toBeInTheDocument();
     expect(document.body.textContent).toContain("new content");
+  });
+
+  it("renders multi-file tool edits as clickable filename summary links", async () => {
+    const user = userEvent.setup();
+    document.documentElement.dataset.collapseMultiFileToolDiffs = "true";
+
+    render(
+      <MessageContent
+        text={JSON.stringify({
+          name: "apply_patch",
+          input: [
+            "*** Begin Patch",
+            "*** Add File: /workspace/src/new.ts",
+            "+export const created = true;",
+            "*** Update File: /workspace/src/parser.ts",
+            "@@",
+            "-const value = old();",
+            "+const value = next();",
+            "*** End Patch",
+          ].join("\n"),
+        })}
+        category="tool_edit"
+        query=""
+      />,
+    );
+
+    const summary = document.querySelector(".tool-edit-summary");
+    expect(summary).not.toBeNull();
+    expect(summary?.textContent).toBe("2 files changed: new.ts and parser.ts");
+    const newFileButton = screen.getByRole("button", { name: "new.ts" });
+    const parserFileButton = screen.getByRole("button", { name: "parser.ts" });
+    expect(newFileButton.className).toContain("tool-edit-summary-link");
+    expect(parserFileButton.className).toContain("tool-edit-summary-link");
+    expect(screen.getByRole("button", { name: "Expand diff for new.ts" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Expand diff for parser.ts" })).toBeInTheDocument();
+    expect(document.body.textContent).not.toContain("export const created = true;");
+    expect(document.body.textContent).not.toContain("const value = next();");
+    expect(screen.queryByText("Added")).toBeNull();
+    expect(screen.queryByText("Updated")).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Expand diff for parser.ts" }));
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: "Collapse diff for parser.ts" }),
+      ).toBeInTheDocument();
+      expect(document.body.textContent).toContain("const value = next();");
+    });
+
+    await user.click(screen.getByRole("button", { name: "Collapse diff for parser.ts" }));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Expand diff for parser.ts" })).toBeInTheDocument();
+      expect(document.body.textContent).not.toContain("const value = next();");
+    });
+
+    await user.click(parserFileButton);
+    expect(openFileInEditorMock).toHaveBeenCalledWith(
+      "/workspace/src/parser.ts",
+      undefined,
+      expect.objectContaining({ platform: "darwin" }),
+    );
+  });
+
+  it("renders single-file tool-edit diffs as collapsible viewers", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <MessageContent
+        text={JSON.stringify({
+          input: {
+            path: "/workspace/src/file.ts",
+            old_string: "const beforeValue = 1;",
+            new_string: "const afterValue = 2;",
+          },
+        })}
+        category="tool_edit"
+        query=""
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Collapse diff for file.ts" })).toBeInTheDocument();
+    expect(document.querySelector(".content-viewer-body")).not.toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Collapse diff for file.ts" }));
+    expect(screen.getByRole("button", { name: "Expand diff for file.ts" })).toBeInTheDocument();
+    expect(document.querySelector(".content-viewer-body")).toBeNull();
+  });
+
+  it("resets multi-file diff expansion when the collapse setting changes", async () => {
+    const user = userEvent.setup();
+
+    const messageProps = {
+      text: JSON.stringify({
+        name: "apply_patch",
+        input: [
+          "*** Begin Patch",
+          "*** Add File: /workspace/src/new.ts",
+          "+export const created = true;",
+          "*** Update File: /workspace/src/parser.ts",
+          "@@",
+          "-const value = old();",
+          "+const value = next();",
+          "*** End Patch",
+        ].join("\n"),
+      }),
+      category: "tool_edit" as const,
+      query: "",
+    };
+
+    const { rerender } = render(<MessageContent {...messageProps} />);
+
+    expect(screen.getByRole("button", { name: "Collapse diff for parser.ts" })).toBeInTheDocument();
+    expect(document.body.textContent).toContain("const value = next();");
+
+    await user.click(screen.getByRole("button", { name: "Collapse diff for parser.ts" }));
+    expect(screen.getByRole("button", { name: "Expand diff for parser.ts" })).toBeInTheDocument();
+    expect(document.body.textContent).not.toContain("const value = next();");
+
+    document.documentElement.dataset.collapseMultiFileToolDiffs = "true";
+    rerender(<MessageContent {...messageProps} />);
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Expand diff for parser.ts" })).toBeInTheDocument();
+      expect(document.body.textContent).not.toContain("const value = next();");
+    });
+
+    await user.click(screen.getByRole("button", { name: "Expand diff for parser.ts" }));
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: "Collapse diff for parser.ts" }),
+      ).toBeInTheDocument();
+      expect(document.body.textContent).toContain("const value = next();");
+    });
+
+    document.documentElement.dataset.collapseMultiFileToolDiffs = "false";
+    rerender(<MessageContent {...messageProps} />);
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: "Collapse diff for parser.ts" }),
+      ).toBeInTheDocument();
+      expect(document.body.textContent).toContain("const value = next();");
+    });
+  });
+
+  it("defaults multi-file diffs to expanded when the collapse setting attribute is absent", () => {
+    delete document.documentElement.dataset.collapseMultiFileToolDiffs;
+
+    render(
+      <MessageContent
+        text={JSON.stringify({
+          name: "apply_patch",
+          input: [
+            "*** Begin Patch",
+            "*** Update File: /workspace/src/parser.ts",
+            "@@",
+            "-const value = old();",
+            "+const value = next();",
+            "*** End Patch",
+          ].join("\n"),
+        })}
+        category="tool_edit"
+        query=""
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Collapse diff for parser.ts" })).toBeInTheDocument();
+    expect(document.body.textContent).toContain("const value = next();");
   });
 
   it("renders tool_result metadata and output", () => {

@@ -104,6 +104,47 @@ describe("MessageCard", () => {
     expect(onToggleExpanded).toHaveBeenCalled();
   });
 
+  it("summarizes multi-file tool edits in the collapsed preview", () => {
+    const onToggleExpanded = vi.fn();
+
+    renderWithPaneFocus(
+      <MessageCard
+        message={{
+          ...message,
+          category: "tool_edit",
+          content: JSON.stringify({
+            name: "apply_patch",
+            input: [
+              "*** Begin Patch",
+              "*** Add File: /Users/tcmudemirhan/project/src/new.ts",
+              "+export const created = true;",
+              "*** Update File: /Users/tcmudemirhan/project/src/parser.ts",
+              "@@",
+              "-const value = old();",
+              "+const value = next();",
+              "*** Update File: /Users/tcmudemirhan/project/src/third.ts",
+              "@@",
+              "-old",
+              "+next",
+              "*** Update File: /Users/tcmudemirhan/project/src/fourth.ts",
+              "@@",
+              "-before",
+              "+after",
+              "*** End Patch",
+            ].join("\n"),
+          }),
+        }}
+        query=""
+        pathRoots={[]}
+        isFocused={false}
+        isExpanded={false}
+        onToggleExpanded={onToggleExpanded}
+      />,
+    );
+
+    expect(screen.getByText("Write 4 files: new.ts, parser.ts, third.ts...")).toBeInTheDocument();
+  });
+
   it("uses Cmd+click to toggle all messages of the same type", async () => {
     const onToggleExpanded = vi.fn();
     const onToggleCategoryExpanded = vi.fn();

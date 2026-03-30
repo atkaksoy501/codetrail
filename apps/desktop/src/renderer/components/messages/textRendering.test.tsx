@@ -481,6 +481,55 @@ describe("theme-aware Shiki rendering", () => {
     });
   });
 
+  it("collapses diff blocks without falling back to raw diff content", async () => {
+    render(
+      <DiffBlock
+        codeValue={[
+          "diff --git a/a.ts b/a.ts",
+          "--- a/a.ts",
+          "+++ b/a.ts",
+          "@@ -1,1 +1,1 @@",
+          "-const beforeValue = 1;",
+          "+const afterValue = 2;",
+        ].join("\n")}
+        filePath="/Users/acme/repo/a.ts"
+        collapsible
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Collapse diff for a.ts" })).toBeInTheDocument();
+    expect(document.querySelector(".content-viewer-body")).not.toBeNull();
+    expect(document.querySelector(".diff-table")).not.toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Collapse diff for a.ts" }));
+
+    expect(screen.getByRole("button", { name: "Expand diff for a.ts" })).toBeInTheDocument();
+    expect(document.querySelector(".content-viewer-body")).toBeNull();
+    expect(screen.queryByText("diff --git a/a.ts b/a.ts")).toBeNull();
+  });
+
+  it("only toggles collapsible diffs when the chevron button is clicked", () => {
+    render(
+      <DiffBlock
+        codeValue={[
+          "diff --git a/a.ts b/a.ts",
+          "--- a/a.ts",
+          "+++ b/a.ts",
+          "@@ -1,1 +1,1 @@",
+          "-const beforeValue = 1;",
+          "+const afterValue = 2;",
+        ].join("\n")}
+        filePath="/Users/acme/repo/a.ts"
+        collapsible
+      />,
+    );
+
+    fireEvent.click(screen.getByText("/Users/acme/repo/a.ts"));
+
+    expect(screen.getByRole("button", { name: "Collapse diff for a.ts" })).toBeInTheDocument();
+    expect(document.querySelector(".content-viewer-body")).not.toBeNull();
+  });
+
   it("virtualizes large expanded diffs and swaps rendered rows on scroll", async () => {
     const lines = Array.from({ length: 2000 }, (_, index) => `+line ${index + 1}`);
     document.documentElement.dataset.defaultViewerWrapMode = "nowrap";

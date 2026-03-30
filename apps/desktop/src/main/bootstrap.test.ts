@@ -711,6 +711,7 @@ describe("bootstrapMainProcess", () => {
       autoHideViewerHeaderActions: null,
       defaultViewerWrapMode: null,
       defaultDiffViewMode: null,
+      collapseMultiFileToolDiffs: null,
       preferredExternalEditor: null,
       preferredExternalDiffTool: null,
       terminalAppCommand: null,

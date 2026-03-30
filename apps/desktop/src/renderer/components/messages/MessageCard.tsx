@@ -16,6 +16,7 @@ import {
   tryParseJsonRecord,
 } from "./toolParsing";
 import type { SessionMessage } from "./types";
+import { getPathBaseName } from "./viewerDiffModel";
 
 type MessageCardProps = {
   message: SessionMessage;
@@ -328,6 +329,16 @@ function formatMessagePreview(
 
   if (category === "tool_edit") {
     const parsed = parsedToolPayload.toolEdit;
+    if (parsed && parsed.files.length > 1) {
+      const previewFiles = parsed.files
+        .slice(0, 3)
+        .map((file) => getPathBaseName(file.filePath) ?? compactPath(file.filePath))
+        .join(", ");
+      const remainingCount = parsed.files.length - 3;
+      return remainingCount > 0
+        ? `Write ${parsed.files.length} files: ${previewFiles}...`
+        : `Write ${parsed.files.length} files: ${previewFiles}`;
+    }
     if (parsed?.filePath) {
       return `${prettyCategory(category)} ${compactPath(parsed.filePath)}`;
     }

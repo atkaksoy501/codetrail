@@ -287,6 +287,7 @@ export const paneStateBaseSchema = z.object({
   autoHideViewerHeaderActions: z.boolean(),
   defaultViewerWrapMode: viewerWrapModeSchema,
   defaultDiffViewMode: diffViewModeSchema,
+  collapseMultiFileToolDiffs: z.boolean(),
   preferredExternalEditor: externalToolIdSchema,
   preferredExternalDiffTool: externalToolIdSchema,
   terminalAppCommand: z.string(),

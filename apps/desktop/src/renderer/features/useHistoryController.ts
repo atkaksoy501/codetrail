@@ -803,6 +803,7 @@ export function useHistoryController({
       autoHideViewerHeaderActions: appearance.autoHideViewerHeaderActions,
       defaultViewerWrapMode: appearance.defaultViewerWrapMode,
       defaultDiffViewMode: appearance.defaultDiffViewMode,
+      collapseMultiFileToolDiffs: appearance.collapseMultiFileToolDiffs,
       preferredExternalEditor: appearance.preferredExternalEditor,
       preferredExternalDiffTool: appearance.preferredExternalDiffTool,
       terminalAppCommand: appearance.terminalAppCommand,
@@ -826,6 +827,7 @@ export function useHistoryController({
       appearance.autoHideViewerHeaderActions,
       appearance.defaultViewerWrapMode,
       appearance.defaultDiffViewMode,
+      appearance.collapseMultiFileToolDiffs,
     ],
   );
 
@@ -997,6 +999,7 @@ export function useHistoryController({
     setAutoHideViewerHeaderActions: appearance.setAutoHideViewerHeaderActions,
     setDefaultViewerWrapMode: appearance.setDefaultViewerWrapMode,
     setDefaultDiffViewMode: appearance.setDefaultDiffViewMode,
+    setCollapseMultiFileToolDiffs: appearance.setCollapseMultiFileToolDiffs,
     setPreferredExternalEditor: appearance.setPreferredExternalEditor,
     setPreferredExternalDiffTool: appearance.setPreferredExternalDiffTool,
     setTerminalAppCommand: appearance.setTerminalAppCommand,

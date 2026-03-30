@@ -64,6 +64,7 @@ type SettingsAppearanceProps = {
   autoHideViewerHeaderActions: boolean;
   defaultViewerWrapMode: ViewerWrapMode;
   defaultDiffViewMode: DiffViewMode;
+  collapseMultiFileToolDiffs: boolean;
   preferredExternalEditor: ExternalEditorId;
   preferredExternalDiffTool: ExternalEditorId;
   terminalAppCommand: string;
@@ -111,6 +112,7 @@ type SettingsAppearanceProps = {
   onAutoHideViewerHeaderActionsChange: (enabled: boolean) => void;
   onDefaultViewerWrapModeChange: (mode: ViewerWrapMode) => void;
   onDefaultDiffViewModeChange: (mode: DiffViewMode) => void;
+  onCollapseMultiFileToolDiffsChange: (enabled: boolean) => void;
   onPreferredExternalEditorChange: (editor: ExternalEditorId) => void;
   onPreferredExternalDiffToolChange: (editor: ExternalEditorId) => void;
   onTerminalAppCommandChange: (value: string) => void;
@@ -409,6 +411,13 @@ export function SettingsView({
                     checked={appearance.autoHideViewerHeaderActions}
                     onChange={appearance.onAutoHideViewerHeaderActionsChange}
                     ariaLabel="Auto-hide text viewer header actions"
+                  />
+                </InlineSwitchRow>
+                <InlineSwitchRow label="Collapse diffs when a write message changes multiple files">
+                  <SettingsSwitch
+                    checked={appearance.collapseMultiFileToolDiffs}
+                    onChange={appearance.onCollapseMultiFileToolDiffsChange}
+                    ariaLabel="Collapse diffs when a write message changes multiple files"
                   />
                 </InlineSwitchRow>
               </SectionCard>
