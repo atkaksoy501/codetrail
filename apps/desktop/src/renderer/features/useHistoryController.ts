@@ -1187,6 +1187,7 @@ export function useHistoryController({
     focusMessageId,
     sessionPage,
     messagePageSize: appearance.messagePageSize,
+    historyCategories,
     expandedByDefaultCategories,
     isHistoryLayout,
     projectPaneCollapsed,
@@ -1197,10 +1198,6 @@ export function useHistoryController({
   const activeHistoryMessageIds = useMemo(
     () => activeHistoryMessages.map((message) => message.id),
     [activeHistoryMessages],
-  );
-  const activeHistoryMessageIdsFingerprint = useMemo(
-    () => activeHistoryMessageIds.join("\u0000"),
-    [activeHistoryMessageIds],
   );
 
   useEffect(() => {
@@ -1274,7 +1271,7 @@ export function useHistoryController({
       cancelled = true;
     };
   }, [
-    activeHistoryMessageIdsFingerprint,
+    activeHistoryMessageIds,
     bookmarksResponse.projectId,
     bookmarksResponse.results,
     bookmarkStatesRefreshNonce,

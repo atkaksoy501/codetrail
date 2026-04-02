@@ -555,7 +555,9 @@ export function App({
           return;
         }
         indexingInBackgroundRef.current = status.running;
-        setIndexingInBackground((current) => (current === status.running ? current : status.running));
+        setIndexingInBackground((current) =>
+          current === status.running ? current : status.running,
+        );
         const wasIndexing = wasIndexingRef.current;
         wasIndexingRef.current = status.running;
         const prevCompleted = lastCompletedJobsRef.current;

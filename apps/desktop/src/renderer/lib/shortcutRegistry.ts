@@ -156,7 +156,11 @@ function getShortcutItems(platform: DesktopPlatform) {
       shortcut: `${modifier}+Shift+B`,
       description: "Toggle Sessions pane",
     },
-    { group: "Panels", shortcut: `${modifier}+E`, description: "Expand or collapse all messages" },
+    {
+      group: "Panels",
+      shortcut: `${modifier}+E`,
+      description: "Expand or collapse shown message types",
+    },
     { group: "Panels", shortcut: `${modifier}+Shift+M`, description: "Toggle focus mode" },
     ...CATEGORY_DIGIT_SHORTCUTS.flatMap(([category, digit]) => {
       const categoryLabel =

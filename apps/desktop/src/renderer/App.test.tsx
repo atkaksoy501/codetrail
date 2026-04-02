@@ -286,6 +286,67 @@ describe("App shell", () => {
     });
   });
 
+  it("Cmd+E only toggles expansion defaults for enabled message pills", async () => {
+    installScrollIntoViewMock();
+
+    const listeners: Array<(command: string) => void> = [];
+    const client = createAppClient();
+    client.onAppCommand.mockImplementation((listener) => {
+      listeners.push(listener as (command: string) => void);
+      return () => undefined;
+    });
+    const { container } = renderWithClient(
+      <App
+        initialPaneState={
+          {
+            selectedProjectId: "project_1",
+            selectedSessionId: "session_1",
+            historyMode: "session",
+            historyCategories: ["user"],
+            expandedByDefaultCategories: ["user"],
+          } as PaneStateSnapshot
+        }
+      />,
+      client,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Please review markdown table rendering")).toBeInTheDocument();
+    });
+
+    expect(
+      screen.getByRole("button", {
+        name: "Collapse shown message types",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      container.querySelector(".msg-filter.user-filter .filter-expand-chevron"),
+    ).not.toHaveClass("is-collapsed");
+    expect(
+      container.querySelector(".msg-filter.assistant-filter .filter-expand-chevron"),
+    ).toHaveClass("is-collapsed");
+
+    await act(async () => {
+      for (const listener of listeners) {
+        listener("toggle-all-messages-expanded");
+      }
+    });
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", {
+          name: "Expand shown message types",
+        }),
+      ).toBeInTheDocument();
+    });
+    expect(container.querySelector(".msg-filter.user-filter .filter-expand-chevron")).toHaveClass(
+      "is-collapsed",
+    );
+    expect(
+      container.querySelector(".msg-filter.assistant-filter .filter-expand-chevron"),
+    ).toHaveClass("is-collapsed");
+  });
+
   it("loads history, supports global search navigation, and opens settings", async () => {
     installScrollIntoViewMock();
 
@@ -742,8 +803,8 @@ describe("App shell", () => {
         totalCount: 3,
         categoryCounts: {
           user: 1,
-          assistant: 0,
-          tool_use: 2,
+          assistant: 2,
+          tool_use: 0,
           tool_edit: 0,
           tool_result: 0,
           thinking: 0,
@@ -768,15 +829,12 @@ describe("App shell", () => {
             operationDurationConfidence: null,
           },
           {
-            id: "tool_1",
-            sourceId: "tool_src_1",
+            id: "assistant_1",
+            sourceId: "assistant_src_1",
             sessionId: "session_1",
             provider: "claude",
-            category: "tool_use",
-            content: JSON.stringify({
-              tool_name: "Read",
-              input: { file_path: "/workspace/project-one/src/app.ts" },
-            }),
+            category: "assistant",
+            content: "First assistant body",
             createdAt: "2026-03-01T10:00:02.000Z",
             tokenInput: null,
             tokenOutput: null,
@@ -785,15 +843,12 @@ describe("App shell", () => {
             operationDurationConfidence: null,
           },
           {
-            id: "tool_2",
-            sourceId: "tool_src_2",
+            id: "assistant_2",
+            sourceId: "assistant_src_2",
             sessionId: "session_1",
             provider: "claude",
-            category: "tool_use",
-            content: JSON.stringify({
-              tool_name: "Write",
-              input: { file_path: "/workspace/project-one/src/app.ts" },
-            }),
+            category: "assistant",
+            content: "Second assistant body",
             createdAt: "2026-03-01T10:00:05.000Z",
             tokenInput: null,
             tokenOutput: null,
@@ -820,18 +875,34 @@ describe("App shell", () => {
 
     await waitFor(() => {
       expect(screen.getByText("User body")).toBeInTheDocument();
-      expect(container.querySelectorAll(".message.expanded")).toHaveLength(1);
+      expect(screen.getByText("First assistant body")).toBeInTheDocument();
+      expect(screen.getByText("Second assistant body")).toBeInTheDocument();
+      expect(container.querySelectorAll(".message.expanded")).toHaveLength(3);
+      expect(
+        screen.getByRole("button", { name: "Collapse shown message types" }),
+      ).toBeInTheDocument();
     });
 
-    await user.click(screen.getByRole("button", { name: "Expand all messages" }));
+    await user.click(screen.getByRole("button", { name: "Collapse shown message types" }));
     await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: "Expand shown message types" }),
+      ).toBeInTheDocument();
+      expect(container.querySelectorAll(".message.expanded")).toHaveLength(0);
+    });
+
+    await user.click(screen.getByRole("button", { name: "Expand shown message types" }));
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: "Collapse shown message types" }),
+      ).toBeInTheDocument();
       expect(container.querySelectorAll(".message.expanded")).toHaveLength(3);
     });
 
     await user.click(screen.getAllByRole("button", { name: "Collapse message" })[0]!);
     expect(container.querySelectorAll(".message.expanded")).toHaveLength(2);
 
-    await user.click(screen.getByRole("button", { name: "Collapse all messages" }));
+    await user.click(screen.getByRole("button", { name: "Collapse shown message types" }));
     await waitFor(() => {
       expect(container.querySelectorAll(".message.expanded")).toHaveLength(0);
     });
@@ -2623,6 +2694,18 @@ describe("App shell", () => {
 
     await waitFor(() => {
       expect(screen.getByText("2 of 2 messages")).toBeInTheDocument();
+    });
+
+    const projectTwoFolder = document.querySelector<HTMLButtonElement>(
+      '[data-folder-id="/workspace/project-two"]',
+    );
+    expect(projectTwoFolder).not.toBeNull();
+    if (!projectTwoFolder) {
+      throw new Error("Expected project-two folder row");
+    }
+
+    await user.click(projectTwoFolder);
+    await waitFor(() => {
       expect(document.querySelector('[data-project-expand-toggle-for="project_2"]')).not.toBeNull();
     });
 

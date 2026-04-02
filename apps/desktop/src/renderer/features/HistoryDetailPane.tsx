@@ -167,6 +167,7 @@ export function HistoryDetailPane({
     history.activeMessageSortDirection === "asc"
       ? `Oldest first (${messageSortScopeSuffix}). Switch to newest first`
       : `Newest first (${messageSortScopeSuffix}). Switch to oldest first`;
+  const expandScopeLabel = `${history.globalExpandCollapseLabel} shown message types`;
   const historySearchPlaceholder = getSearchQueryPlaceholder(advancedSearchEnabled);
   const historySearchTooltip = getSearchQueryTooltip(advancedSearchEnabled);
   const [liveNowMs, setLiveNowMs] = useState(() => Date.now());
@@ -368,9 +369,9 @@ export function HistoryDetailPane({
                   history.handleToggleAllCategoryDefaultExpansion();
                   focusMessagePane();
                 }}
-                aria-label={`${history.globalExpandCollapseLabel} all messages`}
+                aria-label={expandScopeLabel}
                 title={formatTooltipLabel(
-                  `${history.globalExpandCollapseLabel} all messages`,
+                  expandScopeLabel,
                   shortcuts.actions.toggleAllMessagesExpanded,
                 )}
               >

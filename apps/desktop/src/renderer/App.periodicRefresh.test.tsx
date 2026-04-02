@@ -449,7 +449,9 @@ describe("App periodic refresh", () => {
     });
 
     await waitFor(() => {
-      expect(countChannelCalls(client, "sessions:getDetail")).toBeGreaterThan(sessionDetailCallsBefore);
+      expect(countChannelCalls(client, "sessions:getDetail")).toBeGreaterThan(
+        sessionDetailCallsBefore,
+      );
     });
     expect(countChannelCalls(client, "bookmarks:getStates")).toBe(bookmarkCallsBefore);
   });

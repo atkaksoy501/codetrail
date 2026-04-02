@@ -446,8 +446,19 @@ export function useHistoryInteractions({
   );
 
   const handleToggleAllCategoryDefaultExpansion = useCallback(() => {
-    const expanded = !CATEGORIES.every((category) => isExpandedByDefault(category));
-    setExpandedByDefaultCategories(expanded ? [...CATEGORIES] : []);
+    if (historyCategories.length === 0) {
+      return;
+    }
+    const enabledCategories = new Set(historyCategories);
+    const expanded = !historyCategories.every((category) => isExpandedByDefault(category));
+    setExpandedByDefaultCategories((current) => {
+      const preservedDisabledCategories = current.filter(
+        (category) => !enabledCategories.has(category),
+      );
+      return expanded
+        ? [...preservedDisabledCategories, ...historyCategories]
+        : preservedDisabledCategories;
+    });
     setMessageExpanded((value) => {
       let changed = false;
       const next = { ...value };
@@ -462,6 +473,7 @@ export function useHistoryInteractions({
     });
   }, [
     activeHistoryMessages,
+    historyCategories,
     isExpandedByDefault,
     setExpandedByDefaultCategories,
     setMessageExpanded,

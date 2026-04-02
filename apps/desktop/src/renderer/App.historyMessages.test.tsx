@@ -331,7 +331,7 @@ describe("App history messages", () => {
       expect(document.activeElement).toBe(messageListElement);
     });
 
-    await user.click(screen.getByRole("button", { name: "Expand all messages" }));
+    await user.click(screen.getByRole("button", { name: "Collapse shown message types" }));
     await waitFor(() => {
       expect(document.activeElement).toBe(messageListElement);
     });

@@ -57,6 +57,7 @@ export function useHistoryDerivedState({
   focusMessageId,
   sessionPage,
   messagePageSize,
+  historyCategories,
   expandedByDefaultCategories,
   isHistoryLayout,
   projectPaneCollapsed,
@@ -80,6 +81,7 @@ export function useHistoryDerivedState({
   focusMessageId: string;
   sessionPage: number;
   messagePageSize: number;
+  historyCategories: MessageCategory[];
   expandedByDefaultCategories: MessageCategory[];
   isHistoryLayout: boolean;
   projectPaneCollapsed: boolean;
@@ -279,8 +281,10 @@ export function useHistoryDerivedState({
   );
 
   const areAllMessagesExpanded = useMemo(
-    () => CATEGORIES.every((category) => isExpandedByDefault(category)),
-    [isExpandedByDefault],
+    () =>
+      historyCategories.length > 0 &&
+      historyCategories.every((category) => isExpandedByDefault(category)),
+    [historyCategories, isExpandedByDefault],
   );
   const globalExpandCollapseLabel = areAllMessagesExpanded ? "Collapse" : "Expand";
   const workspaceStyle = isHistoryLayout
