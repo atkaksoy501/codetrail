@@ -24,8 +24,8 @@ import { shouldIgnoreAsyncEffectError } from "../lib/asyncEffectUtils";
 import type { CodetrailClient } from "../lib/codetrailClient";
 import { type StableListUpdateSource, collectProjectMessageDeltas } from "../lib/projectUpdates";
 import { decideSessionSelectionAfterLoad } from "../lib/sessionSelection";
+import type { RefreshContext } from "./historyControllerTypes";
 import { getHistoryRefreshScopeKey, getLiveEdgePage } from "./historyRefreshPolicy";
-import type { RefreshContext } from "./useHistoryController";
 
 // This hook owns the async side of history state: loading projects/sessions/details and reconciling
 // in-flight requests with the controller's current selection.

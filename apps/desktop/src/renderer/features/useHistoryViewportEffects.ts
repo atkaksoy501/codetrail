@@ -8,7 +8,7 @@ import {
   getMessageListFingerprint,
   scrollFocusedHistoryMessageIntoView,
 } from "./historyControllerShared";
-import type { RefreshContext } from "./useHistoryController";
+import type { RefreshContext } from "./historyControllerTypes";
 
 export function useHistoryViewportEffects({
   messageListRef,

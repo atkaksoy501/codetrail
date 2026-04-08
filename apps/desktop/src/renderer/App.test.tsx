@@ -1433,11 +1433,18 @@ describe("App shell", () => {
     const user = userEvent.setup();
     const client = createAppClient();
 
-    renderWithClient(<App />, client);
+    const { container } = renderWithClient(<App />, client);
 
     await waitFor(() => {
       expect(screen.getByRole("textbox", { name: "Page number" })).toHaveValue("1");
     });
+
+    const messageList = container.querySelector<HTMLDivElement>(".msg-scroll.message-list");
+    expect(messageList).not.toBeNull();
+    if (!messageList) {
+      throw new Error("Expected message list");
+    }
+    messageList.focus();
 
     fireEvent.keyDown(window, { key: "ArrowRight", metaKey: true });
     await waitFor(() => {
@@ -1781,7 +1788,26 @@ describe("App shell", () => {
 
   it("recovers from stale turn anchors when switching projects in Turns view", async () => {
     const user = userEvent.setup();
-    const projectTurns = {
+    type TurnFixture = {
+      anchorMessageId: string;
+      sessionId: string;
+      messages: Array<{
+        id: string;
+        sourceId: string;
+        sessionId: string;
+        provider: "claude" | "codex";
+        category: "user" | "assistant";
+        content: string;
+        createdAt: string;
+        tokenInput: number | null;
+        tokenOutput: number | null;
+        operationDurationMs: number | null;
+        operationDurationSource: "native" | null;
+        operationDurationConfidence: "high" | null;
+      }>;
+    };
+
+    const projectTurns: Record<"project_1" | "project_2", TurnFixture[]> = {
       project_1: [
         {
           anchorMessageId: "p1_turn_1",
@@ -1888,7 +1914,7 @@ describe("App shell", () => {
           ],
         },
       ],
-    } as const;
+    };
     const categoryCounts = {
       user: 1,
       assistant: 1,
@@ -1963,7 +1989,7 @@ describe("App shell", () => {
       }),
       "projects:getCombinedDetail": (request) => {
         const projectId = String(request.projectId ?? "project_1") as keyof typeof projectTurns;
-        const latestTurn = projectTurns[projectId][0];
+        const latestTurn = projectTurns[projectId][0]!;
         return {
           projectId,
           totalCount: latestTurn.messages.length,
@@ -1975,10 +2001,10 @@ describe("App shell", () => {
             ...message,
             sessionTitle: projectId === "project_1" ? "Project One session" : "Project Two session",
             sessionActivity:
-              latestTurn.messages.at(-1)?.createdAt ?? latestTurn.messages[0].createdAt,
-            sessionStartedAt: latestTurn.messages[0].createdAt,
+              latestTurn.messages.at(-1)?.createdAt ?? latestTurn.messages[0]!.createdAt,
+            sessionStartedAt: latestTurn.messages[0]!.createdAt,
             sessionEndedAt:
-              latestTurn.messages.at(-1)?.createdAt ?? latestTurn.messages[0].createdAt,
+              latestTurn.messages.at(-1)?.createdAt ?? latestTurn.messages[0]!.createdAt,
             sessionGitBranch: "main",
             sessionCwd:
               projectId === "project_1" ? "/workspace/project-one" : "/workspace/project-two",
@@ -2041,7 +2067,7 @@ describe("App shell", () => {
           };
         }
 
-        const turn = turns[turnIndex];
+        const turn = turns[turnIndex]!;
         return {
           session: {
             id: turn.sessionId,
@@ -2053,8 +2079,8 @@ describe("App shell", () => {
                 : "/workspace/project-two/session-1.jsonl",
             title: projectId === "project_1" ? "Project One session" : "Project Two session",
             modelNames: projectId === "project_1" ? "claude-opus-4-1" : "gpt-5.4",
-            startedAt: turn.messages[0].createdAt,
-            endedAt: turn.messages.at(-1)?.createdAt ?? turn.messages[0].createdAt,
+            startedAt: turn.messages[0]!.createdAt,
+            endedAt: turn.messages.at(-1)?.createdAt ?? turn.messages[0]!.createdAt,
             durationMs: 1000,
             gitBranch: "main",
             cwd: projectId === "project_1" ? "/workspace/project-one" : "/workspace/project-two",
@@ -2063,12 +2089,12 @@ describe("App shell", () => {
             tokenOutputTotal: 0,
           },
           anchorMessageId: turn.anchorMessageId,
-          anchorMessage: turn.messages[0],
+          anchorMessage: turn.messages[0]!,
           turnNumber: turnIndex + 1,
           totalTurns: turns.length,
           previousTurnAnchorMessageId:
-            turnIndex + 1 < turns.length ? turns[turnIndex + 1].anchorMessageId : null,
-          nextTurnAnchorMessageId: turnIndex > 0 ? turns[turnIndex - 1].anchorMessageId : null,
+            turnIndex + 1 < turns.length ? turns[turnIndex + 1]!.anchorMessageId : null,
+          nextTurnAnchorMessageId: turnIndex > 0 ? turns[turnIndex - 1]!.anchorMessageId : null,
           firstTurnAnchorMessageId: turns.at(-1)?.anchorMessageId ?? null,
           latestTurnAnchorMessageId: turns[0]?.anchorMessageId ?? null,
           totalCount: turn.messages.length,
@@ -3496,10 +3522,23 @@ describe("App shell", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /Project One/i })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /project-one|Project One/i })).toBeInTheDocument();
     });
 
-    fireEvent.doubleClick(screen.getByRole("button", { name: /Project One/i }));
+    const projectRowSelector = '[data-project-nav-kind="project"][data-project-nav-id="project_1"]';
+    let projectTreeButton = container.querySelector<HTMLButtonElement>(projectRowSelector);
+    if (!projectTreeButton) {
+      fireEvent.doubleClick(screen.getByRole("button", { name: /\/workspace\/project-one/i }));
+      await waitFor(() => {
+        expect(container.querySelector<HTMLButtonElement>(projectRowSelector)).not.toBeNull();
+      });
+      projectTreeButton = container.querySelector<HTMLButtonElement>(projectRowSelector);
+    }
+    if (!projectTreeButton) {
+      throw new Error("Expected project tree button");
+    }
+
+    fireEvent.doubleClick(projectTreeButton);
 
     await waitFor(() => {
       expect(
@@ -3531,7 +3570,7 @@ describe("App shell", () => {
     const user = userEvent.setup();
     const client = createAppClient();
 
-    renderWithClient(
+    const { container } = renderWithClient(
       <App
         initialPaneState={
           {
@@ -3550,7 +3589,20 @@ describe("App shell", () => {
       expect(screen.getByText("2 of 2 messages")).toBeInTheDocument();
     });
 
-    fireEvent.doubleClick(screen.getByRole("button", { name: /Project One/i }));
+    const projectRowSelector = '[data-project-nav-kind="project"][data-project-nav-id="project_1"]';
+    let projectTreeButton = container.querySelector<HTMLButtonElement>(projectRowSelector);
+    if (!projectTreeButton) {
+      fireEvent.doubleClick(screen.getByRole("button", { name: /\/workspace\/project-one/i }));
+      await waitFor(() => {
+        expect(container.querySelector<HTMLButtonElement>(projectRowSelector)).not.toBeNull();
+      });
+      projectTreeButton = container.querySelector<HTMLButtonElement>(projectRowSelector);
+    }
+    if (!projectTreeButton) {
+      throw new Error("Expected project tree button");
+    }
+
+    fireEvent.doubleClick(projectTreeButton);
 
     await waitFor(() => {
       expect(

@@ -65,3 +65,19 @@ export function setHistorySelectionSessionId(
     sessionId,
   };
 }
+
+export function areHistorySelectionsEqual(
+  left: HistorySelection,
+  right: HistorySelection,
+): boolean {
+  if (left.mode !== right.mode || left.projectId !== right.projectId) {
+    return false;
+  }
+  if (left.mode === "session") {
+    return right.mode === "session" && left.sessionId === right.sessionId;
+  }
+  if (left.mode === "bookmarks") {
+    return right.mode === "bookmarks" && (left.sessionId ?? "") === (right.sessionId ?? "");
+  }
+  return true;
+}
