@@ -481,6 +481,44 @@ describe("theme-aware Shiki rendering", () => {
     });
   });
 
+  it("renders split diffs with inserted JSX lines as standalone add rows", async () => {
+    document.documentElement.dataset.defaultDiffViewMode = "split";
+    resetContentViewerCachesForTests();
+
+    render(
+      <DiffBlock
+        codeValue={[
+          "diff --git a/a.tsx b/a.tsx",
+          "--- a/a.tsx",
+          "+++ b/a.tsx",
+          "@@ -1,3 +1,5 @@",
+          '-<span className="content-viewer-path" title={metaPath ?? undefined}>',
+          "-  {displayedMetaPath}",
+          "-</span>",
+          '+<span className="content-viewer-path">',
+          '+  <span className="content-viewer-path-text" title={metaPath ?? undefined}>',
+          "+    {displayedMetaPath}",
+          "+  </span>",
+          "+</span>",
+        ].join("\n")}
+        filePath="/Users/acme/repo/a.tsx"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Split" })).toBeInTheDocument();
+    });
+
+    const rows = Array.from(document.querySelectorAll(".diff-split-row"));
+    expect(rows).toHaveLength(5);
+
+    expect(rows[0]?.querySelector(".diff-remove")).not.toBeNull();
+    expect(rows[0]?.querySelector(".diff-add")).not.toBeNull();
+    expect(rows[1]?.querySelector(".diff-remove")).toBeNull();
+    expect(rows[1]?.querySelector(".diff-add")).not.toBeNull();
+    expect(rows[1]?.textContent).toContain("content-viewer-path-text");
+  });
+
   it("collapses diff blocks without falling back to raw diff content", async () => {
     render(
       <DiffBlock

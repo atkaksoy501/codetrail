@@ -9,6 +9,7 @@ import { AdvancedSearchToggleButton } from "../components/AdvancedSearchToggleBu
 import { HistoryExportMenu } from "../components/HistoryExportMenu";
 import { ToolbarIcon } from "../components/ToolbarIcon";
 import { ZoomPercentInput } from "../components/ZoomPercentInput";
+import { TurnView } from "../components/history/TurnView";
 import { MessageCard } from "../components/messages/MessagePresentation";
 import {
   buildLiveSummary,
@@ -26,8 +27,8 @@ import {
 } from "../lib/searchLabels";
 import { useShortcutRegistry } from "../lib/shortcutRegistry";
 import { useTooltipFormatter } from "../lib/tooltipText";
-import { toggleValue } from "../lib/viewUtils";
 import type { useHistoryController } from "./useHistoryController";
+import { formatSelectedSummaryMessageCount } from "./useHistoryDerivedState";
 
 type HistoryController = ReturnType<typeof useHistoryController>;
 
@@ -42,14 +43,15 @@ function getHistoryCategoryShortcutDigit(
 function getHistoryCategoryTooltip(
   history: HistoryController,
   category: MessageCategory,
+  count: number,
   shortcuts: ReturnType<typeof useShortcutRegistry>,
   formatTooltipLabel: ReturnType<typeof useTooltipFormatter>,
 ): string {
   const label = history.prettyCategory(category);
-  const count = formatInteger(history.historyCategoryCounts[category]);
+  const formattedCount = formatInteger(count);
   return [
     formatTooltipLabel(
-      `Show or hide ${label} messages (${count})`,
+      `Show or hide ${label} messages (${formattedCount})`,
       history.historyCategoriesShortcutMap[category],
     ),
     formatTooltipLabel(
@@ -62,33 +64,37 @@ function getHistoryCategoryTooltip(
 function getHistoryCategoryAriaLabel(
   history: HistoryController,
   category: MessageCategory,
+  count: number,
 ): string {
   const label = history.prettyCategory(category);
-  const count = formatInteger(history.historyCategoryCounts[category]);
-  return `Show or hide ${label} messages (${count})`;
+  return `Show or hide ${label} messages (${formatInteger(count)})`;
 }
 
 function getHistoryCategoryExpansionDefaultTooltip(
   history: HistoryController,
   category: MessageCategory,
+  expandedByDefault: boolean,
   formatTooltipLabel: ReturnType<typeof useTooltipFormatter>,
 ): string {
   const label = history.prettyCategory(category);
-  const nextAction = history.expandedByDefaultCategories.includes(category) ? "Collapse" : "Expand";
+  const nextAction = expandedByDefault ? "Collapse" : "Expand";
   return formatTooltipLabel(
     `${nextAction} ${label} messages`,
     history.historyCategoryExpandShortcutMap[category],
   );
 }
 
-function formatHistoryCategorySelection(history: HistoryController): string {
-  if (history.historyCategories.length === 0) {
+function formatHistoryCategorySelection(
+  history: HistoryController,
+  categories: MessageCategory[],
+): string {
+  if (categories.length === 0) {
     return "None";
   }
-  if (history.historyCategories.length === CATEGORIES.length) {
+  if (categories.length === CATEGORIES.length) {
     return "All";
   }
-  return history.historyCategories.map((category) => history.prettyCategory(category)).join(", ");
+  return categories.map((category) => history.prettyCategory(category)).join(", ");
 }
 
 function getHistoryExportViewLabel(history: HistoryController): string {
@@ -140,6 +146,37 @@ export function HistoryDetailPane({
   const formatTooltipLabel = useTooltipFormatter();
   const focusMessagePane = () => paneFocus.focusHistoryPane("message");
   const messagePaneChromeProps = paneFocus.getPaneChromeProps("message");
+  const isTurnView = history.historyDetailMode === "turn";
+  const isBookmarksView = history.historyVisualization === "bookmarks";
+  const isMessagesView = history.historyVisualization === "messages";
+  const turnMessages = history.turnVisibleMessages;
+  const turnCategoryCounts = history.turnCategoryCounts;
+  const effectiveHistoryCategories = isTurnView
+    ? history.turnViewCategories
+    : history.historyCategories;
+  const effectiveExpandedByDefaultCategories = isTurnView
+    ? history.turnViewExpandedByDefaultCategories
+    : history.expandedByDefaultCategories;
+  const effectiveCategoryCounts = isTurnView ? turnCategoryCounts : history.historyCategoryCounts;
+  const effectiveQueryError = isTurnView
+    ? (history.sessionTurnDetail?.queryError ?? null)
+    : history.historyQueryError;
+  const effectiveSortDirection = isTurnView
+    ? history.turnViewSortDirection
+    : history.activeMessageSortDirection;
+  const summaryCountLabel = isTurnView
+    ? formatSelectedSummaryMessageCount(
+        turnMessages.length,
+        history.sessionTurnDetail?.totalCount ?? turnMessages.length,
+        "turn messages",
+      )
+    : history.selectedSummaryMessageCount;
+  const bookmarksEmptyStateLabel =
+    history.selectedSessionId.length > 0
+      ? "There are no bookmarks for this session."
+      : "There are no bookmarks for this project.";
+  const bookmarksEmptyStateActionLabel =
+    history.selectedSessionId.length > 0 ? "Go To Session Messages" : "Go To Project Messages";
   const preserveMessagePaneFocusProps = paneFocus.getPreservePaneFocusProps("message");
   const exportAllPagesCount =
     history.historyMode === "bookmarks"
@@ -147,27 +184,29 @@ export function HistoryDetailPane({
       : history.historyMode === "project_all"
         ? (history.projectCombinedDetail?.totalCount ?? 0)
         : (history.sessionDetail?.totalCount ?? 0);
-  const exportCurrentPageCount = history.activeHistoryMessages.length;
+  const exportCurrentPageCount = isTurnView
+    ? turnMessages.length
+    : history.activeHistoryMessages.length;
   const exportSortLabel =
-    history.activeMessageSortDirection === "asc" ? "Oldest to newest" : "Newest to oldest";
-  const paginationTotal =
-    history.historyMode === "bookmarks"
+    effectiveSortDirection === "asc" ? "Oldest to newest" : "Newest to oldest";
+  const paginationTotal = isTurnView
+    ? history.totalPages
+    : history.historyMode === "bookmarks"
       ? history.bookmarksResponse.filteredCount
       : history.historyMode === "project_all"
         ? (history.projectCombinedDetail?.totalCount ?? 0)
         : (history.sessionDetail?.totalCount ?? 0);
-  const paginationUnit = history.historyMode === "bookmarks" ? "bookmarks" : "messages";
-  const messageSortScopeSuffix =
-    history.historyMode === "project_all"
+  const messageSortScopeSuffix = isTurnView
+    ? "turn"
+    : history.historyMode === "project_all"
       ? "all sessions"
       : history.historyMode === "bookmarks"
         ? "bookmarks"
         : "session";
   const messageSortAriaLabel =
-    history.activeMessageSortDirection === "asc"
+    effectiveSortDirection === "asc"
       ? `Oldest first (${messageSortScopeSuffix}). Switch to newest first`
       : `Newest first (${messageSortScopeSuffix}). Switch to oldest first`;
-  const expandScopeLabel = `${history.globalExpandCollapseLabel} shown message types`;
   const historySearchPlaceholder = getSearchQueryPlaceholder(advancedSearchEnabled);
   const historySearchTooltip = getSearchQueryTooltip(advancedSearchEnabled);
   const [liveNowMs, setLiveNowMs] = useState(() => Date.now());
@@ -286,58 +325,78 @@ export function HistoryDetailPane({
     <div className="history-view">
       <div className="msg-header" {...messagePaneChromeProps}>
         <div className="msg-header-top">
-          <div className="msg-header-info">
-            <span className="summary-count">{history.selectedSummaryMessageCount}</span>
-            {history.historyMode === "bookmarks" ? (
-              <button
-                type="button"
-                className="msg-header-action-button msg-header-action-button-close"
-                {...preserveMessagePaneFocusProps}
-                onClick={() => {
-                  history.closeBookmarksView();
-                  focusMessagePane();
-                }}
-                aria-label="Close bookmarks"
-                title="Close bookmarks"
-              >
-                <ToolbarIcon name="closeFocus" />
-                Close bookmarks
-              </button>
-            ) : history.currentViewBookmarkCount > 0 ? (
-              <button
-                type="button"
-                className="msg-header-action-button"
-                {...preserveMessagePaneFocusProps}
-                onClick={() => {
-                  history.selectBookmarksView();
-                  focusMessagePane();
-                }}
-                aria-label={`${history.currentViewBookmarkCount} ${history.currentViewBookmarkCount === 1 ? "bookmark" : "bookmarks"}`}
-                title="Open bookmarked messages"
-              >
-                <ToolbarIcon name="bookmark" />
-                {history.currentViewBookmarkCount}{" "}
-                {history.currentViewBookmarkCount === 1 ? "bookmark" : "bookmarks"}
-              </button>
-            ) : null}
+          <div className="msg-view-switcher" role="tablist" aria-label="Message pane visualization">
+            <button
+              type="button"
+              role="tab"
+              className={`toolbar-btn msg-view-switcher-button msg-view-switcher-button-messages${isMessagesView ? " is-active" : ""}`}
+              aria-selected={isMessagesView}
+              {...preserveMessagePaneFocusProps}
+              onClick={() => {
+                history.handleSelectMessagesView();
+                focusMessagePane();
+              }}
+              title="Messages"
+            >
+              <ToolbarIcon name="history" />
+              <span>Messages</span>
+            </button>
+            <button
+              type="button"
+              role="tab"
+              className={`toolbar-btn msg-view-switcher-button msg-view-switcher-button-turns${isTurnView ? " is-active" : ""}`}
+              aria-selected={isTurnView}
+              {...preserveMessagePaneFocusProps}
+              onClick={() => {
+                void history.handleSelectTurnsView();
+                focusMessagePane();
+              }}
+              disabled={!history.canToggleTurnView && !isTurnView}
+              title={formatTooltipLabel("Turns", shortcuts.actions.showTurnsView)}
+            >
+              <ToolbarIcon name="turns" />
+              <span>Turns</span>
+            </button>
+            <button
+              type="button"
+              role="tab"
+              className={`toolbar-btn msg-view-switcher-button msg-view-switcher-button-bookmarks${isBookmarksView ? " is-active" : ""}`}
+              aria-selected={isBookmarksView}
+              {...preserveMessagePaneFocusProps}
+              onClick={() => {
+                history.handleSelectBookmarksVisualization();
+                focusMessagePane();
+              }}
+              title={formatTooltipLabel("Bookmarks", shortcuts.actions.showBookmarksView)}
+            >
+              <ToolbarIcon name="bookmark" />
+              <span>Bookmarks</span>
+            </button>
           </div>
           <div className="msg-toolbar">
-            <HistoryExportMenu
-              disabled={exportCurrentPageCount === 0}
-              viewLabel={getHistoryExportViewLabel(history)}
-              currentPageCount={exportCurrentPageCount}
-              allPagesCount={exportAllPagesCount}
-              categoryLabel={formatHistoryCategorySelection(history)}
-              sortLabel={exportSortLabel}
-              onExport={async ({ scope }) => {
-                await history.handleExportMessages({ scope });
-              }}
-            />
+            {!isTurnView ? (
+              <HistoryExportMenu
+                disabled={exportCurrentPageCount === 0}
+                viewLabel={getHistoryExportViewLabel(history)}
+                currentPageCount={exportCurrentPageCount}
+                allPagesCount={exportAllPagesCount}
+                categoryLabel={formatHistoryCategorySelection(history, effectiveHistoryCategories)}
+                sortLabel={exportSortLabel}
+                onExport={async ({ scope }) => {
+                  await history.handleExportMessages({ scope });
+                }}
+              />
+            ) : null}
             <button
               type="button"
               className="toolbar-btn msg-sort-btn"
               {...preserveMessagePaneFocusProps}
               onClick={() => {
+                if (isTurnView) {
+                  history.setTurnViewSortDirection((value) => (value === "asc" ? "desc" : "asc"));
+                  focusMessagePane();
+                  return;
+                }
                 if (history.historyMode === "project_all") {
                   history.setProjectAllSortDirection((value) => (value === "asc" ? "desc" : "asc"));
                   history.setSessionPage(0);
@@ -354,11 +413,15 @@ export function HistoryDetailPane({
                 focusMessagePane();
               }}
               aria-label={messageSortAriaLabel}
-              title={history.messageSortTooltip}
+              title={
+                isTurnView
+                  ? effectiveSortDirection === "asc"
+                    ? "Oldest first"
+                    : "Newest first"
+                  : history.messageSortTooltip
+              }
             >
-              <ToolbarIcon
-                name={history.activeMessageSortDirection === "asc" ? "sortAsc" : "sortDesc"}
-              />
+              <ToolbarIcon name={effectiveSortDirection === "asc" ? "sortAsc" : "sortDesc"} />
             </button>
             <div className="expand-scope-control">
               <button
@@ -369,13 +432,13 @@ export function HistoryDetailPane({
                   history.handleToggleAllCategoryDefaultExpansion();
                   focusMessagePane();
                 }}
-                aria-label={expandScopeLabel}
+                aria-label={`${history.globalExpandCollapseLabel} shown items`}
                 title={formatTooltipLabel(
-                  expandScopeLabel,
+                  `${history.globalExpandCollapseLabel} shown items`,
                   shortcuts.actions.toggleAllMessagesExpanded,
                 )}
               >
-                <ToolbarIcon name={history.areAllMessagesExpanded ? "collapseAll" : "expandAll"} />
+                <ToolbarIcon name={history.globalExpandCollapseIconName} />
                 {history.globalExpandCollapseLabel}
               </button>
             </div>
@@ -446,15 +509,25 @@ export function HistoryDetailPane({
           <div
             key={category}
             className={`msg-filter ${category}-filter${
-              history.historyCategories.includes(category) ? " active" : ""
+              effectiveHistoryCategories.includes(category) ? " active" : ""
             }`}
           >
             <button
               type="button"
               className="msg-filter-main"
               {...preserveMessagePaneFocusProps}
-              aria-label={getHistoryCategoryAriaLabel(history, category)}
-              title={getHistoryCategoryTooltip(history, category, shortcuts, formatTooltipLabel)}
+              aria-label={getHistoryCategoryAriaLabel(
+                history,
+                category,
+                effectiveCategoryCounts[category],
+              )}
+              title={getHistoryCategoryTooltip(
+                history,
+                category,
+                effectiveCategoryCounts[category],
+                shortcuts,
+                formatTooltipLabel,
+              )}
               onMouseDown={(event) => {
                 if (!shortcuts.matches.isCategoryExpansionClick(event) || event.button !== 0) {
                   handledCtrlFilterMouseDownRef.current = null;
@@ -490,7 +563,7 @@ export function HistoryDetailPane({
               <span className="filter-label">
                 {history.prettyCategory(category)}
                 <span className="filter-count" aria-hidden="true">
-                  {formatCompactInteger(history.historyCategoryCounts[category])}
+                  {formatCompactInteger(effectiveCategoryCounts[category])}
                 </span>
               </span>
             </button>
@@ -501,11 +574,13 @@ export function HistoryDetailPane({
               aria-label={getHistoryCategoryExpansionDefaultTooltip(
                 history,
                 category,
+                effectiveExpandedByDefaultCategories.includes(category),
                 formatTooltipLabel,
               )}
               title={getHistoryCategoryExpansionDefaultTooltip(
                 history,
                 category,
+                effectiveExpandedByDefaultCategories.includes(category),
                 formatTooltipLabel,
               )}
               onClick={() => {
@@ -515,7 +590,7 @@ export function HistoryDetailPane({
             >
               <svg
                 className={`msg-chevron filter-expand-chevron${
-                  history.expandedByDefaultCategories.includes(category) ? "" : " is-collapsed"
+                  effectiveExpandedByDefaultCategories.includes(category) ? "" : " is-collapsed"
                 }`}
                 fill="none"
                 viewBox="0 0 24 24"
@@ -529,19 +604,25 @@ export function HistoryDetailPane({
       </div>
 
       <div className="msg-search">
-        <div className={history.historyQueryError ? "search-box invalid" : "search-box"}>
+        <div className={effectiveQueryError ? "search-box invalid" : "search-box"}>
           <div className="search-input-shell">
             <ToolbarIcon name="search" />
             <input
               ref={history.refs.sessionSearchInputRef}
               className="search-input"
               value={
-                history.historyMode === "bookmarks"
-                  ? history.bookmarkQueryInput
-                  : history.sessionQueryInput
+                isTurnView
+                  ? history.turnQueryInput
+                  : history.historyMode === "bookmarks"
+                    ? history.bookmarkQueryInput
+                    : history.sessionQueryInput
               }
               onKeyDown={history.handleHistorySearchKeyDown}
               onChange={(event) => {
+                if (isTurnView) {
+                  history.setTurnQueryInput(event.target.value);
+                  return;
+                }
                 if (history.historyMode === "bookmarks") {
                   history.setBookmarkQueryInput(event.target.value);
                   return;
@@ -550,7 +631,7 @@ export function HistoryDetailPane({
                 history.setSessionPage(0);
               }}
               placeholder={historySearchPlaceholder}
-              title={history.historyQueryError ?? historySearchTooltip}
+              title={effectiveQueryError ?? historySearchTooltip}
               aria-label="Search current history view"
             />
           </div>
@@ -564,9 +645,9 @@ export function HistoryDetailPane({
             title={getAdvancedSearchToggleTitle(advancedSearchEnabled)}
           />
         </div>
-        {history.historyQueryError ? (
-          <p className="search-error" title={history.historyQueryError}>
-            {history.historyQueryError}
+        {effectiveQueryError ? (
+          <p className="search-error" title={effectiveQueryError}>
+            {effectiveQueryError}
           </p>
         ) : null}
       </div>
@@ -580,7 +661,9 @@ export function HistoryDetailPane({
         tabIndex={-1}
         onScroll={history.handleMessageListScroll}
       >
-        {history.activeHistoryMessages.length ? (
+        {isTurnView ? (
+          <TurnView history={history} />
+        ) : history.activeHistoryMessages.length ? (
           history.activeHistoryMessages.map((message) => (
             <MessageCard
               key={message.id}
@@ -620,8 +703,29 @@ export function HistoryDetailPane({
                 : history.bookmarkedMessageIds.has(message.id)
                   ? { onRevealInBookmarks: history.handleRevealInBookmarks }
                   : {})}
+              {...(message.category === "user" &&
+              (message.provider === "claude" || message.provider === "codex")
+                ? { onViewTurn: history.handleEnterTurnView }
+                : {})}
             />
           ))
+        ) : history.historyMode === "bookmarks" &&
+          history.bookmarksResponse.totalCount === 0 &&
+          !history.effectiveBookmarkQuery ? (
+          <div className="empty-state empty-state-with-action">
+            <p>{bookmarksEmptyStateLabel}</p>
+            <button
+              type="button"
+              className="toolbar-btn"
+              {...preserveMessagePaneFocusProps}
+              onClick={() => {
+                history.handleSelectMessagesView();
+                focusMessagePane();
+              }}
+            >
+              {bookmarksEmptyStateActionLabel}
+            </button>
+          </div>
         ) : (
           <p className="empty-state">
             {history.historyMode === "bookmarks"
@@ -631,9 +735,12 @@ export function HistoryDetailPane({
         )}
       </div>
 
-      <div className="msg-pagination pagination-row" {...messagePaneChromeProps}>
+      <div
+        className={`msg-pagination pagination-row history-visualization-${history.historyVisualization}`}
+        {...messagePaneChromeProps}
+      >
         <div className="msg-pagination-group msg-pagination-summary">
-          <span className="page-total">{`${paginationTotal} ${paginationUnit}`}</span>
+          <span className="page-total">{summaryCountLabel}</span>
         </div>
 
         <div className="msg-pagination-group msg-pagination-controls">
@@ -646,8 +753,8 @@ export function HistoryDetailPane({
               focusMessagePane();
             }}
             disabled={!history.canGoToPreviousHistoryPage}
-            title="First page"
-            aria-label="First page"
+            title={isTurnView ? "First turn" : "First page"}
+            aria-label={isTurnView ? "First turn" : "First page"}
           >
             <ToolbarIcon name="chevronsLeft" />
           </button>
@@ -660,14 +767,17 @@ export function HistoryDetailPane({
               focusMessagePane();
             }}
             disabled={!history.canGoToPreviousHistoryPage}
-            title={formatTooltipLabel("Previous page", shortcuts.actions.previousPage)}
-            aria-label="Previous page"
+            title={formatTooltipLabel(
+              isTurnView ? "Previous turn" : "Previous page",
+              shortcuts.actions.previousPage,
+            )}
+            aria-label={isTurnView ? "Previous turn" : "Previous page"}
           >
             <ToolbarIcon name="chevronLeft" />
           </button>
 
           <label className="page-jump-control">
-            <span className="page-jump-label-text">Page</span>
+            <span className="page-jump-label-text">{isTurnView ? "Turn" : "Page"}</span>
             <input
               className="page-jump-input"
               type="text"
@@ -696,7 +806,7 @@ export function HistoryDetailPane({
                   focusMessagePane();
                 }
               }}
-              aria-label="Page number"
+              aria-label={isTurnView ? "Turn number" : "Page number"}
             />
             <span className="page-jump-total">{`of ${history.totalPages}`}</span>
           </label>
@@ -710,8 +820,11 @@ export function HistoryDetailPane({
               focusMessagePane();
             }}
             disabled={!history.canGoToNextHistoryPage}
-            title={formatTooltipLabel("Next page", shortcuts.actions.nextPage)}
-            aria-label="Next page"
+            title={formatTooltipLabel(
+              isTurnView ? "Next turn" : "Next page",
+              shortcuts.actions.nextPage,
+            )}
+            aria-label={isTurnView ? "Next turn" : "Next page"}
           >
             <ToolbarIcon name="chevronRight" />
           </button>
@@ -724,46 +837,52 @@ export function HistoryDetailPane({
               focusMessagePane();
             }}
             disabled={!history.canGoToNextHistoryPage}
-            title="Last page"
-            aria-label="Last page"
+            title={isTurnView ? "Latest turn" : "Last page"}
+            aria-label={isTurnView ? "Latest turn" : "Last page"}
           >
             <ToolbarIcon name="chevronsRight" />
           </button>
         </div>
 
-        <div className="msg-pagination-group msg-pagination-page-size">
-          <label className="page-size-control">
-            <span className="page-size-label-text">Per page</span>
-            <div className="pagination-select-wrap">
-              <select
-                className="pagination-select"
-                aria-label="Messages per page"
-                value={history.messagePageSize}
-                onChange={(event) => {
-                  history.setMessagePageSize(
-                    selectNumericValueOrFallback(
-                      event.target.value,
-                      UI_MESSAGE_PAGE_SIZE_VALUES,
-                      history.messagePageSize as MessagePageSize,
-                    ),
-                  );
-                  focusMessagePane();
-                }}
-              >
-                {UI_MESSAGE_PAGE_SIZE_VALUES.map((value) => (
-                  <option key={value} value={value}>
-                    {value}
-                  </option>
-                ))}
-              </select>
-              <span className="pagination-select-chevron" aria-hidden>
-                <svg viewBox="0 0 12 12">
-                  <title>Open menu</title>
-                  <path d="M3 4.5L6 7.5L9 4.5" />
-                </svg>
-              </span>
-            </div>
-          </label>
+        <div
+          className={`msg-pagination-group msg-pagination-page-size${isTurnView ? " is-hidden" : ""}`}
+        >
+          {!isTurnView ? (
+            <label className="page-size-control">
+              <span className="page-size-label-text">Per page</span>
+              <div className="pagination-select-wrap">
+                <select
+                  className="pagination-select"
+                  aria-label="Messages per page"
+                  value={history.messagePageSize}
+                  onChange={(event) => {
+                    history.setMessagePageSize(
+                      selectNumericValueOrFallback(
+                        event.target.value,
+                        UI_MESSAGE_PAGE_SIZE_VALUES,
+                        history.messagePageSize as MessagePageSize,
+                      ),
+                    );
+                    focusMessagePane();
+                  }}
+                >
+                  {UI_MESSAGE_PAGE_SIZE_VALUES.map((value) => (
+                    <option key={value} value={value}>
+                      {value}
+                    </option>
+                  ))}
+                </select>
+                <span className="pagination-select-chevron" aria-hidden>
+                  <svg viewBox="0 0 12 12">
+                    <title>Open menu</title>
+                    <path d="M3 4.5L6 7.5L9 4.5" />
+                  </svg>
+                </span>
+              </div>
+            </label>
+          ) : (
+            <span aria-hidden="true" />
+          )}
         </div>
       </div>
     </div>

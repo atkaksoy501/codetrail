@@ -431,6 +431,13 @@ export function App({
   );
   const handleOpenProjectDelete = useCallback(
     (projectId?: string) => {
+      if (
+        !projectId &&
+        history.projectViewMode === "tree" &&
+        history.treeFocusedRow?.kind === "folder"
+      ) {
+        return;
+      }
       const targetProject = resolveExplicitOrSelectedItem(
         history.sortedProjects,
         projectId,
@@ -451,7 +458,13 @@ export function App({
         messageCount: targetProject.messageCount,
       });
     },
-    [history.selectedProject, history.selectedProjectId, history.sortedProjects],
+    [
+      history.projectViewMode,
+      history.selectedProject,
+      history.selectedProjectId,
+      history.sortedProjects,
+      history.treeFocusedRow,
+    ],
   );
   const handleOpenSessionDelete = useCallback(
     (sessionId?: string) => {
@@ -1065,6 +1078,8 @@ export function App({
     activeHistoryPane: activeHistoryPaneId,
     lastHistoryPane: paneFocus.lastHistoryPane,
     overlayOpen: paneFocus.isOverlayOpen,
+    historyVisualization: history.historyVisualization,
+    historyDetailMode: history.historyDetailMode,
     hasFocusedHistoryMessage: Boolean(history.visibleFocusedMessageId),
     projectListRef: history.refs.projectListRef,
     sessionListRef: history.refs.sessionListRef,
@@ -1115,8 +1130,13 @@ export function App({
     pageSearchResultsDown: search.pageSearchResultsDown,
     goToPreviousHistoryPage: history.goToPreviousHistoryPage,
     goToNextHistoryPage: history.goToNextHistoryPage,
+    showMessagesView: history.handleSelectMessagesView,
+    showTurnsView: () => void history.handleSelectTurnsView(),
+    showBookmarksView: history.handleSelectBookmarksVisualization,
+    canToggleTurnView: history.canToggleTurnView,
     goToPreviousSearchPage: search.goToPreviousSearchPage,
     goToNextSearchPage: search.goToNextSearchPage,
+    handleSecondaryMessagePaneEscape: history.handleSecondaryMessagePaneEscape,
     applyZoomAction: appearance.applyZoomAction,
     triggerIncrementalRefresh: () => void handleIncrementalRefresh(),
     togglePeriodicRefresh: () =>
@@ -1244,7 +1264,7 @@ export function App({
                 />
               ) : (
                 <section
-                  className="pane content-pane history-focus-pane"
+                  className={`pane content-pane history-focus-pane history-visualization-${history.historyVisualization}`}
                   {...paneFocus.getHistoryPaneRootProps("message")}
                   ref={(element) => {
                     paneFocus.registerHistoryPaneRoot("message", element);

@@ -101,6 +101,7 @@ const MESSAGE_PAGE_SIZE_VALUES: MessagePageSize[] = [...UI_MESSAGE_PAGE_SIZE_VAL
 const VIEWER_WRAP_MODE_VALUES: ViewerWrapMode[] = [...UI_VIEWER_WRAP_MODE_VALUES];
 const DIFF_VIEW_MODE_VALUES: DiffViewMode[] = [...UI_DIFF_VIEW_MODE_VALUES];
 const HISTORY_MODE_VALUES = ["session", "bookmarks", "project_all"] as const;
+const HISTORY_VISUALIZATION_VALUES = ["messages", "turns", "bookmarks"] as const;
 const PROJECT_VIEW_MODE_VALUES = ["list", "tree"] as const;
 const PROJECT_SORT_FIELD_VALUES = ["last_active", "name"] as const;
 const SORT_DIRECTION_VALUES = ["asc", "desc"] as const;
@@ -324,6 +325,14 @@ function sanitizePaneState(
     record.expandedByDefaultCategories,
     CATEGORY_VALUES,
   );
+  const turnViewCategories = sanitizeStringArray(record.turnViewCategories, CATEGORY_VALUES);
+  const turnViewExpandedByDefaultCategories = sanitizeStringArray(
+    record.turnViewExpandedByDefaultCategories,
+    CATEGORY_VALUES,
+  );
+  const turnViewCombinedChangesExpanded = sanitizeOptionalBoolean(
+    record.turnViewCombinedChangesExpanded,
+  );
   const searchProviders = addMissingProviders(
     sanitizeStringArray(record.searchProviders, enabledProviders),
     enabledProviders,
@@ -368,6 +377,14 @@ function sanitizePaneState(
   const selectedProjectId = sanitizeOptionalNonEmptyString(record.selectedProjectId);
   const selectedSessionId = sanitizeOptionalNonEmptyString(record.selectedSessionId);
   const historyMode = sanitizeStringValue(record.historyMode, HISTORY_MODE_VALUES);
+  const historyVisualization = sanitizeStringValue(
+    record.historyVisualization,
+    HISTORY_VISUALIZATION_VALUES,
+  );
+  const historyDetailMode = sanitizeStringValue(record.historyDetailMode, [
+    "flat",
+    "turn",
+  ] as const);
   const projectViewMode = sanitizeStringValue(record.projectViewMode, PROJECT_VIEW_MODE_VALUES);
   const projectSortField = sanitizeStringValue(record.projectSortField, PROJECT_SORT_FIELD_VALUES);
   const projectSortDirection = sanitizeStringValue(
@@ -388,6 +405,10 @@ function sanitizePaneState(
   );
   const projectAllSortDirection = sanitizeStringValue(
     record.projectAllSortDirection,
+    SORT_DIRECTION_VALUES,
+  );
+  const turnViewSortDirection = sanitizeStringValue(
+    record.turnViewSortDirection,
     SORT_DIRECTION_VALUES,
   );
   const sessionPage = sanitizeOptionalInt(record.sessionPage, PAGE_MIN, PAGE_MAX);
@@ -417,6 +438,9 @@ function sanitizePaneState(
     ...(projectProviders ? { projectProviders } : {}),
     ...(historyCategories ? { historyCategories } : {}),
     ...(expandedByDefaultCategories ? { expandedByDefaultCategories } : {}),
+    ...(turnViewCategories ? { turnViewCategories } : {}),
+    ...(turnViewExpandedByDefaultCategories ? { turnViewExpandedByDefaultCategories } : {}),
+    ...(turnViewCombinedChangesExpanded === null ? {} : { turnViewCombinedChangesExpanded }),
     ...(searchProviders ? { searchProviders } : {}),
     ...(liveWatchEnabled === null ? {} : { liveWatchEnabled }),
     ...(liveWatchRowHasBackground === null ? {} : { liveWatchRowHasBackground }),
@@ -442,6 +466,8 @@ function sanitizePaneState(
     ...(selectedProjectId ? { selectedProjectId } : {}),
     ...(selectedSessionId ? { selectedSessionId } : {}),
     ...(historyMode ? { historyMode } : {}),
+    ...(historyVisualization ? { historyVisualization } : {}),
+    ...(historyDetailMode ? { historyDetailMode } : {}),
     ...(projectViewMode ? { projectViewMode } : {}),
     ...(projectSortField ? { projectSortField } : {}),
     ...(projectSortDirection ? { projectSortDirection } : {}),
@@ -449,6 +475,7 @@ function sanitizePaneState(
     ...(messageSortDirection ? { messageSortDirection } : {}),
     ...(bookmarkSortDirection ? { bookmarkSortDirection } : {}),
     ...(projectAllSortDirection ? { projectAllSortDirection } : {}),
+    ...(turnViewSortDirection ? { turnViewSortDirection } : {}),
     ...(sessionPage === null ? {} : { sessionPage }),
     ...(sessionScrollTop === null ? {} : { sessionScrollTop }),
     ...(currentAutoRefreshStrategy ? { currentAutoRefreshStrategy } : {}),

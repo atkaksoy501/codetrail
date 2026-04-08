@@ -138,7 +138,9 @@ export function HistoryLayout({
   const liveTraceProps = recordLiveUiTrace ? { recordLiveUiTrace } : {};
 
   return (
-    <>
+    <div
+      className={`history-visualization-scope history-visualization-${history.historyVisualization}`}
+    >
       <ProjectPane
         data={{
           sortedProjects: history.sortedProjects,
@@ -148,6 +150,7 @@ export function HistoryLayout({
           viewMode: history.projectViewMode,
           updateSource: history.projectListUpdateSource,
           historyMode: history.uiHistoryMode,
+          historyVisualization: history.historyVisualization,
           collapsed: history.projectPaneCollapsed,
           projectQueryInput: history.projectQueryInput,
           projectProviders: history.projectProviders,
@@ -218,7 +221,9 @@ export function HistoryLayout({
         capabilities={{
           canCopyProjectDetails: Boolean(history.selectedProject),
           canOpenProjectLocation: Boolean(history.selectedProject?.path?.trim()),
-          canDeleteProject: Boolean(history.selectedProject),
+          canDeleteProject:
+            Boolean(history.selectedProject) &&
+            !(history.projectViewMode === "tree" && history.treeFocusedRow?.kind === "folder"),
         }}
       />
 
@@ -263,6 +268,7 @@ export function HistoryLayout({
             }}
             onSelectBookmarks={history.selectBookmarksView}
             onSelectSession={history.selectSessionView}
+            historyVisualization={history.historyVisualization}
           />
 
           <div
@@ -277,7 +283,7 @@ export function HistoryLayout({
       )}
 
       <section
-        className="pane content-pane history-focus-pane"
+        className={`pane content-pane history-focus-pane history-visualization-${history.historyVisualization}`}
         {...paneFocus.getHistoryPaneRootProps("message")}
         ref={(element) => {
           paneFocus.registerHistoryPaneRoot("message", element);
@@ -297,6 +303,6 @@ export function HistoryLayout({
           {...liveTraceProps}
         />
       </section>
-    </>
+    </div>
   );
 }

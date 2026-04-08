@@ -126,11 +126,11 @@ export function buildDiffViewModel(
     }
     if (isRemovedDiffLine(line) || isAddedDiffLine(line)) {
       const block = collectChangedDiffBlock(lines, index);
-      for (const removedLine of block.removed) {
-        const pairedAddedLine = block.added.shift() ?? null;
-        if (pairedAddedLine) {
-          const leftText = removedLine.slice(1);
-          const rightText = pairedAddedLine.slice(1);
+      const alignedRows = alignChangedDiffBlock(block.removed, block.added);
+      for (const alignedRow of alignedRows) {
+        if (alignedRow.kind === "paired") {
+          const leftText = alignedRow.removed.slice(1);
+          const rightText = alignedRow.added.slice(1);
           const inlineDiff = shouldRenderInlineDiff(leftText, rightText)
             ? diffInlineSegments(leftText, rightText)
             : {
@@ -152,12 +152,13 @@ export function buildDiffViewModel(
           newLineNumber += 1;
           continue;
         }
-        rows.push({ kind: "remove", oldLine: oldLineNumber, text: removedLine.slice(1) });
-        removedLineCount += 1;
-        oldLineNumber += 1;
-      }
-      for (const addedLine of block.added) {
-        rows.push({ kind: "add", newLine: newLineNumber, text: addedLine.slice(1) });
+        if (alignedRow.kind === "remove") {
+          rows.push({ kind: "remove", oldLine: oldLineNumber, text: alignedRow.removed.slice(1) });
+          removedLineCount += 1;
+          oldLineNumber += 1;
+          continue;
+        }
+        rows.push({ kind: "add", newLine: newLineNumber, text: alignedRow.added.slice(1) });
         addedLineCount += 1;
         newLineNumber += 1;
       }
@@ -247,6 +248,150 @@ function collectChangedDiffBlock(
     break;
   }
   return { removed, added, nextIndex: index };
+}
+
+type AlignedChangedRow =
+  | { kind: "paired"; removed: string; added: string }
+  | { kind: "remove"; removed: string }
+  | { kind: "add"; added: string };
+
+const CHANGED_LINE_MATCH_THRESHOLD = 0.5;
+
+function alignChangedDiffBlock(removed: string[], added: string[]): AlignedChangedRow[] {
+  if (removed.length === 0) {
+    return added.map((line) => ({ kind: "add", added: line }));
+  }
+  if (added.length === 0) {
+    return removed.map((line) => ({ kind: "remove", removed: line }));
+  }
+
+  const pairScores = Array.from({ length: removed.length }, (_, removedIndex) =>
+    Array.from({ length: added.length }, (_, addedIndex) =>
+      scoreChangedLinePair(
+        removed[removedIndex]?.slice(1) ?? "",
+        added[addedIndex]?.slice(1) ?? "",
+      ),
+    ),
+  );
+  const scores: number[][] = Array.from({ length: removed.length + 1 }, () =>
+    Array.from({ length: added.length + 1 }, () => 0),
+  );
+
+  for (let removedIndex = removed.length - 1; removedIndex >= 0; removedIndex -= 1) {
+    for (let addedIndex = added.length - 1; addedIndex >= 0; addedIndex -= 1) {
+      const scoreRow = scores[removedIndex];
+      if (!scoreRow) {
+        continue;
+      }
+      const skipRemoved = scores[removedIndex + 1]?.[addedIndex] ?? 0;
+      const skipAdded = scores[removedIndex]?.[addedIndex + 1] ?? 0;
+      const pairScore = pairScores[removedIndex]?.[addedIndex] ?? 0;
+      const pairValue =
+        pairScore >= CHANGED_LINE_MATCH_THRESHOLD
+          ? pairScore + (scores[removedIndex + 1]?.[addedIndex + 1] ?? 0)
+          : Number.NEGATIVE_INFINITY;
+      scoreRow[addedIndex] = Math.max(skipRemoved, skipAdded, pairValue);
+    }
+  }
+
+  const alignedRows: AlignedChangedRow[] = [];
+  let removedIndex = 0;
+  let addedIndex = 0;
+  while (removedIndex < removed.length && addedIndex < added.length) {
+    const currentScore = scores[removedIndex]?.[addedIndex] ?? 0;
+    const pairScore = pairScores[removedIndex]?.[addedIndex] ?? 0;
+    const pairValue =
+      pairScore >= CHANGED_LINE_MATCH_THRESHOLD
+        ? pairScore + (scores[removedIndex + 1]?.[addedIndex + 1] ?? 0)
+        : Number.NEGATIVE_INFINITY;
+    if (pairValue >= currentScore && pairValue >= (scores[removedIndex + 1]?.[addedIndex] ?? 0)) {
+      alignedRows.push({
+        kind: "paired",
+        removed: removed[removedIndex] ?? "",
+        added: added[addedIndex] ?? "",
+      });
+      removedIndex += 1;
+      addedIndex += 1;
+      continue;
+    }
+    if (
+      (scores[removedIndex + 1]?.[addedIndex] ?? 0) >= (scores[removedIndex]?.[addedIndex + 1] ?? 0)
+    ) {
+      alignedRows.push({
+        kind: "remove",
+        removed: removed[removedIndex] ?? "",
+      });
+      removedIndex += 1;
+      continue;
+    }
+    alignedRows.push({
+      kind: "add",
+      added: added[addedIndex] ?? "",
+    });
+    addedIndex += 1;
+  }
+
+  while (removedIndex < removed.length) {
+    alignedRows.push({
+      kind: "remove",
+      removed: removed[removedIndex] ?? "",
+    });
+    removedIndex += 1;
+  }
+  while (addedIndex < added.length) {
+    alignedRows.push({
+      kind: "add",
+      added: added[addedIndex] ?? "",
+    });
+    addedIndex += 1;
+  }
+
+  return alignedRows;
+}
+
+function scoreChangedLinePair(left: string, right: string): number {
+  const normalizedLeft = left.trim();
+  const normalizedRight = right.trim();
+  if (normalizedLeft.length === 0 || normalizedRight.length === 0) {
+    return normalizedLeft === normalizedRight ? 1 : 0;
+  }
+  const leftIndent = left.length - left.trimStart().length;
+  const rightIndent = right.length - right.trimStart().length;
+  const indentScore = 1 / (1 + Math.abs(leftIndent - rightIndent) / 2);
+
+  const leftTokens = tokenizeChangedLine(normalizedLeft);
+  const rightTokens = tokenizeChangedLine(normalizedRight);
+  if (leftTokens.length === 0 || rightTokens.length === 0) {
+    return normalizedLeft === normalizedRight ? indentScore : 0;
+  }
+
+  const matrix: number[][] = Array.from({ length: leftTokens.length + 1 }, () =>
+    Array.from({ length: rightTokens.length + 1 }, () => 0),
+  );
+
+  for (let leftIndex = leftTokens.length - 1; leftIndex >= 0; leftIndex -= 1) {
+    for (let rightIndex = rightTokens.length - 1; rightIndex >= 0; rightIndex -= 1) {
+      const currentRow = matrix[leftIndex];
+      if (!currentRow) {
+        continue;
+      }
+      if (leftTokens[leftIndex] === rightTokens[rightIndex]) {
+        currentRow[rightIndex] = 1 + (matrix[leftIndex + 1]?.[rightIndex + 1] ?? 0);
+      } else {
+        currentRow[rightIndex] = Math.max(
+          matrix[leftIndex + 1]?.[rightIndex] ?? 0,
+          currentRow[rightIndex + 1] ?? 0,
+        );
+      }
+    }
+  }
+
+  const sharedLength = matrix[0]?.[0] ?? 0;
+  return (sharedLength / Math.max(leftTokens.length, rightTokens.length)) * indentScore;
+}
+
+function tokenizeChangedLine(line: string): string[] {
+  return line.match(/[A-Za-z_$][A-Za-z0-9_$]*/g) ?? [];
 }
 
 function shouldRenderInlineDiff(left: string, right: string): boolean {

@@ -319,6 +319,869 @@ describe("queryService in-memory", () => {
     expect(() => service.close()).not.toThrow();
   });
 
+  it("loads a full session turn around an anchor user message", () => {
+    const db = seedQueryDb();
+    db.prepare(
+      `INSERT INTO messages (
+        id,
+        source_id,
+        session_id,
+        provider,
+        category,
+        content,
+        created_at,
+        token_input,
+        token_output,
+        operation_duration_ms,
+        operation_duration_source,
+        operation_duration_confidence
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      "message_3",
+      "source_3",
+      "session_1",
+      "claude",
+      "tool_edit",
+      JSON.stringify({
+        name: "Edit",
+        input: {
+          file_path: "/workspace/project-one/src/query.ts",
+          old_string: "stable",
+          new_string: "turn-stable",
+        },
+      }),
+      "2026-03-01T10:00:06.000Z",
+      null,
+      null,
+      null,
+      null,
+      null,
+    );
+    db.prepare(
+      `INSERT INTO messages (
+        id,
+        source_id,
+        session_id,
+        provider,
+        category,
+        content,
+        created_at,
+        token_input,
+        token_output,
+        operation_duration_ms,
+        operation_duration_source,
+        operation_duration_confidence
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      "message_4",
+      "source_4",
+      "session_1",
+      "claude",
+      "user",
+      "Start another turn",
+      "2026-03-01T10:00:07.000Z",
+      null,
+      null,
+      null,
+      null,
+      null,
+    );
+    db.prepare(
+      `INSERT INTO message_fts (message_id, session_id, provider, category, content)
+       VALUES (?, ?, ?, ?, ?)`,
+    ).run("message_3", "session_1", "claude", "tool_edit", "turn stable query edit");
+    db.prepare(
+      `INSERT INTO message_fts (message_id, session_id, provider, category, content)
+       VALUES (?, ?, ?, ?, ?)`,
+    ).run("message_4", "session_1", "claude", "user", "Start another turn");
+    db.prepare(
+      `INSERT INTO message_tool_edit_files (
+        id,
+        message_id,
+        file_ordinal,
+        file_path,
+        previous_file_path,
+        change_type,
+        unified_diff,
+        added_line_count,
+        removed_line_count,
+        exactness,
+        before_hash,
+        after_hash
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      "tool_edit_file_1",
+      "message_3",
+      0,
+      "/workspace/project-one/src/query.ts",
+      null,
+      "update",
+      "--- a//workspace/project-one/src/query.ts\n+++ b//workspace/project-one/src/query.ts\n@@ -1,1 +1,1 @@\n-stable\n+turn-stable",
+      1,
+      1,
+      "best_effort",
+      null,
+      null,
+    );
+
+    const service = createQueryServiceFromDb(db);
+    const turn = service.getSessionTurn({
+      scopeMode: "session",
+      sessionId: "session_1",
+      anchorMessageId: "message_1",
+      query: "",
+      sortDirection: "asc",
+    });
+
+    expect(turn.anchorMessageId).toBe("message_1");
+    expect(turn.anchorMessage?.id).toBe("message_1");
+    expect(turn.turnNumber).toBe(1);
+    expect(turn.totalTurns).toBe(2);
+    expect(turn.previousTurnAnchorMessageId).toBeNull();
+    expect(turn.nextTurnAnchorMessageId).toBe("message_4");
+    expect(turn.firstTurnAnchorMessageId).toBe("message_1");
+    expect(turn.latestTurnAnchorMessageId).toBe("message_4");
+    expect(turn.totalCount).toBe(3);
+    expect(turn.messages.map((message) => message.id)).toEqual([
+      "message_1",
+      "message_2",
+      "message_3",
+    ]);
+    expect(turn.categoryCounts.user).toBe(1);
+    expect(turn.categoryCounts.tool_edit).toBe(1);
+    expect(turn.matchedMessageIds).toBeUndefined();
+    expect(turn.messages[2]?.toolEditFiles).toEqual([
+      {
+        filePath: "/workspace/project-one/src/query.ts",
+        previousFilePath: null,
+        changeType: "update",
+        unifiedDiff:
+          "--- a//workspace/project-one/src/query.ts\n+++ b//workspace/project-one/src/query.ts\n@@ -1,1 +1,1 @@\n-stable\n+turn-stable",
+        addedLineCount: 1,
+        removedLineCount: 1,
+        exactness: "best_effort",
+        beforeHash: null,
+        afterHash: null,
+      },
+    ]);
+  });
+
+  it("returns the full turn and separate match ids for turn search", () => {
+    const db = seedQueryDb();
+    db.prepare(
+      `INSERT INTO messages (
+        id,
+        source_id,
+        session_id,
+        provider,
+        category,
+        content,
+        created_at,
+        token_input,
+        token_output,
+        operation_duration_ms,
+        operation_duration_source,
+        operation_duration_confidence
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      "message_3",
+      "source_3",
+      "session_1",
+      "claude",
+      "tool_edit",
+      JSON.stringify({
+        name: "Edit",
+        input: {
+          file_path: "/workspace/project-one/src/query.ts",
+          old_string: "stable",
+          new_string: "turn-stable",
+        },
+      }),
+      "2026-03-01T10:00:06.000Z",
+      null,
+      null,
+      null,
+      null,
+      null,
+    );
+    db.prepare(
+      `INSERT INTO messages (
+        id,
+        source_id,
+        session_id,
+        provider,
+        category,
+        content,
+        created_at,
+        token_input,
+        token_output,
+        operation_duration_ms,
+        operation_duration_source,
+        operation_duration_confidence
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      "message_4",
+      "source_4",
+      "session_1",
+      "claude",
+      "user",
+      "Start another turn",
+      "2026-03-01T10:00:07.000Z",
+      null,
+      null,
+      null,
+      null,
+      null,
+    );
+    db.prepare(
+      `INSERT INTO message_fts (message_id, session_id, provider, category, content)
+       VALUES (?, ?, ?, ?, ?)`,
+    ).run("message_3", "session_1", "claude", "tool_edit", "turn stable query edit");
+    db.prepare(
+      `INSERT INTO message_fts (message_id, session_id, provider, category, content)
+       VALUES (?, ?, ?, ?, ?)`,
+    ).run("message_4", "session_1", "claude", "user", "Start another turn");
+    const service = createQueryServiceFromDb(db);
+
+    const turn = service.getSessionTurn({
+      scopeMode: "session",
+      sessionId: "session_1",
+      anchorMessageId: "message_1",
+      query: "stable",
+      sortDirection: "desc",
+    });
+
+    expect(turn.messages.map((message) => message.id)).toEqual([
+      "message_3",
+      "message_2",
+      "message_1",
+    ]);
+    expect(turn.matchedMessageIds).toEqual(["message_2", "message_3"]);
+    expect(turn.anchorMessage?.id).toBe("message_1");
+    expect(turn.turnNumber).toBe(1);
+    expect(turn.totalTurns).toBe(2);
+    expect(turn.categoryCounts.user).toBe(0);
+    expect(turn.categoryCounts.assistant).toBe(1);
+    expect(turn.categoryCounts.tool_edit).toBe(1);
+  });
+
+  it("loads tool edit metadata for turns larger than the SQLite bind limit", () => {
+    const db = createInMemoryDatabase();
+    const now = "2026-03-01T10:00:00.000Z";
+
+    db.prepare(
+      `INSERT INTO projects (id, provider, name, path, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run("project_1", "claude", "Project One", "/workspace/project-one", now, now);
+
+    db.prepare(
+      `INSERT INTO sessions (
+        id,
+        project_id,
+        provider,
+        file_path,
+        title,
+        model_names,
+        started_at,
+        ended_at,
+        duration_ms,
+        git_branch,
+        cwd,
+        message_count,
+        token_input_total,
+        token_output_total
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      "session_1",
+      "project_1",
+      "claude",
+      "/workspace/project-one/session-1.jsonl",
+      "Large Turn",
+      "claude-opus-4-1",
+      "2026-03-01T10:00:00.000Z",
+      "2026-03-01T10:30:00.000Z",
+      1_800_000,
+      "main",
+      "/workspace/project-one",
+      1005,
+      0,
+      0,
+    );
+
+    const insertMessage = db.prepare(
+      `INSERT INTO messages (
+        id,
+        source_id,
+        session_id,
+        provider,
+        category,
+        content,
+        created_at,
+        token_input,
+        token_output,
+        operation_duration_ms,
+        operation_duration_source,
+        operation_duration_confidence
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    const insertToolEditFile = db.prepare(
+      `INSERT INTO message_tool_edit_files (
+        id,
+        message_id,
+        file_ordinal,
+        file_path,
+        previous_file_path,
+        change_type,
+        unified_diff,
+        added_line_count,
+        removed_line_count,
+        exactness,
+        before_hash,
+        after_hash
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+
+    insertMessage.run(
+      "message_0000",
+      "source_0000",
+      "session_1",
+      "claude",
+      "user",
+      "Anchor turn",
+      "2026-03-01T10:00:00.000Z",
+      null,
+      null,
+      null,
+      null,
+      null,
+    );
+
+    for (let index = 1; index <= 1004; index += 1) {
+      const padded = String(index).padStart(4, "0");
+      const messageId = `message_${padded}`;
+      insertMessage.run(
+        messageId,
+        `source_${padded}`,
+        "session_1",
+        "claude",
+        index % 2 === 0 ? "assistant" : "tool_edit",
+        index % 2 === 0 ? `Assistant ${index}` : `Tool edit ${index}`,
+        `2026-03-01T10:${String(Math.floor(index / 60)).padStart(2, "0")}:${String(index % 60).padStart(2, "0")}.000Z`,
+        null,
+        null,
+        null,
+        null,
+        null,
+      );
+      insertToolEditFile.run(
+        `tool_edit_${padded}`,
+        messageId,
+        0,
+        `/workspace/project-one/src/file-${padded}.ts`,
+        null,
+        "update",
+        `--- a//workspace/project-one/src/file-${padded}.ts\n+++ b//workspace/project-one/src/file-${padded}.ts\n@@ -1,1 +1,1 @@\n-old\n+new`,
+        1,
+        1,
+        "exact",
+        null,
+        null,
+      );
+    }
+
+    const service = createQueryServiceFromDb(db);
+    const turn = service.getSessionTurn({
+      scopeMode: "session",
+      sessionId: "session_1",
+      anchorMessageId: "message_0000",
+      query: "",
+      sortDirection: "asc",
+    });
+
+    expect(turn.totalCount).toBe(1005);
+    expect(turn.turnNumber).toBe(1);
+    expect(turn.totalTurns).toBe(1);
+    expect(turn.messages).toHaveLength(1005);
+    expect(turn.messages[1004]?.toolEditFiles).toEqual([
+      expect.objectContaining({
+        filePath: "/workspace/project-one/src/file-1004.ts",
+        exactness: "exact",
+      }),
+    ]);
+  });
+
+  it("loads the latest turn and arbitrary turn numbers with navigation metadata", () => {
+    const db = seedQueryDb();
+    const insertMessage = db.prepare(
+      `INSERT INTO messages (
+        id,
+        source_id,
+        session_id,
+        provider,
+        category,
+        content,
+        created_at,
+        token_input,
+        token_output,
+        operation_duration_ms,
+        operation_duration_source,
+        operation_duration_confidence
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    const insertFts = db.prepare(
+      `INSERT INTO message_fts (message_id, session_id, provider, category, content)
+       VALUES (?, ?, ?, ?, ?)`,
+    );
+
+    insertMessage.run(
+      "message_3",
+      "source_3",
+      "session_1",
+      "claude",
+      "assistant",
+      "First turn tail",
+      "2026-03-01T10:00:06.000Z",
+      null,
+      null,
+      null,
+      null,
+      null,
+    );
+    insertMessage.run(
+      "message_4",
+      "source_4",
+      "session_1",
+      "claude",
+      "user",
+      "Start turn two",
+      "2026-03-01T10:00:07.000Z",
+      null,
+      null,
+      null,
+      null,
+      null,
+    );
+    insertMessage.run(
+      "message_5",
+      "source_5",
+      "session_1",
+      "claude",
+      "assistant",
+      "Second turn tail",
+      "2026-03-01T10:00:08.000Z",
+      null,
+      null,
+      null,
+      null,
+      null,
+    );
+    insertMessage.run(
+      "message_6",
+      "source_6",
+      "session_1",
+      "claude",
+      "user",
+      "Start turn three",
+      "2026-03-01T10:00:09.000Z",
+      null,
+      null,
+      null,
+      null,
+      null,
+    );
+    insertMessage.run(
+      "message_7",
+      "source_7",
+      "session_1",
+      "claude",
+      "assistant",
+      "Third turn tail",
+      "2026-03-01T10:00:10.000Z",
+      null,
+      null,
+      null,
+      null,
+      null,
+    );
+    insertFts.run("message_3", "session_1", "claude", "assistant", "First turn tail");
+    insertFts.run("message_4", "session_1", "claude", "user", "Start turn two");
+    insertFts.run("message_5", "session_1", "claude", "assistant", "Second turn tail");
+    insertFts.run("message_6", "session_1", "claude", "user", "Start turn three");
+    insertFts.run("message_7", "session_1", "claude", "assistant", "Third turn tail");
+
+    const service = createQueryServiceFromDb(db);
+    const latestTurn = service.getSessionTurn({
+      scopeMode: "session",
+      sessionId: "session_1",
+      latest: true,
+      query: "",
+      sortDirection: "asc",
+    });
+    expect(latestTurn.anchorMessageId).toBe("message_6");
+    expect(latestTurn.turnNumber).toBe(3);
+    expect(latestTurn.totalTurns).toBe(3);
+    expect(latestTurn.previousTurnAnchorMessageId).toBe("message_4");
+    expect(latestTurn.nextTurnAnchorMessageId).toBeNull();
+    expect(latestTurn.firstTurnAnchorMessageId).toBe("message_1");
+    expect(latestTurn.latestTurnAnchorMessageId).toBe("message_6");
+    expect(latestTurn.messages.map((message) => message.id)).toEqual(["message_6", "message_7"]);
+
+    const secondTurn = service.getSessionTurn({
+      scopeMode: "session",
+      sessionId: "session_1",
+      turnNumber: 2,
+      query: "",
+      sortDirection: "asc",
+    });
+    expect(secondTurn.anchorMessageId).toBe("message_4");
+    expect(secondTurn.turnNumber).toBe(2);
+    expect(secondTurn.totalTurns).toBe(3);
+    expect(secondTurn.previousTurnAnchorMessageId).toBe("message_1");
+    expect(secondTurn.nextTurnAnchorMessageId).toBe("message_6");
+    expect(secondTurn.messages.map((message) => message.id)).toEqual(["message_4", "message_5"]);
+  });
+
+  it("returns an empty turn response with a null anchor when the scope has no user turns", () => {
+    const db = createInMemoryDatabase();
+    const now = "2026-03-01T10:00:00.000Z";
+
+    db.prepare(
+      `INSERT INTO projects (id, provider, name, path, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run("project_1", "claude", "Project One", "/workspace/project-one", now, now);
+
+    db.prepare(
+      `INSERT INTO sessions (
+        id,
+        project_id,
+        provider,
+        file_path,
+        model_names,
+        started_at,
+        ended_at,
+        duration_ms,
+        git_branch,
+        cwd,
+        message_count,
+        token_input_total,
+        token_output_total
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      "session_1",
+      "project_1",
+      "claude",
+      "/workspace/project-one/session-1.jsonl",
+      "claude-opus-4-1",
+      now,
+      now,
+      0,
+      "main",
+      "/workspace/project-one",
+      0,
+      0,
+      0,
+    );
+
+    const service = createQueryServiceFromDb(db);
+    const turn = service.getSessionTurn({
+      scopeMode: "session",
+      sessionId: "session_1",
+      latest: true,
+      query: "",
+      sortDirection: "asc",
+    });
+
+    expect(turn.anchorMessageId).toBeNull();
+    expect(turn.anchorMessage).toBeNull();
+    expect(turn.turnNumber).toBe(0);
+    expect(turn.totalTurns).toBe(0);
+    expect(turn.messages).toEqual([]);
+  });
+
+  it("counts project-all turns from all visible user messages in the origin scope", () => {
+    const db = createInMemoryDatabase();
+    const now = "2026-03-01T10:00:00.000Z";
+
+    db.prepare(
+      `INSERT INTO projects (id, provider, name, path, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run("project_1", "claude", "Project One", "/workspace/project-one", now, now);
+
+    const insertSession = db.prepare(
+      `INSERT INTO sessions (
+        id,
+        project_id,
+        provider,
+        file_path,
+        model_names,
+        started_at,
+        ended_at,
+        duration_ms,
+        git_branch,
+        cwd,
+        message_count,
+        token_input_total,
+        token_output_total
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    insertSession.run(
+      "session_claude",
+      "project_1",
+      "claude",
+      "/workspace/project-one/claude.jsonl",
+      "claude",
+      now,
+      now,
+      1_000,
+      "main",
+      "/workspace/project-one",
+      2,
+      0,
+      0,
+    );
+    insertSession.run(
+      "session_gemini",
+      "project_1",
+      "gemini",
+      "/workspace/project-one/gemini.jsonl",
+      "gemini",
+      now,
+      now,
+      1_000,
+      "main",
+      "/workspace/project-one",
+      4,
+      0,
+      0,
+    );
+
+    const insertMessage = db.prepare(
+      `INSERT INTO messages (
+        id,
+        source_id,
+        session_id,
+        provider,
+        category,
+        content,
+        created_at,
+        token_input,
+        token_output,
+        operation_duration_ms,
+        operation_duration_source,
+        operation_duration_confidence
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    const insertFts = db.prepare(
+      `INSERT INTO message_fts (message_id, session_id, provider, category, content)
+       VALUES (?, ?, ?, ?, ?)`,
+    );
+    const rows = [
+      [
+        "message_1",
+        "source_1",
+        "session_claude",
+        "claude",
+        "user",
+        "Claude turn one",
+        "2026-03-01T10:00:00.000Z",
+      ],
+      [
+        "message_2",
+        "source_2",
+        "session_claude",
+        "claude",
+        "assistant",
+        "Claude reply one",
+        "2026-03-01T10:00:01.000Z",
+      ],
+      [
+        "message_3",
+        "source_3",
+        "session_gemini",
+        "gemini",
+        "user",
+        "Gemini turn one",
+        "2026-03-01T10:00:02.000Z",
+      ],
+      [
+        "message_4",
+        "source_4",
+        "session_gemini",
+        "gemini",
+        "assistant",
+        "Gemini reply one",
+        "2026-03-01T10:00:03.000Z",
+      ],
+      [
+        "message_5",
+        "source_5",
+        "session_gemini",
+        "gemini",
+        "user",
+        "Gemini turn two",
+        "2026-03-01T10:00:04.000Z",
+      ],
+      [
+        "message_6",
+        "source_6",
+        "session_gemini",
+        "gemini",
+        "assistant",
+        "Gemini reply two",
+        "2026-03-01T10:00:05.000Z",
+      ],
+    ] as const;
+    for (const [id, sourceId, sessionId, provider, category, content, createdAt] of rows) {
+      insertMessage.run(
+        id,
+        sourceId,
+        sessionId,
+        provider,
+        category,
+        content,
+        createdAt,
+        null,
+        null,
+        null,
+        null,
+        null,
+      );
+      insertFts.run(id, sessionId, provider, category, content);
+    }
+
+    const service = createQueryServiceFromDb(db);
+    const latestTurn = service.getSessionTurn({
+      scopeMode: "project_all",
+      projectId: "project_1",
+      latest: true,
+      query: "",
+      sortDirection: "desc",
+    });
+
+    expect(latestTurn.totalTurns).toBe(3);
+    expect(latestTurn.turnNumber).toBe(3);
+    expect(latestTurn.anchorMessageId).toBe("message_5");
+    expect(latestTurn.firstTurnAnchorMessageId).toBe("message_1");
+    expect(latestTurn.latestTurnAnchorMessageId).toBe("message_5");
+
+    const middleTurn = service.getSessionTurn({
+      scopeMode: "project_all",
+      projectId: "project_1",
+      turnNumber: 2,
+      query: "",
+      sortDirection: "desc",
+    });
+
+    expect(middleTurn.anchorMessageId).toBe("message_3");
+    expect(middleTurn.turnNumber).toBe(2);
+    expect(middleTurn.previousTurnAnchorMessageId).toBe("message_1");
+    expect(middleTurn.nextTurnAnchorMessageId).toBe("message_5");
+  });
+
+  it("does not reduce project-wide turn navigation counts when turn search is active", () => {
+    const db = createInMemoryDatabase();
+    const now = "2026-03-01T10:00:00.000Z";
+
+    db.prepare(
+      `INSERT INTO projects (id, provider, name, path, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run("project_1", "claude", "Project One", "/workspace/project-one", now, now);
+
+    db.prepare(
+      `INSERT INTO sessions (
+        id,
+        project_id,
+        provider,
+        file_path,
+        title,
+        model_names,
+        started_at,
+        ended_at,
+        duration_ms,
+        git_branch,
+        cwd,
+        message_count,
+        token_input_total,
+        token_output_total
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      "session_1",
+      "project_1",
+      "claude",
+      "/workspace/project-one/session-1.jsonl",
+      "session",
+      "claude-opus-4-1",
+      now,
+      "2026-03-01T10:00:06.000Z",
+      1_000,
+      "main",
+      "/workspace/project-one",
+      6,
+      0,
+      0,
+    );
+
+    const insertMessage = db.prepare(
+      `INSERT INTO messages (
+        id,
+        source_id,
+        session_id,
+        provider,
+        category,
+        content,
+        created_at,
+        token_input,
+        token_output,
+        operation_duration_ms,
+        operation_duration_source,
+        operation_duration_confidence
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    const insertFts = db.prepare(
+      `INSERT INTO message_fts (message_id, session_id, provider, category, content)
+       VALUES (?, ?, ?, ?, ?)`,
+    );
+    const rows = [
+      ["message_1", "source_1", "user", "Alpha turn", "2026-03-01T10:00:00.000Z"],
+      ["message_2", "source_2", "assistant", "Alpha reply", "2026-03-01T10:00:01.000Z"],
+      ["message_3", "source_3", "user", "Beta turn", "2026-03-01T10:00:02.000Z"],
+      ["message_4", "source_4", "assistant", "Beta reply", "2026-03-01T10:00:03.000Z"],
+      ["message_5", "source_5", "user", "Gamma turn", "2026-03-01T10:00:04.000Z"],
+      ["message_6", "source_6", "assistant", "Gamma reply", "2026-03-01T10:00:05.000Z"],
+    ] as const;
+    for (const [id, sourceId, category, content, createdAt] of rows) {
+      insertMessage.run(
+        id,
+        sourceId,
+        "session_1",
+        "claude",
+        category,
+        content,
+        createdAt,
+        null,
+        null,
+        null,
+        null,
+        null,
+      );
+      insertFts.run(id, "session_1", "claude", category, content);
+    }
+
+    const service = createQueryServiceFromDb(db);
+    const latestTurn = service.getSessionTurn({
+      scopeMode: "project_all",
+      projectId: "project_1",
+      latest: true,
+      query: "beta",
+      sortDirection: "desc",
+    });
+
+    expect(latestTurn.totalTurns).toBe(3);
+    expect(latestTurn.turnNumber).toBe(3);
+    expect(latestTurn.anchorMessageId).toBe("message_5");
+    expect(latestTurn.matchedMessageIds).toEqual([]);
+  });
+
   it("returns project combined detail sorted by message timestamp", () => {
     const db = createInMemoryDatabase();
     const now = "2026-03-01T10:00:00.000Z";
@@ -773,6 +1636,49 @@ describe("queryService in-memory", () => {
     expect(response.filteredCount).toBe(1);
     expect(response.results).toEqual([]);
     expect(bookmarkStore.listProjectBookmarks).not.toHaveBeenCalled();
+  });
+
+  it("filters bookmark queries by session when a bookmarks session scope is requested", () => {
+    const db = seedQueryDb();
+    const bookmarkStore = createBookmarkStoreMock({
+      countProjectBookmarks: vi.fn((_projectId: string, _options?: unknown) => 1),
+      countProjectBookmarkCategories: vi.fn(() => ({
+        user: 0,
+        assistant: 1,
+        tool_use: 0,
+        tool_edit: 0,
+        tool_result: 0,
+        thinking: 0,
+        system: 0,
+      })),
+      listProjectBookmarks: vi.fn((_projectId: string, _options?: unknown) => []),
+    });
+    const service = createQueryServiceFromDb(db, { bookmarkStore });
+
+    service.listProjectBookmarks({
+      projectId: "project_1",
+      sessionId: "session_1",
+      page: 0,
+      pageSize: 100,
+      sortDirection: "desc",
+    });
+
+    expect(bookmarkStore.countProjectBookmarks).toHaveBeenNthCalledWith(1, "project_1", {
+      sessionId: "session_1",
+    });
+    expect(bookmarkStore.countProjectBookmarkCategories).toHaveBeenCalledWith(
+      "project_1",
+      undefined,
+      "session_1",
+      "simple",
+    );
+    expect(bookmarkStore.listProjectBookmarks).toHaveBeenCalledWith("project_1", {
+      sessionId: "session_1",
+      searchMode: "simple",
+      sortDirection: "desc",
+      limit: 100,
+      offset: 0,
+    });
   });
 
   it("applies bookmark sort direction before bookmark pagination", () => {

@@ -21,6 +21,8 @@ function makeLiveStatusResponse(
     revision: 1,
     claudeHookState: {
       installed: false,
+      managed: false,
+      managedEventNames: [],
       logPath: "/tmp/hooks.jsonl",
       settingsPath: "/tmp/settings.json",
       missingEventNames: [],
@@ -91,7 +93,7 @@ describe("useLiveWatchController push notifications", () => {
       useLiveWatchController({
         codetrail: client,
         mainView: "settings",
-        refreshStrategy: "manual",
+        refreshStrategy: "off",
         liveWatchEnabled: true,
         claudeEnabled: false,
         claudeHooksPrompted: false,
@@ -108,7 +110,7 @@ describe("useLiveWatchController push notifications", () => {
     renderHook(() =>
       useLiveWatchController({
         codetrail: client,
-        mainView: "session",
+        mainView: "help",
         refreshStrategy: "watch-1s",
         liveWatchEnabled: true,
         claudeEnabled: false,

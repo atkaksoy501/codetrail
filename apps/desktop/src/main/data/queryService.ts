@@ -5,6 +5,7 @@ import {
   type MessageCategory,
   PROVIDER_METADATA,
   type Provider,
+  type SearchMode,
   type SearchQueryPlan,
   buildSearchQueryPlan,
   buildWildcardFilterPatterns,
@@ -27,6 +28,8 @@ type DatabaseHandle = ReturnType<typeof openDatabase>;
 type OpenDatabase = typeof openDatabase;
 
 type CreateBookmarkStore = (bookmarksDbPath: string) => BookmarkStore;
+const EMPTY_SEARCH_QUERY_PLAN = buildSearchQueryPlan("", "simple");
+const TOOL_EDIT_FILE_LOAD_BATCH_SIZE = 500;
 
 export type QueryServiceDependencies = {
   openDatabase?: OpenDatabase;
@@ -115,6 +118,20 @@ type MessageRow = {
   operation_duration_confidence: "high" | "low" | null;
 };
 
+type ToolEditFileRow = {
+  message_id: string;
+  file_ordinal: number;
+  file_path: string;
+  previous_file_path: string | null;
+  change_type: "add" | "update" | "delete" | "move";
+  unified_diff: string | null;
+  added_line_count: number;
+  removed_line_count: number;
+  exactness: "exact" | "best_effort";
+  before_hash: string | null;
+  after_hash: string | null;
+};
+
 type ProjectCombinedMessageRow = MessageRow & {
   session_title: string;
   session_started_at: string | null;
@@ -135,6 +152,28 @@ type FocusTargetRow = {
   created_at_ms: number;
 };
 
+type TurnAnchorRow = {
+  id: string;
+  session_id: string;
+  created_at: string;
+  created_at_ms: number;
+};
+
+type TurnAnchorScopeSql = {
+  fromSql: string;
+  whereClause: string;
+  params: Array<string | number>;
+};
+
+type TurnNavigationMetadata = {
+  turnNumber: number;
+  totalTurns: number;
+  previousTurnAnchorMessageId: string | null;
+  nextTurnAnchorMessageId: string | null;
+  firstTurnAnchorMessageId: string | null;
+  latestTurnAnchorMessageId: string | null;
+};
+
 export type QueryService = {
   listProjects: (request: IpcRequest<"projects:list">) => IpcResponse<"projects:list">;
   getProjectCombinedDetail: (
@@ -146,6 +185,7 @@ export type QueryService = {
   getSessionDetail: (
     request: IpcRequest<"sessions:getDetail">,
   ) => IpcResponse<"sessions:getDetail">;
+  getSessionTurn: (request: IpcRequest<"sessions:getTurn">) => IpcResponse<"sessions:getTurn">;
   deleteSession: (request: IpcRequest<"sessions:delete">) => IpcResponse<"sessions:delete">;
   listProjectBookmarks: (
     request: IpcRequestInput<"bookmarks:listProject">,
@@ -209,6 +249,7 @@ export function createQueryServiceFromDb(
     listSessions: (request) => listSessionsWithDatabase(db, bookmarkStore, request),
     listSessionsMany: (request) => listSessionsManyWithDatabase(db, bookmarkStore, request),
     getSessionDetail: (request) => getSessionDetailWithDatabase(db, request),
+    getSessionTurn: (request) => getSessionTurnWithDatabase(db, bookmarkStore, request),
     deleteSession: (request) => deleteSessionWithStore(db, bookmarkStore, request),
     listProjectBookmarks: (request) => listProjectBookmarksWithStore(db, bookmarkStore, request),
     getBookmarkStates: (request) => getBookmarkStatesWithStore(bookmarkStore, request),
@@ -336,6 +377,18 @@ export function getSessionDetail(
     dbPath,
     (db) => getSessionDetailWithDatabase(db, request),
     dependencies.openDatabase,
+  );
+}
+
+export function getSessionTurn(
+  dbPath: string,
+  request: IpcRequest<"sessions:getTurn">,
+  dependencies: QueryServiceDependencies = {},
+): IpcResponse<"sessions:getTurn"> {
+  return withDatabaseAndBookmarkStore(
+    dbPath,
+    (db, bookmarkStore) => getSessionTurnWithDatabase(db, bookmarkStore, request),
+    dependencies,
   );
 }
 
@@ -744,7 +797,7 @@ function getProjectCombinedDetailWithDatabase(
     focusIndex,
     queryError: null,
     highlightPatterns: queryPlan.highlightPatterns,
-    messages: rows.map(mapProjectCombinedMessageRow),
+    messages: mapProjectCombinedMessageRows(db, rows),
   };
 }
 
@@ -918,8 +971,638 @@ function getSessionDetailWithDatabase(
     focusIndex,
     queryError: null,
     highlightPatterns: queryPlan.highlightPatterns,
-    messages: rows.map(mapSessionMessageRow),
+    messages: mapSessionMessageRows(db, rows),
   };
+}
+
+function getSessionTurnWithDatabase(
+  db: DatabaseHandle,
+  bookmarkStore: BookmarkStore,
+  request: IpcRequest<"sessions:getTurn">,
+): IpcResponse<"sessions:getTurn"> {
+  const queryPlan = buildSearchQueryPlan(request.query, request.searchMode ?? "simple");
+  const normalizedQuery = request.query.trim();
+  const { anchor, navigation } = queryPlan.error
+    ? {
+        anchor: undefined,
+        navigation: makeEmptyTurnNavigationMetadata(),
+      }
+    : resolveScopedTurnNavigation(db, bookmarkStore, request);
+
+  if (!anchor) {
+    return {
+      session: null,
+      anchorMessageId: request.anchorMessageId ?? null,
+      anchorMessage: null,
+      ...navigation,
+      totalCount: 0,
+      categoryCounts: makeEmptyCategoryCounts(),
+      queryError: queryPlan.error ?? null,
+      highlightPatterns: queryPlan.error ? [] : queryPlan.highlightPatterns,
+      matchedMessageIds: queryPlan.error
+        ? []
+        : normalizedQuery.length > 0 && !queryPlan.hasTerms
+          ? []
+          : undefined,
+      messages: [],
+    };
+  }
+
+  const sessionRow = db
+    .prepare(
+      `SELECT
+         s.id,
+         s.project_id,
+         s.provider,
+         s.file_path,
+         s.title,
+         s.model_names,
+         s.started_at,
+         s.ended_at,
+         s.activity_at,
+         s.duration_ms,
+         s.git_branch,
+         s.cwd,
+         s.session_identity,
+         s.provider_session_id,
+         s.session_kind,
+         s.canonical_project_path,
+         s.repository_url,
+         s.git_commit_hash,
+         s.lineage_parent_id,
+         s.provider_client,
+         s.provider_source,
+         s.provider_client_version,
+         s.resolution_source,
+         s.worktree_label,
+         s.worktree_source,
+         s.message_count,
+         s.token_input_total,
+         s.token_output_total
+       FROM sessions s
+       WHERE s.id = ?`,
+    )
+    .get(anchor.session_id) as SessionSummaryRow | undefined;
+
+  const nextUser = db
+    .prepare(
+      `SELECT id, created_at, created_at_ms
+       FROM messages
+       WHERE session_id = ?
+         AND category = 'user'
+         AND (
+           created_at_ms > ?
+           OR (
+             created_at_ms = ?
+             AND (
+               created_at > ?
+               OR (created_at = ? AND id > ?)
+             )
+           )
+         )
+       ORDER BY created_at_ms ASC, created_at ASC, id ASC
+       LIMIT 1`,
+    )
+    .get(
+      anchor.session_id,
+      anchor.created_at_ms,
+      anchor.created_at_ms,
+      anchor.created_at,
+      anchor.created_at,
+      anchor.id,
+    ) as FocusTargetRow | undefined;
+
+  if (queryPlan.error) {
+    return {
+      session: sessionRow ? mapSessionSummaryRow(sessionRow) : null,
+      anchorMessageId: anchor.id,
+      anchorMessage: loadAnchorSessionMessage(db, anchor.session_id, anchor.id),
+      ...navigation,
+      totalCount: loadTurnMessageCount(db, anchor.session_id, anchor, nextUser),
+      categoryCounts: loadTurnCategoryCounts(db, anchor.session_id, anchor, nextUser),
+      queryError: queryPlan.error,
+      highlightPatterns: [],
+      matchedMessageIds: [],
+      messages: mapSessionMessageRows(
+        db,
+        loadTurnMessages(db, anchor.session_id, anchor, nextUser, request.sortDirection),
+      ),
+    };
+  }
+  if (normalizedQuery.length > 0 && !queryPlan.hasTerms) {
+    return {
+      session: sessionRow ? mapSessionSummaryRow(sessionRow) : null,
+      anchorMessageId: anchor.id,
+      anchorMessage: loadAnchorSessionMessage(db, anchor.session_id, anchor.id),
+      ...navigation,
+      totalCount: loadTurnMessageCount(db, anchor.session_id, anchor, nextUser),
+      categoryCounts: loadTurnCategoryCounts(db, anchor.session_id, anchor, nextUser),
+      queryError: null,
+      highlightPatterns: [],
+      matchedMessageIds: [],
+      messages: mapSessionMessageRows(
+        db,
+        loadTurnMessages(db, anchor.session_id, anchor, nextUser, request.sortDirection),
+      ),
+    };
+  }
+
+  const turnScope = buildTurnMessageFilters({
+    sessionId: anchor.session_id,
+    anchor,
+    ...(nextUser ? { nextUser } : {}),
+    queryPlan: EMPTY_SEARCH_QUERY_PLAN,
+  });
+  const queryOnlyTurnScope = queryPlan.hasTerms
+    ? buildTurnMessageFilters({
+        sessionId: anchor.session_id,
+        anchor,
+        ...(nextUser ? { nextUser } : {}),
+        queryPlan,
+      })
+    : turnScope;
+  const rows = db
+    .prepare(
+      `SELECT
+         m.id,
+         m.source_id,
+         m.session_id,
+         m.provider,
+         m.category,
+         m.content,
+         m.created_at,
+         m.created_at_ms,
+         m.token_input,
+         m.token_output,
+         m.operation_duration_ms,
+         m.operation_duration_source,
+         m.operation_duration_confidence
+       FROM messages m
+       WHERE ${turnScope.whereClause}
+       ORDER BY ${
+         request.sortDirection === "desc"
+           ? "m.created_at_ms DESC, m.created_at DESC, m.id DESC"
+           : "m.created_at_ms ASC, m.created_at ASC, m.id ASC"
+       }`,
+    )
+    .all(...turnScope.params) as MessageRow[];
+  const totalCount = db
+    .prepare(`SELECT COUNT(*) as count FROM messages m WHERE ${turnScope.whereClause}`)
+    .get(...turnScope.params) as { count: number };
+  const categoryCounts = loadCategoryCounts(
+    db,
+    "FROM messages m",
+    queryOnlyTurnScope.whereClause,
+    queryOnlyTurnScope.params,
+  );
+  const matchedMessageIds = queryPlan.hasTerms
+    ? (
+        db
+          .prepare(
+            `SELECT m.id
+             FROM messages m
+             WHERE ${queryOnlyTurnScope.whereClause}
+             ORDER BY m.created_at_ms ASC, m.created_at ASC, m.id ASC`,
+          )
+          .all(...queryOnlyTurnScope.params) as Array<{ id: string }>
+      ).map((row) => row.id)
+    : undefined;
+
+  return {
+    session: sessionRow ? mapSessionSummaryRow(sessionRow) : null,
+    anchorMessageId: anchor.id,
+    anchorMessage: loadAnchorSessionMessage(db, anchor.session_id, anchor.id),
+    ...navigation,
+    totalCount: totalCount.count,
+    categoryCounts,
+    queryError: null,
+    highlightPatterns: queryPlan.highlightPatterns,
+    matchedMessageIds,
+    messages: mapSessionMessageRows(db, rows),
+  };
+}
+
+function makeEmptyTurnNavigationMetadata(): TurnNavigationMetadata {
+  return {
+    turnNumber: 0,
+    totalTurns: 0,
+    previousTurnAnchorMessageId: null,
+    nextTurnAnchorMessageId: null,
+    firstTurnAnchorMessageId: null,
+    latestTurnAnchorMessageId: null,
+  };
+}
+
+function resolveScopedTurnNavigation(
+  db: DatabaseHandle,
+  bookmarkStore: BookmarkStore,
+  request: IpcRequest<"sessions:getTurn">,
+): {
+  anchor: TurnAnchorRow | undefined;
+  navigation: TurnNavigationMetadata;
+} {
+  if (request.scopeMode === "bookmarks") {
+    const anchors = loadBookmarkTurnAnchors(bookmarkStore, {
+      ...(request.projectId ? { projectId: request.projectId } : {}),
+    });
+    const anchor = resolveScopedTurnAnchorFromList(anchors, request);
+    return {
+      anchor,
+      navigation: buildTurnNavigationMetadataFromAnchors(anchors, anchor?.id ?? null),
+    };
+  }
+
+  const scope = buildTurnAnchorScopeSql({
+    ...(request.scopeMode ? { scopeMode: request.scopeMode } : {}),
+    ...(request.projectId ? { projectId: request.projectId } : {}),
+    ...(request.sessionId ? { sessionId: request.sessionId } : {}),
+  });
+  if (!scope) {
+    return {
+      anchor: undefined,
+      navigation: makeEmptyTurnNavigationMetadata(),
+    };
+  }
+
+  const totalTurns = countTurnAnchors(db, scope);
+  const first = loadBoundaryTurnAnchor(db, scope, "asc");
+  const latest = loadBoundaryTurnAnchor(db, scope, "desc");
+  const anchor = resolveScopedTurnAnchorFromDatabase(db, scope, request, latest);
+
+  if (!anchor) {
+    return {
+      anchor: undefined,
+      navigation: {
+        turnNumber: 0,
+        totalTurns,
+        previousTurnAnchorMessageId: null,
+        nextTurnAnchorMessageId: null,
+        firstTurnAnchorMessageId: first?.id ?? null,
+        latestTurnAnchorMessageId: latest?.id ?? null,
+      },
+    };
+  }
+
+  return {
+    anchor,
+    navigation: {
+      turnNumber: countTurnAnchorsBeforeOrAt(db, scope, anchor),
+      totalTurns,
+      previousTurnAnchorMessageId:
+        loadAdjacentTurnAnchor(db, scope, anchor, "previous")?.id ?? null,
+      nextTurnAnchorMessageId: loadAdjacentTurnAnchor(db, scope, anchor, "next")?.id ?? null,
+      firstTurnAnchorMessageId: first?.id ?? null,
+      latestTurnAnchorMessageId: latest?.id ?? null,
+    },
+  };
+}
+
+function buildTurnAnchorScopeSql(args: {
+  scopeMode?: "session" | "project_all" | "bookmarks";
+  projectId?: string;
+  sessionId?: string;
+}): TurnAnchorScopeSql | null {
+  const scopeMode = args.scopeMode ?? "session";
+  if (scopeMode === "bookmarks") {
+    return null;
+  }
+  const conditions = ["m.category = 'user'"];
+  const params: Array<string | number> = [];
+  if (scopeMode === "project_all") {
+    if (!args.projectId) {
+      return null;
+    }
+    conditions.unshift("s.project_id = ?");
+    params.push(args.projectId);
+    return {
+      fromSql: "FROM messages m JOIN sessions s ON s.id = m.session_id",
+      whereClause: conditions.join(" AND "),
+      params,
+    };
+  }
+  if (!args.sessionId) {
+    return null;
+  }
+  conditions.unshift("m.session_id = ?");
+  params.push(args.sessionId);
+  return {
+    fromSql: "FROM messages m",
+    whereClause: conditions.join(" AND "),
+    params,
+  };
+}
+
+function countTurnAnchors(db: DatabaseHandle, scope: TurnAnchorScopeSql): number {
+  const row = db
+    .prepare(`SELECT COUNT(*) as count ${scope.fromSql} WHERE ${scope.whereClause}`)
+    .get(...scope.params) as { count: number };
+  return row.count;
+}
+
+function loadBoundaryTurnAnchor(
+  db: DatabaseHandle,
+  scope: TurnAnchorScopeSql,
+  sortDirection: "asc" | "desc",
+): TurnAnchorRow | undefined {
+  return db
+    .prepare(
+      `SELECT
+         m.id,
+         m.session_id,
+         m.created_at,
+         m.created_at_ms
+       ${scope.fromSql}
+       WHERE ${scope.whereClause}
+       ORDER BY ${
+         sortDirection === "desc"
+           ? "m.created_at_ms DESC, m.created_at DESC, m.id DESC"
+           : "m.created_at_ms ASC, m.created_at ASC, m.id ASC"
+       }
+       LIMIT 1`,
+    )
+    .get(...scope.params) as TurnAnchorRow | undefined;
+}
+
+function loadTurnAnchorByNumber(
+  db: DatabaseHandle,
+  scope: TurnAnchorScopeSql,
+  turnNumber: number,
+): TurnAnchorRow | undefined {
+  return db
+    .prepare(
+      `SELECT
+         m.id,
+         m.session_id,
+         m.created_at,
+         m.created_at_ms
+       ${scope.fromSql}
+       WHERE ${scope.whereClause}
+       ORDER BY m.created_at_ms ASC, m.created_at ASC, m.id ASC
+       LIMIT 1 OFFSET ?`,
+    )
+    .get(...scope.params, turnNumber - 1) as TurnAnchorRow | undefined;
+}
+
+function loadTurnAnchorByMessageId(
+  db: DatabaseHandle,
+  scope: TurnAnchorScopeSql,
+  anchorMessageId: string,
+): TurnAnchorRow | undefined {
+  return db
+    .prepare(
+      `SELECT
+         m.id,
+         m.session_id,
+         m.created_at,
+         m.created_at_ms
+       ${scope.fromSql}
+       WHERE ${scope.whereClause} AND m.id = ?`,
+    )
+    .get(...scope.params, anchorMessageId) as TurnAnchorRow | undefined;
+}
+
+function resolveScopedTurnAnchorFromDatabase(
+  db: DatabaseHandle,
+  scope: TurnAnchorScopeSql,
+  request: IpcRequest<"sessions:getTurn">,
+  latestAnchor: TurnAnchorRow | undefined,
+): TurnAnchorRow | undefined {
+  if (request.latest) {
+    return latestAnchor;
+  }
+  if (request.turnNumber !== undefined) {
+    return loadTurnAnchorByNumber(db, scope, request.turnNumber);
+  }
+  return request.anchorMessageId
+    ? loadTurnAnchorByMessageId(db, scope, request.anchorMessageId)
+    : undefined;
+}
+
+function countTurnAnchorsBeforeOrAt(
+  db: DatabaseHandle,
+  scope: TurnAnchorScopeSql,
+  anchor: TurnAnchorRow,
+): number {
+  const row = db
+    .prepare(
+      `SELECT COUNT(*) as count
+       ${scope.fromSql}
+       WHERE ${scope.whereClause}
+         AND (
+           m.created_at_ms < ?
+           OR (
+             m.created_at_ms = ?
+             AND (
+               m.created_at < ?
+               OR (m.created_at = ? AND m.id <= ?)
+             )
+           )
+         )`,
+    )
+    .get(
+      ...scope.params,
+      anchor.created_at_ms,
+      anchor.created_at_ms,
+      anchor.created_at,
+      anchor.created_at,
+      anchor.id,
+    ) as { count: number };
+  return row.count;
+}
+
+function loadAdjacentTurnAnchor(
+  db: DatabaseHandle,
+  scope: TurnAnchorScopeSql,
+  anchor: TurnAnchorRow,
+  direction: "previous" | "next",
+): TurnAnchorRow | undefined {
+  const isNext = direction === "next";
+  return db
+    .prepare(
+      `SELECT
+         m.id,
+         m.session_id,
+         m.created_at,
+         m.created_at_ms
+       ${scope.fromSql}
+       WHERE ${scope.whereClause}
+         AND (
+           m.created_at_ms ${isNext ? ">" : "<"} ?
+           OR (
+             m.created_at_ms = ?
+             AND (
+               m.created_at ${isNext ? ">" : "<"} ?
+               OR (m.created_at = ? AND m.id ${isNext ? ">" : "<"} ?)
+             )
+           )
+         )
+       ORDER BY ${
+         isNext
+           ? "m.created_at_ms ASC, m.created_at ASC, m.id ASC"
+           : "m.created_at_ms DESC, m.created_at DESC, m.id DESC"
+       }
+       LIMIT 1`,
+    )
+    .get(
+      ...scope.params,
+      anchor.created_at_ms,
+      anchor.created_at_ms,
+      anchor.created_at,
+      anchor.created_at,
+      anchor.id,
+    ) as TurnAnchorRow | undefined;
+}
+
+function loadBookmarkTurnAnchors(
+  bookmarkStore: BookmarkStore,
+  args: {
+    projectId?: string;
+  },
+): TurnAnchorRow[] {
+  if (!args.projectId) {
+    return [];
+  }
+  return bookmarkStore
+    .listProjectBookmarks(args.projectId, {
+      categories: ["user"],
+      sortDirection: "asc",
+    })
+    .map((row) => ({
+      id: row.message_id,
+      session_id: row.session_id,
+      created_at: row.message_created_at,
+      created_at_ms: Date.parse(row.message_created_at) || 0,
+    }));
+}
+
+function resolveScopedTurnAnchorFromList(
+  anchors: readonly TurnAnchorRow[],
+  request: IpcRequest<"sessions:getTurn">,
+): TurnAnchorRow | undefined {
+  if (request.latest) {
+    return anchors.at(-1);
+  }
+  if (request.turnNumber !== undefined) {
+    return anchors[request.turnNumber - 1];
+  }
+  return anchors.find((anchor) => anchor.id === request.anchorMessageId);
+}
+
+function buildTurnNavigationMetadataFromAnchors(
+  anchors: readonly TurnAnchorRow[],
+  anchorMessageId: string | null,
+): TurnNavigationMetadata {
+  const totalTurns = anchors.length;
+  const index = anchorMessageId ? anchors.findIndex((anchor) => anchor.id === anchorMessageId) : -1;
+  return {
+    turnNumber: index >= 0 ? index + 1 : 0,
+    totalTurns,
+    previousTurnAnchorMessageId: index > 0 ? (anchors[index - 1]?.id ?? null) : null,
+    nextTurnAnchorMessageId:
+      index >= 0 && index + 1 < anchors.length ? (anchors[index + 1]?.id ?? null) : null,
+    firstTurnAnchorMessageId: anchors[0]?.id ?? null,
+    latestTurnAnchorMessageId: anchors.at(-1)?.id ?? null,
+  };
+}
+
+function loadTurnMessages(
+  db: DatabaseHandle,
+  sessionId: string,
+  anchor: FocusTargetRow,
+  nextUser: FocusTargetRow | undefined,
+  sortDirection: "asc" | "desc",
+): MessageRow[] {
+  const turnScope = buildTurnMessageFilters({
+    sessionId,
+    anchor,
+    ...(nextUser ? { nextUser } : {}),
+    queryPlan: EMPTY_SEARCH_QUERY_PLAN,
+  });
+  return db
+    .prepare(
+      `SELECT
+         m.id,
+         m.source_id,
+         m.session_id,
+         m.provider,
+         m.category,
+         m.content,
+         m.created_at,
+         m.created_at_ms,
+         m.token_input,
+         m.token_output,
+         m.operation_duration_ms,
+         m.operation_duration_source,
+         m.operation_duration_confidence
+       FROM messages m
+       WHERE ${turnScope.whereClause}
+       ORDER BY ${
+         sortDirection === "desc"
+           ? "m.created_at_ms DESC, m.created_at DESC, m.id DESC"
+           : "m.created_at_ms ASC, m.created_at ASC, m.id ASC"
+       }`,
+    )
+    .all(...turnScope.params) as MessageRow[];
+}
+
+function loadTurnMessageCount(
+  db: DatabaseHandle,
+  sessionId: string,
+  anchor: FocusTargetRow,
+  nextUser: FocusTargetRow | undefined,
+): number {
+  const turnScope = buildTurnMessageFilters({
+    sessionId,
+    anchor,
+    ...(nextUser ? { nextUser } : {}),
+    queryPlan: EMPTY_SEARCH_QUERY_PLAN,
+  });
+  const totalCount = db
+    .prepare(`SELECT COUNT(*) as count FROM messages m WHERE ${turnScope.whereClause}`)
+    .get(...turnScope.params) as { count: number };
+  return totalCount.count;
+}
+
+function loadTurnCategoryCounts(
+  db: DatabaseHandle,
+  sessionId: string,
+  anchor: FocusTargetRow,
+  nextUser: FocusTargetRow | undefined,
+) {
+  const turnScope = buildTurnMessageFilters({
+    sessionId,
+    anchor,
+    ...(nextUser ? { nextUser } : {}),
+    queryPlan: EMPTY_SEARCH_QUERY_PLAN,
+  });
+  return loadCategoryCounts(db, "FROM messages m", turnScope.whereClause, turnScope.params);
+}
+
+function loadAnchorSessionMessage(db: DatabaseHandle, sessionId: string, anchorMessageId: string) {
+  const row = db
+    .prepare(
+      `SELECT
+         m.id,
+         m.source_id,
+         m.session_id,
+         m.provider,
+         m.category,
+         m.content,
+         m.created_at,
+         m.created_at_ms,
+         m.token_input,
+         m.token_output,
+         m.operation_duration_ms,
+         m.operation_duration_source,
+         m.operation_duration_confidence
+       FROM messages m
+       WHERE m.session_id = ? AND m.id = ?`,
+    )
+    .get(sessionId, anchorMessageId) as MessageRow | undefined;
+  if (!row) {
+    return null;
+  }
+  return mapSessionMessageRows(db, [row])[0] ?? null;
 }
 
 function deleteSessionWithStore(
@@ -1054,10 +1737,13 @@ function listProjectBookmarksWithStore(
   const countOnly = request.countOnly === true;
   const pageSize = request.pageSize ?? 100;
   let page = request.page ?? 0;
+  const bookmarkScopeSessionId = request.sessionId;
   const queryPlan = hasQuery
     ? buildSearchQueryPlan(request.query ?? "", request.searchMode ?? "simple")
     : buildSearchQueryPlan("", request.searchMode ?? "simple");
-  const totalCount = bookmarkStore.countProjectBookmarks(request.projectId);
+  const totalCount = bookmarkStore.countProjectBookmarks(request.projectId, {
+    ...(bookmarkScopeSessionId ? { sessionId: bookmarkScopeSessionId } : {}),
+  });
   if (queryPlan.error) {
     return {
       projectId: request.projectId,
@@ -1074,15 +1760,18 @@ function listProjectBookmarksWithStore(
   const categoryCounts = bookmarkStore.countProjectBookmarkCategories(
     request.projectId,
     hasQuery ? request.query : undefined,
+    bookmarkScopeSessionId,
     request.searchMode ?? "simple",
   );
   const bookmarkQuery = hasQuery ? (request.query ?? "") : null;
   const filteredCount = bookmarkStore.countProjectBookmarks(request.projectId, {
+    ...(bookmarkScopeSessionId ? { sessionId: bookmarkScopeSessionId } : {}),
     ...(bookmarkQuery !== null ? { query: bookmarkQuery } : {}),
     searchMode: request.searchMode ?? "simple",
     ...(request.categories ? { categories: request.categories } : {}),
   });
   const bookmarkListOptions = {
+    ...(bookmarkScopeSessionId ? { sessionId: bookmarkScopeSessionId } : {}),
     ...(bookmarkQuery !== null ? { query: bookmarkQuery } : {}),
     searchMode: request.searchMode ?? "simple",
     ...(request.categories ? { categories: request.categories } : {}),
@@ -1096,8 +1785,8 @@ function listProjectBookmarksWithStore(
   const focusIndex = bookmarkStore.getProjectBookmarkFocusIndex(
     request.projectId,
     {
-      messageId: request.focusMessageId,
-      messageSourceId: request.focusSourceId,
+      ...(request.focusMessageId ? { messageId: request.focusMessageId } : {}),
+      ...(request.focusSourceId ? { messageSourceId: request.focusSourceId } : {}),
     },
     bookmarkListOptions,
   );
@@ -1445,7 +2134,7 @@ function buildMessageFilters(args: {
   sessionId: string;
   categories?: string[];
   queryPlan: SearchQueryPlan;
-}): { whereClause: string; params: string[] } {
+}): { whereClause: string; params: Array<string | number> } {
   return buildScopedMessageFilters({
     scopeClause: "m.session_id = ?",
     scopeValue: args.sessionId,
@@ -1458,7 +2147,7 @@ function buildProjectMessageFilters(args: {
   projectId: string;
   categories?: string[];
   queryPlan: SearchQueryPlan;
-}): { whereClause: string; params: string[] } {
+}): { whereClause: string; params: Array<string | number> } {
   return buildScopedMessageFilters({
     scopeClause: "s.project_id = ?",
     scopeValue: args.projectId,
@@ -1467,12 +2156,56 @@ function buildProjectMessageFilters(args: {
   });
 }
 
+function buildTurnMessageFilters(args: {
+  sessionId: string;
+  anchor: FocusTargetRow;
+  nextUser?: FocusTargetRow;
+  categories?: string[];
+  queryPlan: SearchQueryPlan;
+}): { whereClause: string; params: Array<string | number> } {
+  const conditions = [
+    "m.session_id = ?",
+    `(
+      m.created_at_ms > ?
+      OR (m.created_at_ms = ? AND (m.created_at > ? OR (m.created_at = ? AND m.id >= ?)))
+    )`,
+  ];
+  const params = [
+    args.sessionId,
+    args.anchor.created_at_ms,
+    args.anchor.created_at_ms,
+    args.anchor.created_at,
+    args.anchor.created_at,
+    args.anchor.id,
+  ];
+
+  if (args.nextUser) {
+    conditions.push(
+      `(
+        m.created_at_ms < ?
+        OR (m.created_at_ms = ? AND (m.created_at < ? OR (m.created_at = ? AND m.id < ?)))
+      )`,
+    );
+    params.push(
+      args.nextUser.created_at_ms,
+      args.nextUser.created_at_ms,
+      args.nextUser.created_at,
+      args.nextUser.created_at,
+      args.nextUser.id,
+    );
+  }
+
+  appendNormalizedCategoryFilter(conditions, params, args.categories);
+  appendMessageQueryConditions(conditions, params, args.queryPlan, "m");
+  return { whereClause: conditions.join(" AND "), params };
+}
+
 function buildScopedMessageFilters(args: {
   scopeClause: string;
   scopeValue: string;
   categories: string[] | undefined;
   queryPlan: SearchQueryPlan;
-}): { whereClause: string; params: string[] } {
+}): { whereClause: string; params: Array<string | number> } {
   const conditions = [args.scopeClause];
   const params = [args.scopeValue];
 
@@ -1484,7 +2217,7 @@ function buildScopedMessageFilters(args: {
 
 function appendNormalizedCategoryFilter(
   conditions: string[],
-  params: string[],
+  params: Array<string | number>,
   categoriesInput: string[] | undefined,
 ): void {
   if (categoriesInput === undefined) {
@@ -1503,7 +2236,7 @@ function appendNormalizedCategoryFilter(
 
 function appendMessageQueryConditions(
   conditions: string[],
-  params: string[],
+  params: Array<string | number>,
   queryPlan: SearchQueryPlan,
   messageAlias: string,
 ): void {
@@ -1524,8 +2257,66 @@ function appendMessageQueryConditions(
   }
 }
 
+function loadToolEditFilesByMessageId(
+  db: DatabaseHandle,
+  messageIds: readonly string[],
+): Map<
+  string,
+  NonNullable<IpcResponse<"sessions:getDetail">["messages"][number]["toolEditFiles"]>
+> {
+  const output = new Map<
+    string,
+    NonNullable<IpcResponse<"sessions:getDetail">["messages"][number]["toolEditFiles"]>
+  >();
+  if (messageIds.length === 0) {
+    return output;
+  }
+  for (let index = 0; index < messageIds.length; index += TOOL_EDIT_FILE_LOAD_BATCH_SIZE) {
+    const batch = messageIds.slice(index, index + TOOL_EDIT_FILE_LOAD_BATCH_SIZE);
+    const placeholders = batch.map(() => "?").join(", ");
+    const rows = db
+      .prepare(
+        `SELECT
+           message_id,
+           file_ordinal,
+           file_path,
+           previous_file_path,
+           change_type,
+           unified_diff,
+           added_line_count,
+           removed_line_count,
+           exactness,
+           before_hash,
+           after_hash
+         FROM message_tool_edit_files
+         WHERE message_id IN (${placeholders})
+         ORDER BY message_id ASC, file_ordinal ASC`,
+      )
+      .all(...batch) as ToolEditFileRow[];
+    for (const row of rows) {
+      const current = output.get(row.message_id) ?? [];
+      current.push({
+        filePath: row.file_path,
+        previousFilePath: row.previous_file_path,
+        changeType: row.change_type,
+        unifiedDiff: row.unified_diff,
+        addedLineCount: row.added_line_count,
+        removedLineCount: row.removed_line_count,
+        exactness: row.exactness,
+        beforeHash: row.before_hash,
+        afterHash: row.after_hash,
+      });
+      output.set(row.message_id, current);
+    }
+  }
+  return output;
+}
+
 function mapSessionMessageRow(
   row: MessageRow,
+  toolEditFiles?: NonNullable<
+    IpcResponse<"sessions:getDetail">["messages"][number]["toolEditFiles"]
+  >,
 ): IpcResponse<"sessions:getDetail">["messages"][number] {
   return {
     id: row.id,
@@ -1540,14 +2331,29 @@ function mapSessionMessageRow(
     operationDurationMs: row.operation_duration_ms,
     operationDurationSource: row.operation_duration_source,
     operationDurationConfidence: row.operation_duration_confidence,
+    ...(toolEditFiles && toolEditFiles.length > 0 ? { toolEditFiles } : {}),
   };
+}
+
+function mapSessionMessageRows(
+  db: DatabaseHandle,
+  rows: MessageRow[],
+): IpcResponse<"sessions:getDetail">["messages"] {
+  const toolEditFilesByMessageId = loadToolEditFilesByMessageId(
+    db,
+    rows.map((row) => row.id),
+  );
+  return rows.map((row) => mapSessionMessageRow(row, toolEditFilesByMessageId.get(row.id)));
 }
 
 function mapProjectCombinedMessageRow(
   row: ProjectCombinedMessageRow,
+  toolEditFiles?: NonNullable<
+    IpcResponse<"sessions:getDetail">["messages"][number]["toolEditFiles"]
+  >,
 ): IpcResponse<"projects:getCombinedDetail">["messages"][number] {
   return {
-    ...mapSessionMessageRow(row),
+    ...mapSessionMessageRow(row, toolEditFiles),
     sessionTitle: row.session_title,
     sessionActivity: row.session_ended_at ?? row.session_started_at,
     sessionStartedAt: row.session_started_at,
@@ -1555,6 +2361,17 @@ function mapProjectCombinedMessageRow(
     sessionGitBranch: row.session_git_branch,
     sessionCwd: row.session_cwd,
   };
+}
+
+function mapProjectCombinedMessageRows(
+  db: DatabaseHandle,
+  rows: ProjectCombinedMessageRow[],
+): IpcResponse<"projects:getCombinedDetail">["messages"] {
+  const toolEditFilesByMessageId = loadToolEditFilesByMessageId(
+    db,
+    rows.map((row) => row.id),
+  );
+  return rows.map((row) => mapProjectCombinedMessageRow(row, toolEditFilesByMessageId.get(row.id)));
 }
 
 function mapStoredBookmarkMessageRow(
@@ -1651,6 +2468,9 @@ function assertDeletedSessionResumeMetadata(
 function deleteSessionCascade(db: DatabaseHandle, sessionId: string, filePath: string): void {
   db.prepare(
     "DELETE FROM tool_calls WHERE message_id IN (SELECT id FROM messages WHERE session_id = ?)",
+  ).run(sessionId);
+  db.prepare(
+    "DELETE FROM message_tool_edit_files WHERE message_id IN (SELECT id FROM messages WHERE session_id = ?)",
   ).run(sessionId);
   db.prepare("DELETE FROM message_fts WHERE session_id = ?").run(sessionId);
   db.prepare("DELETE FROM messages WHERE session_id = ?").run(sessionId);

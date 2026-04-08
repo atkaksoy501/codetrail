@@ -36,10 +36,16 @@ function historySelectionsEqual(left: HistorySelection, right: HistorySelection)
   if (left.mode !== right.mode || left.projectId !== right.projectId) {
     return false;
   }
+  if (left.mode === "session" && right.mode === "session") {
+    return left.sessionId === right.sessionId;
+  }
+  if (left.mode === "bookmarks" && right.mode === "bookmarks") {
+    return (left.sessionId ?? "") === (right.sessionId ?? "");
+  }
   if (left.mode !== "session" && right.mode !== "session") {
     return true;
   }
-  return left.mode === "session" && right.mode === "session" && left.sessionId === right.sessionId;
+  return false;
 }
 
 export function useHistorySelectionState(
@@ -233,7 +239,12 @@ export function useHistorySelectionState(
 
   useEffect(() => {
     const flushOnArrowRelease = (event: KeyboardEvent) => {
-      if (event.key !== "ArrowUp" && event.key !== "ArrowDown") {
+      if (
+        event.key !== "ArrowUp" &&
+        event.key !== "ArrowDown" &&
+        event.key !== "ArrowLeft" &&
+        event.key !== "ArrowRight"
+      ) {
         return;
       }
       flushPendingDebouncedSelection();

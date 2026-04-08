@@ -383,7 +383,7 @@ describe("SettingsView", () => {
     );
     await user.click(
       screen.getByRole("checkbox", {
-        name: "Collapse diffs when a write message changes multiple files",
+        name: "Collapse multiple diffs by default in write cards and for all diffs in combined changes card",
       }),
     );
 

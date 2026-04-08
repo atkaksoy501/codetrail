@@ -15,6 +15,7 @@ import type { BookmarkListResponse } from "./types";
 export const PAGE_SIZE = 100;
 export const SEARCH_PAGE_SIZE = 100;
 export const COLLAPSED_PANE_WIDTH = 36;
+export const MESSAGE_ID_BATCH_SIZE = 500;
 
 export const PROJECT_ALL_NAV_ID = "__project_all__";
 export const BOOKMARKS_NAV_ID = "__bookmarks__";
@@ -22,6 +23,12 @@ export const BOOKMARKS_NAV_ID = "__bookmarks__";
 export const PROVIDERS = [...UI_PROVIDER_VALUES];
 export const CATEGORIES = [...UI_MESSAGE_CATEGORY_VALUES];
 export const DEFAULT_MESSAGE_CATEGORIES: MessageCategory[] = ["user", "assistant"];
+export const DEFAULT_TURN_VIEW_MESSAGE_CATEGORIES: MessageCategory[] = [
+  "user",
+  "assistant",
+  "tool_edit",
+];
+export const DEFAULT_TURN_VIEW_EXPANDED_CATEGORIES: MessageCategory[] = ["assistant"];
 
 export const EMPTY_CATEGORY_COUNTS = {
   user: 0,

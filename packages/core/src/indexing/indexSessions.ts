@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { closeSync, openSync, readFileSync, readSync } from "node:fs";
-import { basename } from "node:path";
+import { basename, dirname, join, relative } from "node:path";
 import { z } from "zod";
 
 import {
@@ -35,6 +35,7 @@ import {
   getProviderAdapter,
 } from "../providers";
 import { summarizeOversizedSanitization } from "../providers/oversized/shared";
+import { buildUnifiedDiffFromTextPair, countUnifiedDiffLines } from "../tooling/unifiedDiff";
 
 import { makeMessageId, makeProjectId, makeSessionId, makeToolCallId } from "./ids";
 import {
@@ -258,6 +259,29 @@ export type IndexingNotice = {
   details?: Record<string, unknown>;
 };
 
+type ToolEditExactness = "exact" | "best_effort";
+type ToolEditChangeType = "add" | "update" | "delete" | "move";
+type ClaudeSnapshotFileEntry = {
+  backupFileName: string | null;
+  version: number | null;
+  backupTime: string | null;
+};
+type ClaudePendingToolEdit = {
+  messageDbId: string;
+  sourceId: string;
+  fileOrdinal: number;
+  filePath: string;
+  comparisonPath: string;
+  toolName: "Edit" | "Write";
+  input: Record<string, unknown>;
+};
+type ClaudeTurnNormalizationState = {
+  fileHistoryDirectory: string | null;
+  previousSnapshotByPath: Map<string, ClaudeSnapshotFileEntry>;
+  pendingBySourceId: Map<string, ClaudePendingToolEdit[]>;
+  backupTextByName: Map<string, string | null>;
+};
+
 type IndexingStatements = {
   upsertProject: PreparedStatement<
     [
@@ -343,6 +367,22 @@ type IndexingStatements = {
   insertMessageFts: PreparedStatement<[string, string, Provider, MessageCategory, string]>;
   insertToolCall: PreparedStatement<
     [string, string, string, string, string | null, string | null, string | null]
+  >;
+  upsertMessageToolEditFile: PreparedStatement<
+    [
+      string,
+      string,
+      number,
+      string,
+      string | null,
+      ToolEditChangeType,
+      string | null,
+      number,
+      number,
+      ToolEditExactness,
+      string | null,
+      string | null,
+    ]
   >;
   upsertIndexedFile: PreparedStatement<[string, Provider, string, string, number, number, string]>;
   upsertCheckpoint: PreparedStatement<
@@ -955,6 +995,32 @@ function createIndexingStatements(db: SqliteDatabase): IndexingStatements {
         completed_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
     ),
+    upsertMessageToolEditFile: db.prepare(
+      `INSERT INTO message_tool_edit_files (
+         id,
+         message_id,
+         file_ordinal,
+         file_path,
+         previous_file_path,
+         change_type,
+         unified_diff,
+         added_line_count,
+         removed_line_count,
+         exactness,
+         before_hash,
+         after_hash
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(message_id, file_ordinal) DO UPDATE SET
+         file_path = excluded.file_path,
+         previous_file_path = excluded.previous_file_path,
+         change_type = excluded.change_type,
+         unified_diff = excluded.unified_diff,
+         added_line_count = excluded.added_line_count,
+         removed_line_count = excluded.removed_line_count,
+         exactness = excluded.exactness,
+         before_hash = excluded.before_hash,
+         after_hash = excluded.after_hash`,
+    ),
     upsertIndexedFile: db.prepare(
       `INSERT INTO indexed_files (
          file_path,
@@ -1368,6 +1434,7 @@ function indexStreamedJsonlSessionFile(args: {
       );
 
       const streamed = streamAndPersistJsonlEvents({
+        db: args.db,
         adapter,
         discovered: args.discovered,
         parserDiagnostics,
@@ -1705,6 +1772,7 @@ function prepareStreamedSessionPersistence(
 }
 
 function streamAndPersistJsonlEvents(args: {
+  db: SqliteDatabase;
   adapter: ReturnType<typeof getProviderAdapter>;
   discovered: ReturnType<typeof discoverSessionFiles>[number];
   parserDiagnostics: ParserDiagnostic[];
@@ -1718,6 +1786,10 @@ function streamAndPersistJsonlEvents(args: {
 }): { sequence: number; emittedEvents: number; streamResult: StreamJsonlResult } {
   let sequence = args.resumeCheckpoint?.nextMessageSequence ?? 0;
   let emittedEvents = 0;
+  const claudeNormalizationState =
+    args.discovered.provider === "claude"
+      ? createClaudeTurnNormalizationState(args.discovered)
+      : null;
   try {
     const streamResult = streamJsonlEvents(args.discovered.filePath, {
       adapter: args.adapter,
@@ -1749,6 +1821,7 @@ function streamAndPersistJsonlEvents(args: {
         }
         args.adapter.updateSourceMetadataFromEvent?.(event, args.sourceMetaAccumulator);
         sequence = parseAndPersistStreamEvent({
+          db: args.db,
           discovered: args.discovered,
           event,
           eventIndex,
@@ -1758,6 +1831,7 @@ function streamAndPersistJsonlEvents(args: {
           sessionDbId: args.sessionDbId,
           statements: args.statements,
           onNotice: args.onNotice,
+          claudeNormalizationState,
         });
       },
       onOmittedLine: (omitted) => {
@@ -1768,6 +1842,7 @@ function streamAndPersistJsonlEvents(args: {
           sessionDbId: args.sessionDbId,
           statements: args.statements,
           onNotice: args.onNotice,
+          claudeNormalizationState,
           message: buildOversizedJsonlOmissionMessage(
             args.discovered,
             args.processingState,
@@ -1809,6 +1884,7 @@ function streamAndPersistJsonlEvents(args: {
 }
 
 function parseAndPersistStreamEvent(args: {
+  db: SqliteDatabase;
   discovered: ReturnType<typeof discoverSessionFiles>[number];
   event: unknown;
   eventIndex: number;
@@ -1818,6 +1894,7 @@ function parseAndPersistStreamEvent(args: {
   sessionDbId: string;
   statements: IndexingStatements;
   onNotice: (notice: IndexingNotice) => void;
+  claudeNormalizationState: ClaudeTurnNormalizationState | null;
 }): number {
   let parsedEvent: ReturnType<typeof parseSessionEvent>;
   try {
@@ -1853,9 +1930,19 @@ function parseAndPersistStreamEvent(args: {
       sessionDbId: args.sessionDbId,
       statements: args.statements,
       onNotice: args.onNotice,
+      claudeNormalizationState: args.claudeNormalizationState,
       message,
     });
   }
+
+  processClaudeSnapshotEvent({
+    db: args.db,
+    discovered: args.discovered,
+    event: args.event,
+    sessionDbId: args.sessionDbId,
+    statements: args.statements,
+    claudeNormalizationState: args.claudeNormalizationState,
+  });
 
   return parsedEvent.nextSequence;
 }
@@ -1866,6 +1953,7 @@ function persistStreamMessage(args: {
   sessionDbId: string;
   statements: IndexingStatements;
   onNotice: (notice: IndexingNotice) => void;
+  claudeNormalizationState: ClaudeTurnNormalizationState | null;
   message: IndexedMessage;
 }): void {
   const stateSnapshot = snapshotMessageProcessingState(args.processingState);
@@ -1915,6 +2003,7 @@ function persistStreamMessage(args: {
     });
   }
 
+  const persistedMessageId = makeMessageId(args.sessionDbId, messageToPersist.id);
   try {
     insertIndexedMessage(args.statements, args.sessionDbId, messageToPersist, {
       provider: args.discovered.provider,
@@ -1930,6 +2019,570 @@ function persistStreamMessage(args: {
       stage: "persist",
       error,
     });
+  }
+
+  registerClaudeToolEditCandidate({
+    statements: args.statements,
+    discovered: args.discovered,
+    claudeNormalizationState: args.claudeNormalizationState,
+    message: messageToPersist,
+    persistedMessageId,
+  });
+}
+
+function createClaudeTurnNormalizationState(
+  discovered: ReturnType<typeof discoverSessionFiles>[number],
+): ClaudeTurnNormalizationState {
+  return {
+    fileHistoryDirectory: resolveClaudeFileHistoryDirectory(
+      discovered.filePath,
+      discovered.sourceSessionId,
+    ),
+    previousSnapshotByPath: new Map(),
+    pendingBySourceId: new Map(),
+    backupTextByName: new Map(),
+  };
+}
+
+function resolveClaudeFileHistoryDirectory(filePath: string, sessionId: string): string | null {
+  const projectsDirectory = dirname(filePath);
+  const claudeRoot = dirname(dirname(projectsDirectory));
+  if (basename(claudeRoot) !== ".claude") {
+    return null;
+  }
+  return join(claudeRoot, "file-history", sessionId);
+}
+
+function registerClaudeToolEditCandidate(args: {
+  statements: IndexingStatements;
+  discovered: ReturnType<typeof discoverSessionFiles>[number];
+  claudeNormalizationState: ClaudeTurnNormalizationState | null;
+  message: IndexedMessage;
+  persistedMessageId: string;
+}): void {
+  if (args.discovered.provider !== "claude" || !args.claudeNormalizationState) {
+    return;
+  }
+  if (args.message.category !== "tool_use" && args.message.category !== "tool_edit") {
+    return;
+  }
+
+  const record = tryParseJsonRecord(args.message.content);
+  const toolName = readString(record?.name);
+  if (toolName !== "Edit" && toolName !== "Write") {
+    return;
+  }
+  const input = asRecord(record?.input);
+  const filePath = readString(input?.file_path);
+  if (!filePath) {
+    return;
+  }
+
+  const sourceId = args.message.id;
+  const fileOrdinal = 0;
+  const candidate: ClaudePendingToolEdit = {
+    messageDbId: args.persistedMessageId,
+    sourceId,
+    fileOrdinal,
+    filePath,
+    comparisonPath: normalizeClaudeComparisonPath(filePath, args.discovered.metadata.cwd),
+    toolName,
+    input: input ?? {},
+  };
+  const pending =
+    args.claudeNormalizationState.pendingBySourceId.get(sourceId) ??
+    args.claudeNormalizationState.pendingBySourceId.get(sourceId.split("#")[0] ?? sourceId) ??
+    [];
+  pending.push(candidate);
+  args.claudeNormalizationState.pendingBySourceId.set(sourceId.split("#")[0] ?? sourceId, pending);
+
+  const provisional = buildBestEffortClaudeToolEditFile({
+    candidate,
+    fileHistoryDirectory: args.claudeNormalizationState.fileHistoryDirectory,
+    previousSnapshotByPath: args.claudeNormalizationState.previousSnapshotByPath,
+    backupTextByName: args.claudeNormalizationState.backupTextByName,
+  });
+  if (!provisional) {
+    return;
+  }
+  upsertMessageToolEditFile(args.statements, {
+    id: makeToolCallId(args.persistedMessageId, 1000 + fileOrdinal),
+    messageId: args.persistedMessageId,
+    fileOrdinal,
+    filePath: provisional.filePath,
+    previousFilePath: provisional.previousFilePath,
+    changeType: provisional.changeType,
+    unifiedDiff: provisional.unifiedDiff,
+    addedLineCount: provisional.addedLineCount,
+    removedLineCount: provisional.removedLineCount,
+    exactness: provisional.exactness,
+    beforeHash: provisional.beforeHash,
+    afterHash: provisional.afterHash,
+  });
+}
+
+function processClaudeSnapshotEvent(args: {
+  db: SqliteDatabase;
+  discovered: ReturnType<typeof discoverSessionFiles>[number];
+  event: unknown;
+  sessionDbId: string;
+  statements: IndexingStatements;
+  claudeNormalizationState: ClaudeTurnNormalizationState | null;
+}): void {
+  if (args.discovered.provider !== "claude" || !args.claudeNormalizationState) {
+    return;
+  }
+  const eventRecord = asRecord(args.event);
+  if (readString(eventRecord?.type) !== "file-history-snapshot") {
+    return;
+  }
+  const sourceId = readString(eventRecord?.messageId);
+  if (!sourceId) {
+    return;
+  }
+  const snapshot = asRecord(eventRecord?.snapshot);
+  const trackedFileBackups = asRecord(snapshot?.trackedFileBackups);
+  if (!trackedFileBackups) {
+    return;
+  }
+
+  const currentSnapshotByPath = new Map<string, ClaudeSnapshotFileEntry>();
+  const changedPaths: string[] = [];
+  for (const [filePath, value] of Object.entries(trackedFileBackups)) {
+    const entryRecord = asRecord(value);
+    const entry: ClaudeSnapshotFileEntry = {
+      backupFileName: readString(entryRecord?.backupFileName) ?? null,
+      version:
+        typeof entryRecord?.version === "number" && Number.isFinite(entryRecord.version)
+          ? entryRecord.version
+          : null,
+      backupTime: readString(entryRecord?.backupTime) ?? null,
+    };
+    currentSnapshotByPath.set(filePath, entry);
+    const previous = args.claudeNormalizationState.previousSnapshotByPath.get(filePath);
+    if (!previous || !isSameClaudeSnapshotEntry(previous, entry)) {
+      changedPaths.push(filePath);
+    }
+  }
+  args.claudeNormalizationState.previousSnapshotByPath = currentSnapshotByPath;
+
+  const pending =
+    args.claudeNormalizationState.pendingBySourceId.get(sourceId) ??
+    loadPersistedClaudePendingToolEdits({
+      db: args.db,
+      sessionDbId: args.sessionDbId,
+      discovered: args.discovered,
+      sourceId,
+    });
+  if (!pending || pending.length === 0) {
+    return;
+  }
+
+  for (const changedPath of changedPaths) {
+    const snapshotEntry = currentSnapshotByPath.get(changedPath);
+    if (!snapshotEntry) {
+      continue;
+    }
+    const pendingIndex = pending.findIndex(
+      (candidate) =>
+        candidate.comparisonPath === normalizeClaudeComparisonPath(changedPath, null) ||
+        candidate.filePath === changedPath,
+    );
+    if (pendingIndex === -1) {
+      continue;
+    }
+    const candidate = pending[pendingIndex];
+    if (!candidate) {
+      continue;
+    }
+    const normalized = buildExactClaudeToolEditFile({
+      candidate,
+      snapshotEntry,
+      fileHistoryDirectory: args.claudeNormalizationState.fileHistoryDirectory,
+      backupTextByName: args.claudeNormalizationState.backupTextByName,
+    });
+    if (normalized) {
+      upsertMessageToolEditFile(args.statements, {
+        id: makeToolCallId(candidate.messageDbId, 1000 + candidate.fileOrdinal),
+        messageId: candidate.messageDbId,
+        fileOrdinal: candidate.fileOrdinal,
+        filePath: normalized.filePath,
+        previousFilePath: normalized.previousFilePath,
+        changeType: normalized.changeType,
+        unifiedDiff: normalized.unifiedDiff,
+        addedLineCount: normalized.addedLineCount,
+        removedLineCount: normalized.removedLineCount,
+        exactness: normalized.exactness,
+        beforeHash: normalized.beforeHash,
+        afterHash: normalized.afterHash,
+      });
+    }
+    pending.splice(pendingIndex, 1);
+  }
+
+  if (pending.length === 0) {
+    args.claudeNormalizationState.pendingBySourceId.delete(sourceId);
+  }
+}
+
+function isSameClaudeSnapshotEntry(
+  left: ClaudeSnapshotFileEntry,
+  right: ClaudeSnapshotFileEntry,
+): boolean {
+  return (
+    left.backupFileName === right.backupFileName &&
+    left.version === right.version &&
+    left.backupTime === right.backupTime
+  );
+}
+
+function normalizeClaudeComparisonPath(filePath: string, cwd: string | null | undefined): string {
+  if (cwd && filePath.startsWith(`${cwd}/`)) {
+    return relative(cwd, filePath).replace(/\\/g, "/");
+  }
+  return filePath.replace(/\\/g, "/");
+}
+
+function buildBestEffortClaudeToolEditFile(args: {
+  candidate: ClaudePendingToolEdit;
+  fileHistoryDirectory: string | null;
+  previousSnapshotByPath: Map<string, ClaudeSnapshotFileEntry>;
+  backupTextByName: Map<string, string | null>;
+}): {
+  filePath: string;
+  previousFilePath: string | null;
+  changeType: ToolEditChangeType;
+  unifiedDiff: string | null;
+  addedLineCount: number;
+  removedLineCount: number;
+  exactness: ToolEditExactness;
+  beforeHash: string | null;
+  afterHash: string | null;
+} | null {
+  const beforeText = readClaudeKnownBeforeText({
+    candidate: args.candidate,
+    fileHistoryDirectory: args.fileHistoryDirectory,
+    previousSnapshotByPath: args.previousSnapshotByPath,
+    backupTextByName: args.backupTextByName,
+  });
+
+  if (args.candidate.toolName === "Write") {
+    const afterText = readString(args.candidate.input.content);
+    if (afterText === null) {
+      return null;
+    }
+    if (beforeText === null) {
+      return {
+        filePath: args.candidate.filePath,
+        previousFilePath: null,
+        changeType: "update",
+        unifiedDiff: null,
+        addedLineCount: 0,
+        removedLineCount: 0,
+        exactness: "best_effort",
+        beforeHash: null,
+        afterHash: hashText(afterText),
+      };
+    }
+    const diff = buildUnifiedDiffFromTextPair({
+      oldText: beforeText,
+      newText: afterText,
+      filePath: args.candidate.filePath,
+    });
+    const stats = countUnifiedDiffLines(diff);
+    return {
+      filePath: args.candidate.filePath,
+      previousFilePath: null,
+      changeType: "update",
+      unifiedDiff: diff,
+      addedLineCount: stats.addedLineCount,
+      removedLineCount: stats.removedLineCount,
+      exactness: "best_effort",
+      beforeHash: hashText(beforeText),
+      afterHash: hashText(afterText),
+    };
+  }
+
+  const oldText = readString(args.candidate.input.old_string);
+  const newText = readString(args.candidate.input.new_string);
+  if (oldText === null || newText === null) {
+    return null;
+  }
+  if (beforeText !== null) {
+    const afterText = applyClaudeEditToText(
+      beforeText,
+      oldText,
+      newText,
+      args.candidate.input.replace_all === true,
+    );
+    if (afterText !== null) {
+      const diff = buildUnifiedDiffFromTextPair({
+        oldText: beforeText,
+        newText: afterText,
+        filePath: args.candidate.filePath,
+      });
+      const stats = countUnifiedDiffLines(diff);
+      return {
+        filePath: args.candidate.filePath,
+        previousFilePath: null,
+        changeType: "update",
+        unifiedDiff: diff,
+        addedLineCount: stats.addedLineCount,
+        removedLineCount: stats.removedLineCount,
+        exactness: "best_effort",
+        beforeHash: hashText(beforeText),
+        afterHash: hashText(afterText),
+      };
+    }
+  }
+  const diff = buildUnifiedDiffFromTextPair({
+    oldText,
+    newText,
+    filePath: args.candidate.filePath,
+  });
+  const stats = countUnifiedDiffLines(diff);
+  return {
+    filePath: args.candidate.filePath,
+    previousFilePath: null,
+    changeType: "update",
+    unifiedDiff: diff,
+    addedLineCount: stats.addedLineCount,
+    removedLineCount: stats.removedLineCount,
+    exactness: "best_effort",
+    beforeHash: null,
+    afterHash: null,
+  };
+}
+
+function readClaudeKnownBeforeText(args: {
+  candidate: ClaudePendingToolEdit;
+  fileHistoryDirectory: string | null;
+  previousSnapshotByPath: Map<string, ClaudeSnapshotFileEntry>;
+  backupTextByName: Map<string, string | null>;
+}): string | null {
+  const snapshotEntry =
+    args.previousSnapshotByPath.get(args.candidate.comparisonPath) ??
+    args.previousSnapshotByPath.get(args.candidate.filePath);
+  if (!snapshotEntry) {
+    return null;
+  }
+  return readClaudeBackupText(
+    args.fileHistoryDirectory,
+    snapshotEntry.backupFileName,
+    args.backupTextByName,
+  );
+}
+
+function loadPersistedClaudePendingToolEdits(args: {
+  db: SqliteDatabase;
+  sessionDbId: string;
+  discovered: ReturnType<typeof discoverSessionFiles>[number];
+  sourceId: string;
+}): ClaudePendingToolEdit[] {
+  const rows = args.db
+    .prepare(
+      `SELECT id, source_id, content
+       FROM messages
+       WHERE session_id = ?
+         AND (source_id = ? OR source_id LIKE ?)
+       ORDER BY created_at_ms ASC, created_at ASC, id ASC`,
+    )
+    .all(args.sessionDbId, args.sourceId, `${args.sourceId}#%`) as Array<{
+    id: string;
+    source_id: string;
+    content: string;
+  }>;
+  const output: ClaudePendingToolEdit[] = [];
+  for (const row of rows) {
+    const record = tryParseJsonRecord(row.content);
+    const toolName = readString(record?.name);
+    if (toolName !== "Edit" && toolName !== "Write") {
+      continue;
+    }
+    const input = asRecord(record?.input);
+    const filePath = readString(input?.file_path);
+    if (!filePath) {
+      continue;
+    }
+    output.push({
+      messageDbId: row.id,
+      sourceId: row.source_id,
+      fileOrdinal: 0,
+      filePath,
+      comparisonPath: normalizeClaudeComparisonPath(filePath, args.discovered.metadata.cwd),
+      toolName,
+      input: input ?? {},
+    });
+  }
+  return output;
+}
+
+function buildExactClaudeToolEditFile(args: {
+  candidate: ClaudePendingToolEdit;
+  snapshotEntry: ClaudeSnapshotFileEntry;
+  fileHistoryDirectory: string | null;
+  backupTextByName: Map<string, string | null>;
+}): {
+  filePath: string;
+  previousFilePath: string | null;
+  changeType: ToolEditChangeType;
+  unifiedDiff: string | null;
+  addedLineCount: number;
+  removedLineCount: number;
+  exactness: ToolEditExactness;
+  beforeHash: string | null;
+  afterHash: string | null;
+} | null {
+  const beforeText = readClaudeBackupText(
+    args.fileHistoryDirectory,
+    args.snapshotEntry.backupFileName,
+    args.backupTextByName,
+  );
+
+  if (args.candidate.toolName === "Write") {
+    const afterText = readString(args.candidate.input.content);
+    if (afterText === null) {
+      return null;
+    }
+    const diff = buildUnifiedDiffFromTextPair({
+      oldText: beforeText ?? "",
+      newText: afterText,
+      filePath: args.candidate.filePath,
+    });
+    const stats = countUnifiedDiffLines(diff);
+    return {
+      filePath: args.candidate.filePath,
+      previousFilePath: null,
+      changeType: beforeText === null ? "add" : "update",
+      unifiedDiff: diff,
+      addedLineCount: stats.addedLineCount,
+      removedLineCount: stats.removedLineCount,
+      exactness: "exact",
+      beforeHash: beforeText === null ? null : hashText(beforeText),
+      afterHash: hashText(afterText),
+    };
+  }
+
+  if (beforeText === null) {
+    return null;
+  }
+  const oldString = readString(args.candidate.input.old_string);
+  const newString = readString(args.candidate.input.new_string);
+  if (oldString === null || newString === null) {
+    return null;
+  }
+  const replaceAll = args.candidate.input.replace_all === true;
+  const afterText = applyClaudeEditToText(beforeText, oldString, newString, replaceAll);
+  if (afterText === null) {
+    return null;
+  }
+  const diff = buildUnifiedDiffFromTextPair({
+    oldText: beforeText,
+    newText: afterText,
+    filePath: args.candidate.filePath,
+  });
+  const stats = countUnifiedDiffLines(diff);
+  return {
+    filePath: args.candidate.filePath,
+    previousFilePath: null,
+    changeType: "update",
+    unifiedDiff: diff,
+    addedLineCount: stats.addedLineCount,
+    removedLineCount: stats.removedLineCount,
+    exactness: "exact",
+    beforeHash: hashText(beforeText),
+    afterHash: hashText(afterText),
+  };
+}
+
+function readClaudeBackupText(
+  fileHistoryDirectory: string | null,
+  backupFileName: string | null,
+  cache: Map<string, string | null>,
+): string | null {
+  if (!fileHistoryDirectory || !backupFileName) {
+    return null;
+  }
+  if (cache.has(backupFileName)) {
+    return cache.get(backupFileName) ?? null;
+  }
+  try {
+    const text = readFileSync(join(fileHistoryDirectory, backupFileName), "utf8");
+    cache.set(backupFileName, text);
+    return text;
+  } catch {
+    cache.set(backupFileName, null);
+    return null;
+  }
+}
+
+function applyClaudeEditToText(
+  beforeText: string,
+  oldString: string,
+  newString: string,
+  replaceAll: boolean,
+): string | null {
+  if (oldString.length === 0) {
+    return null;
+  }
+  if (replaceAll) {
+    return beforeText.includes(oldString) ? beforeText.split(oldString).join(newString) : null;
+  }
+  const firstIndex = beforeText.indexOf(oldString);
+  if (firstIndex === -1) {
+    return null;
+  }
+  const lastIndex = beforeText.lastIndexOf(oldString);
+  if (firstIndex !== lastIndex) {
+    return null;
+  }
+  return (
+    beforeText.slice(0, firstIndex) + newString + beforeText.slice(firstIndex + oldString.length)
+  );
+}
+
+function upsertMessageToolEditFile(
+  statements: IndexingStatements,
+  row: {
+    id: string;
+    messageId: string;
+    fileOrdinal: number;
+    filePath: string;
+    previousFilePath: string | null;
+    changeType: ToolEditChangeType;
+    unifiedDiff: string | null;
+    addedLineCount: number;
+    removedLineCount: number;
+    exactness: ToolEditExactness;
+    beforeHash: string | null;
+    afterHash: string | null;
+  },
+): void {
+  statements.upsertMessageToolEditFile.run(
+    row.id,
+    row.messageId,
+    row.fileOrdinal,
+    row.filePath,
+    row.previousFilePath,
+    row.changeType,
+    row.unifiedDiff,
+    row.addedLineCount,
+    row.removedLineCount,
+    row.exactness,
+    row.beforeHash,
+    row.afterHash,
+  );
+}
+
+function hashText(value: string): string {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+function tryParseJsonRecord(value: string): Record<string, unknown> | null {
+  try {
+    return asRecord(JSON.parse(value));
+  } catch {
+    return null;
   }
 }
 
@@ -3469,6 +4122,9 @@ function listSessionFiles(db: SqliteDatabase): SessionFileRow[] {
 function deleteSessionData(db: SqliteDatabase, sessionId: string): void {
   db.prepare(
     "DELETE FROM tool_calls WHERE message_id IN (SELECT id FROM messages WHERE session_id = ?)",
+  ).run(sessionId);
+  db.prepare(
+    "DELETE FROM message_tool_edit_files WHERE message_id IN (SELECT id FROM messages WHERE session_id = ?)",
   ).run(sessionId);
   db.prepare("DELETE FROM message_fts WHERE session_id = ?").run(sessionId);
   db.prepare("DELETE FROM messages WHERE session_id = ?").run(sessionId);

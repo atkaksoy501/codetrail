@@ -33,7 +33,7 @@ import {
 export function formatSelectedSummaryMessageCount(
   filteredCount: number,
   totalCount: number,
-  label: "messages" | "bookmarked messages",
+  label: string,
 ): string {
   return `${formatInteger(filteredCount)} of ${formatInteger(totalCount)} ${label}`;
 }

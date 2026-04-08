@@ -58,6 +58,7 @@ export type BookmarkReconciliationResult = {
 };
 
 export type BookmarkListOptions = {
+  sessionId?: string;
   query?: string;
   searchMode?: SearchMode;
   categories?: MessageCategory[];
@@ -80,6 +81,7 @@ export type BookmarkStore = {
   countProjectBookmarkCategories: (
     projectId: string,
     query?: string,
+    sessionId?: string,
     searchMode?: SearchMode,
   ) => Record<MessageCategory, number>;
   countProjectBookmarksByProjectIds?: (projectIds: string[]) => Record<string, number>;
@@ -241,9 +243,7 @@ export function createBookmarkStore(bookmarksDbPath: string): BookmarkStore {
       }
 
       const orderDirection = options.sortDirection === "desc" ? "DESC" : "ASC";
-      const targetClause = target.messageId
-        ? "b.message_id = ?"
-        : "b.message_source_id = ?";
+      const targetClause = target.messageId ? "b.message_id = ?" : "b.message_source_id = ?";
       const targetValue = target.messageId ?? target.messageSourceId;
       const targetRow = db
         .prepare(
@@ -325,8 +325,9 @@ export function createBookmarkStore(bookmarksDbPath: string): BookmarkStore {
         .all(projectId, ...messageIds) as Array<{ message_id: string }>;
       return rows.map((row) => row.message_id);
     },
-    countProjectBookmarkCategories: (projectId, query, searchMode = "simple") => {
+    countProjectBookmarkCategories: (projectId, query, sessionId, searchMode = "simple") => {
       const built = buildProjectBookmarkQuery(projectId, {
+        ...(sessionId ? { sessionId } : {}),
         ...(query !== undefined ? { query } : {}),
         searchMode,
       });
@@ -450,6 +451,10 @@ function buildProjectBookmarkQuery(
   const conditions = ["b.project_id = ?"];
   const params: string[] = [projectId];
   let fromSql = "FROM bookmarks b";
+  if (options.sessionId) {
+    conditions.push("b.session_id = ?");
+    params.push(options.sessionId);
+  }
   if (queryPlan?.ftsQuery) {
     fromSql = `FROM bookmarks b
                JOIN bookmarks_fts

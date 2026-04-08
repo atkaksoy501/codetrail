@@ -1,8 +1,10 @@
 import { isLikelyEditOperation } from "@codetrail/core/tooling/editOperations";
+export { buildUnifiedDiffFromTextPair } from "@codetrail/core/tooling/unifiedDiff";
 
 export type ParsedToolEditFile = {
   filePath: string;
-  changeType: "add" | "update" | "delete";
+  previousFilePath?: string | null;
+  changeType: "add" | "update" | "delete" | "move";
   oldText: string | null;
   newText: string | null;
   diff: string | null;
@@ -140,187 +142,6 @@ export function parseToolEditPayload(text: string): ParsedToolEditPayload | null
   return { filePath: normalizedFilePath, oldText, newText, diff: normalizedDiff, files };
 }
 
-export function buildUnifiedDiffFromTextPair(args: {
-  oldText: string;
-  newText: string;
-  filePath: string | null;
-}): string {
-  const oldLines = args.oldText.split(/\r?\n/);
-  const newLines = args.newText.split(/\r?\n/);
-  const operations = buildLineOperations(oldLines, newLines);
-  const hunks = buildDiffHunks(operations, 2);
-  const headerFile = args.filePath ?? "file";
-  const output: string[] = [`--- a/${headerFile}`, `+++ b/${headerFile}`];
-  if (hunks.length === 0) {
-    output.push("@@ -1,0 +1,0 @@");
-    return output.join("\n");
-  }
-
-  for (const hunk of hunks) {
-    output.push(
-      `@@ -${hunk.oldStart},${hunk.oldCount} +${hunk.newStart},${hunk.newCount} @@`,
-      ...hunk.lines,
-    );
-  }
-  return output.join("\n");
-}
-
-function buildLineOperations(
-  oldLines: string[],
-  newLines: string[],
-): Array<{ type: "equal" | "remove" | "add"; line: string; oldLine: number; newLine: number }> {
-  const matrix: number[][] = Array.from({ length: oldLines.length + 1 }, () =>
-    Array.from({ length: newLines.length + 1 }, () => 0),
-  );
-
-  for (let i = oldLines.length - 1; i >= 0; i -= 1) {
-    for (let j = newLines.length - 1; j >= 0; j -= 1) {
-      const currentRow = matrix[i];
-      if (!currentRow) {
-        continue;
-      }
-      if ((oldLines[i] ?? "") === (newLines[j] ?? "")) {
-        currentRow[j] = (matrix[i + 1]?.[j + 1] ?? 0) + 1;
-      } else {
-        currentRow[j] = Math.max(matrix[i + 1]?.[j] ?? 0, currentRow[j + 1] ?? 0);
-      }
-    }
-  }
-
-  const operations: Array<{
-    type: "equal" | "remove" | "add";
-    line: string;
-    oldLine: number;
-    newLine: number;
-  }> = [];
-  let i = 0;
-  let j = 0;
-  let oldLine = 1;
-  let newLine = 1;
-
-  while (i < oldLines.length && j < newLines.length) {
-    const left = oldLines[i] ?? "";
-    const right = newLines[j] ?? "";
-    if (left === right) {
-      operations.push({ type: "equal", line: left, oldLine, newLine });
-      i += 1;
-      j += 1;
-      oldLine += 1;
-      newLine += 1;
-      continue;
-    }
-
-    if ((matrix[i + 1]?.[j] ?? 0) >= (matrix[i]?.[j + 1] ?? 0)) {
-      operations.push({ type: "remove", line: left, oldLine, newLine: 0 });
-      i += 1;
-      oldLine += 1;
-    } else {
-      operations.push({ type: "add", line: right, oldLine: 0, newLine });
-      j += 1;
-      newLine += 1;
-    }
-  }
-
-  while (i < oldLines.length) {
-    operations.push({ type: "remove", line: oldLines[i] ?? "", oldLine, newLine: 0 });
-    i += 1;
-    oldLine += 1;
-  }
-  while (j < newLines.length) {
-    operations.push({ type: "add", line: newLines[j] ?? "", oldLine: 0, newLine });
-    j += 1;
-    newLine += 1;
-  }
-
-  return operations;
-}
-
-function buildDiffHunks(
-  operations: Array<{
-    type: "equal" | "remove" | "add";
-    line: string;
-    oldLine: number;
-    newLine: number;
-  }>,
-  context: number,
-): Array<{
-  oldStart: number;
-  oldCount: number;
-  newStart: number;
-  newCount: number;
-  lines: string[];
-}> {
-  const hunks: Array<{
-    oldStart: number;
-    oldCount: number;
-    newStart: number;
-    newCount: number;
-    lines: string[];
-  }> = [];
-  let cursor = 0;
-  while (cursor < operations.length) {
-    let firstChange = -1;
-    for (let index = cursor; index < operations.length; index += 1) {
-      if (operations[index]?.type !== "equal") {
-        firstChange = index;
-        break;
-      }
-    }
-    if (firstChange < 0) {
-      break;
-    }
-
-    let hunkStart = Math.max(0, firstChange - context);
-    let hunkEnd = firstChange;
-    let lastChange = firstChange;
-    for (let index = firstChange + 1; index < operations.length; index += 1) {
-      const op = operations[index];
-      if (!op) {
-        continue;
-      }
-      if (op.type !== "equal") {
-        lastChange = index;
-      }
-      if (index - lastChange > context) {
-        break;
-      }
-      hunkEnd = index;
-    }
-
-    hunkEnd = Math.min(operations.length - 1, hunkEnd);
-    if (lastChange + context > hunkEnd) {
-      hunkEnd = Math.min(operations.length - 1, lastChange + context);
-    }
-    if (hunkStart > hunkEnd) {
-      hunkStart = hunkEnd;
-    }
-
-    const hunkOps = operations.slice(hunkStart, hunkEnd + 1);
-    const oldStartCandidate = hunkOps.find((op) => op.oldLine > 0)?.oldLine ?? 1;
-    const newStartCandidate = hunkOps.find((op) => op.newLine > 0)?.newLine ?? 1;
-    const oldCount = hunkOps.filter((op) => op.type !== "add").length;
-    const newCount = hunkOps.filter((op) => op.type !== "remove").length;
-    const lines = hunkOps.map((op) => {
-      if (op.type === "remove") {
-        return `-${op.line}`;
-      }
-      if (op.type === "add") {
-        return `+${op.line}`;
-      }
-      return ` ${op.line}`;
-    });
-    hunks.push({
-      oldStart: oldStartCandidate,
-      oldCount,
-      newStart: newStartCandidate,
-      newCount,
-      lines,
-    });
-    cursor = hunkEnd + 1;
-  }
-  return hunks;
-}
-
 export function tryParseJsonRecord(text: string): Record<string, unknown> | null {
   try {
     const parsed = JSON.parse(text) as unknown;
@@ -391,6 +212,7 @@ function buildSingleToolEditFiles(args: {
   return [
     {
       filePath: args.filePath,
+      previousFilePath: null,
       changeType,
       oldText: args.oldText,
       newText: args.newText,
@@ -424,6 +246,9 @@ function parseApplyPatchFiles(patchText: string | null): ParsedToolEditFile[] {
   let current: ApplyPatchFileAccumulator | null = null;
 
   const moveCurrentFile = (file: ApplyPatchFileAccumulator, destination: string) => {
+    if (file.filePath !== destination) {
+      file.changeType = "move";
+    }
     file.filePath = destination;
     file.newPath = `b/${destination}`;
     file.lines[0] = `diff --git ${file.oldPath} ${file.newPath}`;
@@ -441,6 +266,10 @@ function parseApplyPatchFiles(patchText: string | null): ParsedToolEditFile[] {
     }
     files.push({
       filePath: current.filePath,
+      previousFilePath:
+        current.oldPath.startsWith("a/") && current.oldPath !== "/dev/null"
+          ? current.oldPath.slice(2)
+          : null,
       changeType: current.changeType,
       oldText: null,
       newText: null,

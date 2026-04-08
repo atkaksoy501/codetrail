@@ -23,12 +23,23 @@ vi.mock("./lib/pathActions", () => ({
 
 import { App } from "./App";
 import type { PaneStateSnapshot } from "./app/types";
+import { formatInteger } from "./lib/numberFormatting";
 import { SEARCH_PLACEHOLDERS } from "./lib/searchLabels";
 import { createAppClient, installScrollIntoViewMock } from "./test/appTestFixtures";
 import { renderWithClient } from "./test/renderWithClient";
 
 function countChannelCalls(client: ReturnType<typeof createAppClient>, channel: string): number {
   return client.invoke.mock.calls.filter(([name]) => name === channel).length;
+}
+
+function fireKeyDownWithTimeStamp(
+  target: Window | Document | Element,
+  init: KeyboardEventInit & { key: string },
+  timeStamp: number,
+) {
+  const event = new KeyboardEvent("keydown", init);
+  Object.defineProperty(event, "timeStamp", { value: timeStamp });
+  target.dispatchEvent(event);
 }
 
 function installDialogMock(): void {
@@ -113,7 +124,9 @@ describe("App shell", () => {
 
     await waitFor(() => {
       expect(
-        screen.getByRole("button", { name: "Show or hide User messages (18,457)" }),
+        screen.getByRole("button", {
+          name: `Show or hide User messages (${formatInteger(18_457)})`,
+        }),
       ).toBeInTheDocument();
     });
 
@@ -121,10 +134,12 @@ describe("App shell", () => {
       "18.5K",
     );
     expect(
-      screen.getByRole("button", { name: "Show or hide User messages (18,457)" }),
+      screen.getByRole("button", {
+        name: `Show or hide User messages (${formatInteger(18_457)})`,
+      }),
     ).toHaveAttribute(
       "title",
-      "Show or hide User messages (18,457)  ⌘1\nCmd+Click Focus only User messages  ⌃1",
+      `Show or hide User messages (${formatInteger(18_457)})  ⌘1\nCmd+Click Focus only User messages  ⌃1`,
     );
   });
 
@@ -286,7 +301,7 @@ describe("App shell", () => {
     });
   });
 
-  it("Cmd+E only toggles expansion defaults for enabled message pills", async () => {
+  it("Cmd+E cycles visible items without changing the underlying default expansion state", async () => {
     installScrollIntoViewMock();
 
     const listeners: Array<(command: string) => void> = [];
@@ -302,8 +317,8 @@ describe("App shell", () => {
             selectedProjectId: "project_1",
             selectedSessionId: "session_1",
             historyMode: "session",
-            historyCategories: ["user"],
-            expandedByDefaultCategories: ["user"],
+            historyCategories: ["user", "assistant"],
+            expandedByDefaultCategories: ["user", "assistant"],
           } as PaneStateSnapshot
         }
       />,
@@ -314,17 +329,13 @@ describe("App shell", () => {
       expect(screen.getByText("Please review markdown table rendering")).toBeInTheDocument();
     });
 
-    expect(
-      screen.getByRole("button", {
-        name: "Collapse shown message types",
-      }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Collapse shown items/i })).toBeInTheDocument();
     expect(
       container.querySelector(".msg-filter.user-filter .filter-expand-chevron"),
     ).not.toHaveClass("is-collapsed");
     expect(
       container.querySelector(".msg-filter.assistant-filter .filter-expand-chevron"),
-    ).toHaveClass("is-collapsed");
+    ).not.toHaveClass("is-collapsed");
 
     await act(async () => {
       for (const listener of listeners) {
@@ -335,16 +346,11 @@ describe("App shell", () => {
     await waitFor(() => {
       expect(
         screen.getByRole("button", {
-          name: "Expand shown message types",
+          name: "Restore shown items",
         }),
       ).toBeInTheDocument();
     });
-    expect(container.querySelector(".msg-filter.user-filter .filter-expand-chevron")).toHaveClass(
-      "is-collapsed",
-    );
-    expect(
-      container.querySelector(".msg-filter.assistant-filter .filter-expand-chevron"),
-    ).toHaveClass("is-collapsed");
+    expect(container.querySelectorAll(".message.expanded")).toHaveLength(0);
   });
 
   it("loads history, supports global search navigation, and opens settings", async () => {
@@ -360,6 +366,7 @@ describe("App shell", () => {
             selectedProjectId: "project_1",
             selectedSessionId: "session_1",
             historyMode: "session",
+            expandedByDefaultCategories: ["user", "assistant"],
           } as PaneStateSnapshot
         }
       />,
@@ -878,33 +885,27 @@ describe("App shell", () => {
       expect(screen.getByText("First assistant body")).toBeInTheDocument();
       expect(screen.getByText("Second assistant body")).toBeInTheDocument();
       expect(container.querySelectorAll(".message.expanded")).toHaveLength(3);
-      expect(
-        screen.getByRole("button", { name: "Collapse shown message types" }),
-      ).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /Collapse shown items/i })).toBeInTheDocument();
     });
 
-    await user.click(screen.getByRole("button", { name: "Collapse shown message types" }));
+    await user.click(screen.getByRole("button", { name: /Collapse shown items/i }));
     await waitFor(() => {
-      expect(
-        screen.getByRole("button", { name: "Expand shown message types" }),
-      ).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Restore shown items" })).toBeInTheDocument();
       expect(container.querySelectorAll(".message.expanded")).toHaveLength(0);
     });
 
-    await user.click(screen.getByRole("button", { name: "Expand shown message types" }));
+    await user.click(screen.getByRole("button", { name: "Restore shown items" }));
     await waitFor(() => {
-      expect(
-        screen.getByRole("button", { name: "Collapse shown message types" }),
-      ).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Expand shown items" })).toBeInTheDocument();
       expect(container.querySelectorAll(".message.expanded")).toHaveLength(3);
     });
 
     await user.click(screen.getAllByRole("button", { name: "Collapse message" })[0]!);
     expect(container.querySelectorAll(".message.expanded")).toHaveLength(2);
 
-    await user.click(screen.getByRole("button", { name: "Collapse shown message types" }));
+    await user.click(screen.getByRole("button", { name: /shown items/i }));
     await waitFor(() => {
-      expect(container.querySelectorAll(".message.expanded")).toHaveLength(0);
+      expect(container.querySelectorAll(".message.expanded")).toHaveLength(3);
     });
   });
 
@@ -1139,7 +1140,6 @@ describe("App shell", () => {
 
     await waitFor(() => {
       expect(screen.getByText("First assistant body")).toBeInTheDocument();
-      expect(screen.getByText("4 messages")).toBeInTheDocument();
       expect(screen.getByRole("textbox", { name: "Page number" })).toHaveValue("1");
     });
 
@@ -1436,7 +1436,6 @@ describe("App shell", () => {
     renderWithClient(<App />, client);
 
     await waitFor(() => {
-      expect(screen.getByText("250 messages")).toBeInTheDocument();
       expect(screen.getByRole("textbox", { name: "Page number" })).toHaveValue("1");
     });
 
@@ -1469,6 +1468,333 @@ describe("App shell", () => {
     });
   });
 
+  it("shows Turns view and paginates turns using the current sort order", async () => {
+    const user = userEvent.setup();
+    const client = createAppClient();
+
+    const { container } = renderWithClient(
+      <App
+        initialPaneState={
+          {
+            selectedProjectId: "project_1",
+            selectedSessionId: "session_1",
+            historyMode: "session",
+          } as PaneStateSnapshot
+        }
+      />,
+      client,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Turns/i })).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      fireEvent.keyDown(window, { key: "t", metaKey: true });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Turns/i })).toHaveAttribute("aria-selected", "true");
+      expect(screen.getByRole("textbox", { name: "Turn number" })).toHaveValue("1");
+      expect(screen.getByText("2 of 2 turn messages")).toBeInTheDocument();
+      expect(screen.queryByRole("combobox", { name: "Messages per page" })).toBeNull();
+      expect(screen.getByText("Review the latest turn")).toBeInTheDocument();
+    });
+
+    const messageList = container.querySelector<HTMLDivElement>(".msg-scroll.message-list");
+    messageList?.focus();
+
+    fireEvent.keyDown(window, { key: "ArrowRight", metaKey: true });
+    await waitFor(() => {
+      expect(screen.getByRole("textbox", { name: "Turn number" })).toHaveValue("2");
+      expect(screen.getByText("Please review markdown table rendering")).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: "Previous turn" }));
+    await waitFor(() => {
+      expect(screen.getByRole("textbox", { name: "Turn number" })).toHaveValue("1");
+      expect(screen.getByText("Review the latest turn")).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      fireEvent.keyDown(window, { key: "m", metaKey: true, shiftKey: true });
+    });
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Messages/i })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
+      expect(screen.getByRole("combobox", { name: "Messages per page" })).toBeInTheDocument();
+    });
+  });
+
+  it("uses double Escape in the message pane to reset Turns search without leaving Turns view", async () => {
+    const client = createAppClient();
+    const { container } = renderWithClient(
+      <App
+        initialPaneState={
+          {
+            selectedProjectId: "project_1",
+            selectedSessionId: "session_1",
+            historyMode: "session",
+          } as PaneStateSnapshot
+        }
+      />,
+      client,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Turns/i })).toBeInTheDocument();
+    });
+
+    fireEvent.keyDown(window, { key: "t", metaKey: true });
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Turns/i })).toHaveAttribute("aria-selected", "true");
+    });
+    await userEvent.type(
+      screen.getByRole("textbox", { name: "Search current history view" }),
+      "latest",
+    );
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 450));
+    });
+
+    const messageList = container.querySelector<HTMLDivElement>(".msg-scroll.message-list");
+    messageList?.focus();
+
+    await act(async () => {
+      fireKeyDownWithTimeStamp(window, { key: "Escape" }, 100);
+      fireKeyDownWithTimeStamp(window, { key: "Escape" }, 200);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Turns/i })).toHaveAttribute("aria-selected", "true");
+      expect(screen.getByRole("textbox", { name: "Search current history view" })).toHaveValue("");
+      expect(screen.queryByRole("combobox", { name: "Messages per page" })).toBeNull();
+    });
+  });
+
+  it("uses double Escape from another history pane to reset Turns search without leaving Turns view", async () => {
+    const client = createAppClient();
+    const { container } = renderWithClient(
+      <App
+        initialPaneState={
+          {
+            selectedProjectId: "project_1",
+            selectedSessionId: "session_1",
+            historyMode: "session",
+          } as PaneStateSnapshot
+        }
+      />,
+      client,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Turns/i })).toBeInTheDocument();
+    });
+
+    fireEvent.keyDown(window, { key: "t", metaKey: true });
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Turns/i })).toHaveAttribute("aria-selected", "true");
+    });
+    await userEvent.type(
+      screen.getByRole("textbox", { name: "Search current history view" }),
+      "review",
+    );
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 450));
+    });
+
+    const projectPane = container.querySelector<HTMLElement>('[data-history-pane="project"]');
+    projectPane?.focus();
+
+    await act(async () => {
+      fireKeyDownWithTimeStamp(window, { key: "Escape" }, 100);
+      fireKeyDownWithTimeStamp(window, { key: "Escape" }, 200);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Turns/i })).toHaveAttribute("aria-selected", "true");
+      expect(screen.getByRole("textbox", { name: "Search current history view" })).toHaveValue("");
+    });
+  });
+
+  it("opens the oldest turn on page 1 when Turn View sort is oldest first", async () => {
+    const client = createAppClient();
+
+    renderWithClient(
+      <App
+        initialPaneState={
+          {
+            selectedProjectId: "project_1",
+            selectedSessionId: "session_1",
+            historyMode: "session",
+            turnViewSortDirection: "asc",
+          } as PaneStateSnapshot
+        }
+      />,
+      client,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Turns/i })).toBeInTheDocument();
+    });
+
+    fireEvent.keyDown(window, { key: "t", metaKey: true });
+
+    await waitFor(() => {
+      expect(screen.getByRole("textbox", { name: "Turn number" })).toHaveValue("1");
+      expect(screen.getByText("Please review markdown table rendering")).toBeInTheDocument();
+    });
+  });
+
+  it("shows the Turns visualization in project-all mode and opens it with Cmd+T", async () => {
+    const client = createAppClient();
+
+    renderWithClient(
+      <App
+        initialPaneState={
+          {
+            selectedProjectId: "project_1",
+            historyMode: "project_all",
+          } as PaneStateSnapshot
+        }
+      />,
+      client,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Turns/i })).toBeInTheDocument();
+    });
+
+    fireEvent.keyDown(window, { key: "t", metaKey: true });
+
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Turns/i })).toHaveAttribute("aria-selected", "true");
+      expect(screen.getByRole("textbox", { name: "Turn number" })).toHaveValue("1");
+    });
+  });
+
+  it("treats Turns as a peer visualization when switching from Bookmarks", async () => {
+    const client = createAppClient();
+
+    renderWithClient(
+      <App
+        initialPaneState={
+          {
+            selectedProjectId: "project_1",
+            historyMode: "bookmarks",
+          } as PaneStateSnapshot
+        }
+      />,
+      client,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Bookmarks/i })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
+    });
+
+    fireEvent.keyDown(window, { key: "t", metaKey: true });
+
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Turns/i })).toHaveAttribute("aria-selected", "true");
+      expect(screen.getByRole("tab", { name: /Bookmarks/i })).toHaveAttribute(
+        "aria-selected",
+        "false",
+      );
+      expect(screen.getByRole("textbox", { name: "Turn number" })).toBeInTheDocument();
+    });
+  });
+
+  it("preserves the combined changes expansion preference when toggling Turn View off and on", async () => {
+    const user = userEvent.setup();
+    const client = createAppClient();
+
+    renderWithClient(
+      <App
+        initialPaneState={
+          {
+            selectedProjectId: "project_1",
+            selectedSessionId: "session_1",
+            historyMode: "session",
+            turnViewCombinedChangesExpanded: true,
+          } as PaneStateSnapshot
+        }
+      />,
+      client,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Turns/i })).toBeInTheDocument();
+    });
+
+    fireEvent.keyDown(window, { key: "t", metaKey: true });
+
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Turns/i })).toHaveAttribute("aria-selected", "true");
+      expect(
+        screen.getByRole("button", { name: /collapse combined changes/i }),
+      ).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: /collapse combined changes/i }));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /expand combined changes/i })).toBeInTheDocument();
+    });
+
+    fireEvent.keyDown(window, { key: "m", metaKey: true, shiftKey: true });
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Messages/i })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
+    });
+
+    fireEvent.keyDown(window, { key: "t", metaKey: true });
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Turns/i })).toHaveAttribute("aria-selected", "true");
+      expect(screen.getByRole("button", { name: /expand combined changes/i })).toBeInTheDocument();
+    });
+  });
+
+  it("stays in Turn View when switching back to project-all history", async () => {
+    const user = userEvent.setup();
+    const client = createAppClient();
+
+    renderWithClient(
+      <App
+        initialPaneState={
+          {
+            selectedProjectId: "project_1",
+            selectedSessionId: "session_1",
+            historyMode: "session",
+          } as PaneStateSnapshot
+        }
+      />,
+      client,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Turns/i })).toBeInTheDocument();
+    });
+
+    fireEvent.keyDown(window, { key: "t", metaKey: true });
+
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Turns/i })).toHaveAttribute("aria-selected", "true");
+    });
+
+    await user.click(screen.getByRole("button", { name: /All Sessions/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Turns/i })).toHaveAttribute("aria-selected", "true");
+      expect(screen.getByRole("textbox", { name: "Turn number" })).toBeInTheDocument();
+    });
+  });
+
   it("shows generic pagination shortcuts in help page", async () => {
     const user = userEvent.setup();
     const client = createAppClient();
@@ -1481,8 +1807,9 @@ describe("App shell", () => {
 
     await user.click(screen.getByRole("button", { name: "Open help" }));
 
-    expect(screen.getByText("Previous page")).toBeInTheDocument();
-    expect(screen.getByText("Next page")).toBeInTheDocument();
+    expect(screen.getByText("Previous page or turn")).toBeInTheDocument();
+    expect(screen.getByText("Next page or turn")).toBeInTheDocument();
+    expect(screen.getByText("Show Turns view")).toBeInTheDocument();
     expect(
       screen.getByText(
         "Previous session, or previous project when Sessions pane is collapsed or hidden",
@@ -2266,22 +2593,28 @@ describe("App shell", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "2 bookmarks" })).toBeInTheDocument();
+      expect(screen.getByRole("tab", { name: /Bookmarks/i })).toBeInTheDocument();
     });
 
-    await user.click(screen.getByRole("button", { name: "2 bookmarks" }));
+    await user.click(screen.getByRole("tab", { name: /Bookmarks/i }));
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Close bookmarks" })).toBeInTheDocument();
+      expect(screen.getByRole("tab", { name: /Bookmarks/i })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
     });
     expect(screen.getByText("Saved markdown summary")).toBeInTheDocument();
-    expect(screen.getByText("25 bookmarks")).toBeInTheDocument();
+    expect(screen.getByText("25 of 25 bookmarked messages")).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Page number" })).toHaveValue("1");
 
-    await user.click(screen.getByRole("button", { name: "Close bookmarks" }));
+    await user.click(screen.getByRole("tab", { name: /Messages/i }));
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "2 bookmarks" })).toBeInTheDocument();
+      expect(screen.getByRole("tab", { name: /Messages/i })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
     });
     expect(screen.getByText("Please review markdown table rendering")).toBeInTheDocument();
   });
@@ -2696,15 +3029,10 @@ describe("App shell", () => {
       expect(screen.getByText("2 of 2 messages")).toBeInTheDocument();
     });
 
-    const projectTwoFolder = document.querySelector<HTMLButtonElement>(
-      '[data-folder-id="/workspace/project-two"]',
-    );
-    expect(projectTwoFolder).not.toBeNull();
-    if (!projectTwoFolder) {
-      throw new Error("Expected project-two folder row");
-    }
-
-    await user.click(projectTwoFolder);
+    const projectFolder = screen.getByRole("button", {
+      name: /(?:\/workspace\/project-two|~\/project-two), 1 projects/i,
+    });
+    await user.click(projectFolder);
     await waitFor(() => {
       expect(document.querySelector('[data-project-expand-toggle-for="project_2"]')).not.toBeNull();
     });
@@ -3012,6 +3340,45 @@ describe("App shell", () => {
       "This project no longer exists in the database.",
     );
     expect(screen.getByText("Delete Project From Code Trail?")).toBeInTheDocument();
+  });
+
+  it("disables project deletion from the header options when a folder row is focused", async () => {
+    installScrollIntoViewMock();
+    installDialogMock();
+
+    const user = userEvent.setup();
+    const client = createAppClient();
+
+    renderWithClient(
+      <App
+        initialPaneState={
+          {
+            projectViewMode: "tree",
+            hideSessionsPaneInTreeView: true,
+            selectedProjectId: "project_1",
+            selectedSessionId: "session_1",
+            historyMode: "session",
+          } as PaneStateSnapshot
+        }
+      />,
+      client,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("2 of 2 messages")).toBeInTheDocument();
+    });
+
+    const projectFolder = screen.getByRole("button", {
+      name: /(?:\/workspace\/project-one|~\/project-one), 1 projects/i,
+    });
+    await user.click(projectFolder);
+    await user.click(screen.getByRole("button", { name: "Project options" }));
+
+    const deleteButton = screen.getByRole("button", { name: "Delete" });
+    expect(deleteButton).toBeDisabled();
+
+    await user.click(deleteButton);
+    expect(screen.queryByText("Delete Project From Code Trail?")).toBeNull();
   });
 
   it("routes tree session context menu actions through the real session handlers", async () => {

@@ -43,6 +43,7 @@ const api: CodetrailBridge = {
   searchQuery: (payload) => invoke("search:query", payload),
   sessionsDelete: (payload) => invoke("sessions:delete", payload),
   sessionsGetDetail: (payload) => invoke("sessions:getDetail", payload),
+  sessionsGetTurn: (payload) => invoke("sessions:getTurn", payload),
   sessionsList: (payload) => invoke("sessions:list", payload),
   sessionsListMany: (payload) => invoke("sessions:listMany", payload),
   uiGetPaneState: (payload) => invoke("ui:getPaneState", payload),

@@ -46,10 +46,18 @@ export function SectionHeader({
   );
 }
 
-export function InlineSwitchRow({ label, children }: { label: string; children: ReactNode }) {
+export function InlineSwitchRow({
+  label,
+  labelTitle,
+  children,
+}: {
+  label: string;
+  labelTitle?: string;
+  children: ReactNode;
+}) {
   return (
     <div className="settings-inline-switch-row">
-      <span>{label}</span>
+      <span title={labelTitle}>{label}</span>
       {children}
     </div>
   );

@@ -374,6 +374,118 @@ export function createAppClient(overrides: Record<string, ChannelHandler> = {}) 
         },
       ],
     }),
+    "sessions:getTurn": (request) => {
+      const latest = request.latest === true;
+      const turnNumber = typeof request.turnNumber === "number" ? request.turnNumber : null;
+      const anchorMessageId =
+        typeof request.anchorMessageId === "string" && request.anchorMessageId.length > 0
+          ? request.anchorMessageId
+          : latest || turnNumber === 2
+            ? "m3"
+            : "m1";
+      const messages =
+        anchorMessageId === "m3"
+          ? [
+              {
+                id: "m3",
+                sourceId: "src3",
+                sessionId: "session_1",
+                provider: "claude",
+                category: "user",
+                content: "Review the latest turn",
+                createdAt: "2026-03-01T10:00:06.000Z",
+                tokenInput: null,
+                tokenOutput: null,
+                operationDurationMs: null,
+                operationDurationSource: null,
+                operationDurationConfidence: null,
+              },
+              {
+                id: "m4",
+                sourceId: "src4",
+                sessionId: "session_1",
+                provider: "claude",
+                category: "assistant",
+                content: "Latest turn reply",
+                createdAt: "2026-03-01T10:00:07.000Z",
+                tokenInput: 8,
+                tokenOutput: 5,
+                operationDurationMs: 1000,
+                operationDurationSource: "native",
+                operationDurationConfidence: "high",
+              },
+            ]
+          : [
+              {
+                id: "m1",
+                sourceId: "src1",
+                sessionId: "session_1",
+                provider: "claude",
+                category: "user",
+                content: "Please review markdown table rendering",
+                createdAt: "2026-03-01T10:00:00.000Z",
+                tokenInput: null,
+                tokenOutput: null,
+                operationDurationMs: null,
+                operationDurationSource: null,
+                operationDurationConfidence: null,
+              },
+              {
+                id: "m2",
+                sourceId: "src2",
+                sessionId: "session_1",
+                provider: "claude",
+                category: "assistant",
+                content: "Everything checks out.",
+                createdAt: "2026-03-01T10:00:05.000Z",
+                tokenInput: 14,
+                tokenOutput: 8,
+                operationDurationMs: 5000,
+                operationDurationSource: "native",
+                operationDurationConfidence: "high",
+              },
+            ];
+      return {
+        session: {
+          id: "session_1",
+          projectId: "project_1",
+          provider: "claude",
+          filePath: "/workspace/project-one/session-1.jsonl",
+          title: "Investigate markdown rendering",
+          modelNames: "claude-opus-4-1",
+          startedAt: "2026-03-01T10:00:00.000Z",
+          endedAt: "2026-03-01T10:00:07.000Z",
+          durationMs: 7000,
+          gitBranch: "main",
+          cwd: "/workspace/project-one",
+          messageCount: 4,
+          tokenInputTotal: 22,
+          tokenOutputTotal: 13,
+        },
+        anchorMessageId,
+        anchorMessage: messages[0],
+        turnNumber: anchorMessageId === "m3" ? 2 : 1,
+        totalTurns: 2,
+        previousTurnAnchorMessageId: anchorMessageId === "m3" ? "m1" : null,
+        nextTurnAnchorMessageId: anchorMessageId === "m3" ? null : "m3",
+        firstTurnAnchorMessageId: "m1",
+        latestTurnAnchorMessageId: "m3",
+        totalCount: messages.length,
+        categoryCounts: {
+          user: 1,
+          assistant: 1,
+          tool_use: 0,
+          tool_edit: 0,
+          tool_result: 0,
+          thinking: 0,
+          system: 0,
+        },
+        queryError: null,
+        highlightPatterns: [],
+        matchedMessageIds: undefined,
+        messages,
+      };
+    },
     "sessions:delete": () => ({
       deleted: true,
       projectId: "project_1",

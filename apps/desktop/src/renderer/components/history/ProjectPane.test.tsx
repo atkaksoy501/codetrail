@@ -1014,7 +1014,7 @@ describe("ProjectPane", () => {
     expect(onEnsureTreeProjectSessionsLoaded).toHaveBeenCalledWith("project_1");
     expect(screen.getByText("Investigate markdown rendering")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Open 3 bookmarked messages" }));
+    await user.click(screen.getByRole("button", { name: "Show 3 bookmarked messages" }));
     expect(onSelectProjectBookmarks).toHaveBeenCalledWith("project_1");
 
     await user.click(screen.getByRole("button", { name: /Investigate markdown rendering/i }));

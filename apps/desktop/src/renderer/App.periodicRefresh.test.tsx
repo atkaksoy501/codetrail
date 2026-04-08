@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -574,6 +574,214 @@ describe("App periodic refresh", () => {
 
     await waitFor(() => {
       expect(countChannelCalls(client, "projects:getCombinedDetail")).toBeGreaterThan(detailBefore);
+    });
+  });
+
+  it("updates Turns pagination when a new user message creates a new turn without changing the current turn", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    let includeNewTurn = false;
+    const client = createAppClient({
+      "projects:list": () => ({
+        projects: [
+          makeProjectSummary({
+            messageCount: includeNewTurn ? 6 : 4,
+            lastActivity: includeNewTurn ? "2026-03-01T10:00:11.000Z" : "2026-03-01T10:00:07.000Z",
+          }),
+        ],
+      }),
+      "sessions:list": () => ({
+        sessions: [
+          makeSessionSummary({
+            messageCount: includeNewTurn ? 6 : 4,
+            endedAt: includeNewTurn ? "2026-03-01T10:00:11.000Z" : "2026-03-01T10:00:07.000Z",
+          }),
+        ],
+      }),
+      "sessions:getTurn": (request) => {
+        const latestAnchor = includeNewTurn ? "m5" : "m3";
+        const anchorMessageId =
+          typeof request.anchorMessageId === "string" && request.anchorMessageId.length > 0
+            ? request.anchorMessageId
+            : request.latest === true
+              ? latestAnchor
+              : request.turnNumber === 1
+                ? "m1"
+                : request.turnNumber === 2
+                  ? "m3"
+                  : latestAnchor;
+        const totalTurns = includeNewTurn ? 3 : 2;
+        const turnNumber = anchorMessageId === "m1" ? 1 : anchorMessageId === "m3" ? 2 : totalTurns;
+        const messagesByAnchor = {
+          m1: [
+            {
+              id: "m1",
+              sourceId: "src1",
+              sessionId: "session_1",
+              provider: "claude",
+              category: "user",
+              content: "Please review markdown table rendering",
+              createdAt: "2026-03-01T10:00:00.000Z",
+              tokenInput: null,
+              tokenOutput: null,
+              operationDurationMs: null,
+              operationDurationSource: null,
+              operationDurationConfidence: null,
+            },
+            {
+              id: "m2",
+              sourceId: "src2",
+              sessionId: "session_1",
+              provider: "claude",
+              category: "assistant",
+              content: "Everything checks out.",
+              createdAt: "2026-03-01T10:00:05.000Z",
+              tokenInput: 14,
+              tokenOutput: 8,
+              operationDurationMs: 5000,
+              operationDurationSource: "native",
+              operationDurationConfidence: "high",
+            },
+          ],
+          m3: [
+            {
+              id: "m3",
+              sourceId: "src3",
+              sessionId: "session_1",
+              provider: "claude",
+              category: "user",
+              content: "Review the latest turn",
+              createdAt: "2026-03-01T10:00:06.000Z",
+              tokenInput: null,
+              tokenOutput: null,
+              operationDurationMs: null,
+              operationDurationSource: null,
+              operationDurationConfidence: null,
+            },
+            {
+              id: "m4",
+              sourceId: "src4",
+              sessionId: "session_1",
+              provider: "claude",
+              category: "assistant",
+              content: "Latest turn reply",
+              createdAt: "2026-03-01T10:00:07.000Z",
+              tokenInput: 8,
+              tokenOutput: 5,
+              operationDurationMs: 1000,
+              operationDurationSource: "native",
+              operationDurationConfidence: "high",
+            },
+          ],
+          m5: [
+            {
+              id: "m5",
+              sourceId: "src5",
+              sessionId: "session_1",
+              provider: "claude",
+              category: "user",
+              content: "Newest turn prompt",
+              createdAt: "2026-03-01T10:00:10.000Z",
+              tokenInput: null,
+              tokenOutput: null,
+              operationDurationMs: null,
+              operationDurationSource: null,
+              operationDurationConfidence: null,
+            },
+            {
+              id: "m6",
+              sourceId: "src6",
+              sessionId: "session_1",
+              provider: "claude",
+              category: "assistant",
+              content: "Newest turn reply",
+              createdAt: "2026-03-01T10:00:11.000Z",
+              tokenInput: 8,
+              tokenOutput: 5,
+              operationDurationMs: 1000,
+              operationDurationSource: "native",
+              operationDurationConfidence: "high",
+            },
+          ],
+        } as const;
+        const messages = messagesByAnchor[anchorMessageId as keyof typeof messagesByAnchor] ?? [];
+        return {
+          session: makeSessionSummary({
+            messageCount: includeNewTurn ? 6 : 4,
+            endedAt: includeNewTurn ? "2026-03-01T10:00:11.000Z" : "2026-03-01T10:00:07.000Z",
+          }),
+          anchorMessageId,
+          anchorMessage: messages[0] ?? null,
+          turnNumber,
+          totalTurns,
+          previousTurnAnchorMessageId:
+            anchorMessageId === "m1" ? null : anchorMessageId === "m3" ? "m1" : "m3",
+          nextTurnAnchorMessageId:
+            anchorMessageId === "m1"
+              ? "m3"
+              : anchorMessageId === "m3" && includeNewTurn
+                ? "m5"
+                : null,
+          firstTurnAnchorMessageId: "m1",
+          latestTurnAnchorMessageId: latestAnchor,
+          totalCount: messages.length,
+          categoryCounts: {
+            user: 1,
+            assistant: 1,
+            tool_use: 0,
+            tool_edit: 0,
+            tool_result: 0,
+            thinking: 0,
+            system: 0,
+          },
+          queryError: null,
+          highlightPatterns: [],
+          matchedMessageIds: undefined,
+          messages,
+        };
+      },
+    });
+
+    renderWithClient(
+      <App
+        initialPaneState={
+          {
+            selectedProjectId: "project_1",
+            selectedSessionId: "session_1",
+            historyMode: "session",
+          } as PaneStateSnapshot
+        }
+      />,
+      client,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Project One")).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("tab", { name: /Turns/i }));
+    await waitFor(() => {
+      expect(screen.getByRole("textbox", { name: "Turn number" })).toHaveValue("1");
+      expect(screen.getByText("Review the latest turn")).toBeInTheDocument();
+    });
+
+    fireEvent.keyDown(window, { key: "ArrowRight", metaKey: true });
+    await waitFor(() => {
+      expect(screen.getByRole("textbox", { name: "Turn number" })).toHaveValue("2");
+      expect(screen.getByText("Please review markdown table rendering")).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: "Auto-refresh strategy" }));
+    await user.click(screen.getByRole("button", { name: "5s scan" }));
+
+    includeNewTurn = true;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(110);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("textbox", { name: "Turn number" })).toHaveValue("3");
+      expect(screen.getByText("Please review markdown table rendering")).toBeInTheDocument();
+      expect(screen.getByText("of 3")).toBeInTheDocument();
     });
   });
 

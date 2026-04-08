@@ -1,6 +1,6 @@
 import { type Ref, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import type { SessionSummary } from "../../app/types";
+import type { HistoryVisualization, SessionSummary } from "../../app/types";
 import { useClickOutside } from "../../hooks/useClickOutside";
 import { formatCompactInteger, formatInteger } from "../../lib/numberFormatting";
 import { usePaneFocus, usePaneFocusOverlay } from "../../lib/paneFocusController";
@@ -42,6 +42,7 @@ export function SessionPane({
   onSelectAllSessions,
   onSelectBookmarks,
   onSelectSession,
+  historyVisualization = "messages",
   listRef,
 }: {
   sortedSessions: SessionSummary[];
@@ -63,6 +64,7 @@ export function SessionPane({
   onSelectAllSessions: () => void;
   onSelectBookmarks: () => void;
   onSelectSession: (sessionId: string) => void;
+  historyVisualization?: HistoryVisualization;
   listRef?: Ref<HTMLDivElement>;
 }) {
   const paneFocus = usePaneFocus();
@@ -78,9 +80,10 @@ export function SessionPane({
     y: number;
   } | null>(null);
   const [overflowMenuOpen, setOverflowMenuOpen] = useState(false);
+  const bookmarksSessionSelected = bookmarksSelected && selectedSessionId.length > 0;
   const selectedItemId = allSessionsSelected
     ? "__project_all__"
-    : bookmarksSelected
+    : bookmarksSelected && !bookmarksSessionSelected
       ? "__bookmarks__"
       : selectedSessionId;
   const sortTooltip = sortDirection === "asc" ? "Oldest first" : "Newest first";
@@ -130,7 +133,7 @@ export function SessionPane({
 
   return (
     <aside
-      className={`panel history-focus-pane session-pane${collapsed ? " collapsed" : ""}`}
+      className={`panel history-focus-pane history-visualization-${historyVisualization} session-pane${collapsed ? " collapsed" : ""}`}
       {...paneFocus.getHistoryPaneRootProps("session")}
       ref={(element) => {
         paneFocus.registerHistoryPaneRoot("session", element);
@@ -267,9 +270,9 @@ export function SessionPane({
               <button
                 key={row.id}
                 type="button"
-                ref={bookmarksSelected ? selectedSessionRef : null}
+                ref={bookmarksSelected && !bookmarksSessionSelected ? selectedSessionRef : null}
                 className={
-                  bookmarksSelected
+                  bookmarksSelected && !bookmarksSessionSelected
                     ? "session-item bookmarks-item active"
                     : "session-item bookmarks-item"
                 }
@@ -291,14 +294,8 @@ export function SessionPane({
             <button
               key={session.id}
               type="button"
-              ref={
-                session.id === selectedSessionId && !bookmarksSelected ? selectedSessionRef : null
-              }
-              className={
-                session.id === selectedSessionId && !bookmarksSelected
-                  ? "session-item active"
-                  : "session-item"
-              }
+              ref={session.id === selectedSessionId ? selectedSessionRef : null}
+              className={session.id === selectedSessionId ? "session-item active" : "session-item"}
               onClick={() => {
                 setContextMenu(null);
                 onSelectSession(session.id);

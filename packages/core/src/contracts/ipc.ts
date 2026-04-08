@@ -76,6 +76,21 @@ const sessionMessageSchema = z.object({
   operationDurationMs: z.number().int().nonnegative().nullable(),
   operationDurationSource: operationDurationSourceSchema.nullable(),
   operationDurationConfidence: operationDurationConfidenceSchema.nullable(),
+  toolEditFiles: z
+    .array(
+      z.object({
+        filePath: z.string().min(1),
+        previousFilePath: z.string().min(1).nullable(),
+        changeType: z.enum(["add", "update", "delete", "move"]),
+        unifiedDiff: z.string().nullable(),
+        addedLineCount: z.number().int().nonnegative(),
+        removedLineCount: z.number().int().nonnegative(),
+        exactness: z.enum(["exact", "best_effort"]),
+        beforeHash: z.string().nullable(),
+        afterHash: z.string().nullable(),
+      }),
+    )
+    .optional(),
 });
 
 const projectCombinedMessageSchema = sessionMessageSchema.extend({
@@ -270,6 +285,9 @@ export const paneStateBaseSchema = z.object({
   projectProviders: z.array(providerSchema),
   historyCategories: z.array(messageCategorySchema),
   expandedByDefaultCategories: z.array(messageCategorySchema),
+  turnViewCategories: z.array(messageCategorySchema),
+  turnViewExpandedByDefaultCategories: z.array(messageCategorySchema),
+  turnViewCombinedChangesExpanded: z.boolean(),
   searchProviders: z.array(providerSchema),
   liveWatchEnabled: z.boolean(),
   liveWatchRowHasBackground: z.boolean(),
@@ -295,6 +313,8 @@ export const paneStateBaseSchema = z.object({
   selectedProjectId: z.string(),
   selectedSessionId: z.string(),
   historyMode: z.enum(["session", "bookmarks", "project_all"]),
+  historyVisualization: z.enum(["messages", "turns", "bookmarks"]),
+  historyDetailMode: z.enum(["flat", "turn"]),
   projectViewMode: projectViewModeSchema,
   projectSortField: projectSortFieldSchema,
   projectSortDirection: sortDirectionSchema,
@@ -302,6 +322,7 @@ export const paneStateBaseSchema = z.object({
   messageSortDirection: sortDirectionSchema,
   bookmarkSortDirection: sortDirectionSchema,
   projectAllSortDirection: sortDirectionSchema,
+  turnViewSortDirection: sortDirectionSchema,
   sessionPage: z.number().int().nonnegative(),
   sessionScrollTop: z.number().int().nonnegative(),
   currentAutoRefreshStrategy: currentAutoRefreshStrategySchema,
@@ -524,6 +545,57 @@ export const ipcContractSchemas = {
       messages: z.array(sessionMessageSchema),
     }),
   },
+  "sessions:getTurn": {
+    request: z
+      .object({
+        scopeMode: z.enum(["session", "project_all", "bookmarks"]).default("session"),
+        projectId: z.string().min(1).optional(),
+        sessionId: z.string().min(1).optional(),
+        anchorMessageId: z.string().min(1).optional(),
+        turnNumber: z.number().int().positive().optional(),
+        latest: z.boolean().optional(),
+        query: z.string().default(""),
+        searchMode: searchModeSchema.optional(),
+        sortDirection: sortDirectionSchema.default("asc"),
+      })
+      .superRefine((value, context) => {
+        const targetCount =
+          (value.anchorMessageId ? 1 : 0) +
+          (value.turnNumber !== undefined ? 1 : 0) +
+          (value.latest ? 1 : 0);
+        if (targetCount !== 1) {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "Provide exactly one of anchorMessageId, turnNumber, or latest.",
+            path: ["anchorMessageId"],
+          });
+        }
+        if (value.scopeMode !== "session" && !value.projectId) {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "projectId is required for project_all and bookmarks turn scope.",
+            path: ["projectId"],
+          });
+        }
+      }),
+    response: z.object({
+      session: sessionSummarySchema.nullable(),
+      anchorMessageId: z.string().min(1).nullable(),
+      anchorMessage: sessionMessageSchema.nullable(),
+      turnNumber: z.number().int().nonnegative(),
+      totalTurns: z.number().int().nonnegative(),
+      previousTurnAnchorMessageId: z.string().min(1).nullable(),
+      nextTurnAnchorMessageId: z.string().min(1).nullable(),
+      firstTurnAnchorMessageId: z.string().min(1).nullable(),
+      latestTurnAnchorMessageId: z.string().min(1).nullable(),
+      totalCount: z.number().int().nonnegative(),
+      categoryCounts: categoryCountsSchema,
+      queryError: z.string().nullable().optional(),
+      highlightPatterns: z.array(z.string()).optional(),
+      matchedMessageIds: z.array(z.string()).optional(),
+      messages: z.array(sessionMessageSchema),
+    }),
+  },
   "sessions:delete": {
     request: z.object({
       sessionId: z.string().min(1),
@@ -540,6 +612,7 @@ export const ipcContractSchemas = {
   "bookmarks:listProject": {
     request: z.object({
       projectId: z.string().min(1),
+      sessionId: z.string().min(1).optional(),
       page: z.number().int().nonnegative().default(0),
       pageSize: z.number().int().positive().max(500).default(100),
       sortDirection: sortDirectionSchema.default("asc"),

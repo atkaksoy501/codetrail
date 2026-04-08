@@ -413,11 +413,14 @@ export function SettingsView({
                     ariaLabel="Auto-hide text viewer header actions"
                   />
                 </InlineSwitchRow>
-                <InlineSwitchRow label="Collapse diffs when a write message changes multiple files">
+                <InlineSwitchRow
+                  label="Collapse multiple diffs by default in write cards and for all diffs in combined changes card"
+                  labelTitle="When enabled, per-file diffs start collapsed in write messages that touch multiple files and in Turn View Combined Changes, even if the combined result currently shows only one file."
+                >
                   <SettingsSwitch
                     checked={appearance.collapseMultiFileToolDiffs}
                     onChange={appearance.onCollapseMultiFileToolDiffsChange}
-                    ariaLabel="Collapse diffs when a write message changes multiple files"
+                    ariaLabel="Collapse multiple diffs by default in write cards and for all diffs in combined changes card"
                   />
                 </InlineSwitchRow>
               </SectionCard>

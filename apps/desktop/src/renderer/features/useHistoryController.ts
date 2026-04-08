@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 
 import type {
+  IpcRequestInput,
   MessageCategory,
   Provider,
   SearchMode,
@@ -15,9 +16,13 @@ import {
   isWatchRefreshStrategy,
 } from "../app/autoRefresh";
 import {
+  CATEGORIES,
   DEFAULT_MESSAGE_CATEGORIES,
+  DEFAULT_TURN_VIEW_EXPANDED_CATEGORIES,
+  DEFAULT_TURN_VIEW_MESSAGE_CATEGORIES,
   EMPTY_BOOKMARKS_RESPONSE,
   EMPTY_SYSTEM_MESSAGE_REGEX_RULES,
+  MESSAGE_ID_BATCH_SIZE,
 } from "../app/constants";
 import {
   createHistorySelection,
@@ -27,9 +32,11 @@ import {
 import type {
   BookmarkListResponse,
   HistoryExportScope,
+  HistoryMessage,
   HistorySearchNavigation,
   HistorySelection,
   HistorySelectionCommitMode,
+  HistoryVisualization,
   PaneStateSnapshot,
   PendingMessagePageNavigation,
   PendingRevealTarget,
@@ -39,6 +46,7 @@ import type {
   ProjectViewMode,
   SessionDetail,
   SessionSummary,
+  SessionTurnDetail,
   SortDirection,
   TreeAutoRevealSessionRequest,
 } from "../app/types";
@@ -47,6 +55,7 @@ import { useDebouncedValue } from "../hooks/useDebouncedValue";
 import { usePaneStateSync } from "../hooks/usePaneStateSync";
 import { useReconcileProviderSelection } from "../hooks/useReconcileProviderSelection";
 import { useResizablePanes } from "../hooks/useResizablePanes";
+import { shouldIgnoreAsyncEffectError } from "../lib/asyncEffectUtils";
 import { useCodetrailClient } from "../lib/codetrailClient";
 import type { HistoryPaneId } from "../lib/paneFocusController";
 import {
@@ -65,6 +74,17 @@ import {
   isLiveEdgePage,
   isPinnedToVisualRefreshEdge,
 } from "./historyRefreshPolicy";
+import {
+  type VisibleExpansionAction,
+  deriveVisibleExpansionAction,
+  getNextVisibleExpansionAction,
+} from "./historyVisibleExpansion";
+import {
+  deriveHistoryVisualization,
+  getHistoryDetailModeForVisualization,
+  getTurnVisualizationSelection,
+} from "./historyVisualization";
+import { buildTurnCategoryCounts, buildTurnVisibleMessages } from "./turnViewModel";
 import { useHistoryDataEffects } from "./useHistoryDataEffects";
 import { useHistoryDerivedState } from "./useHistoryDerivedState";
 import { useHistoryInteractions } from "./useHistoryInteractions";
@@ -73,6 +93,12 @@ import {
   useHistorySelectionState,
 } from "./useHistorySelectionState";
 import { useHistoryViewportEffects } from "./useHistoryViewportEffects";
+
+const TURN_PRIMARY_HISTORY_CATEGORIES: readonly MessageCategory[] = [
+  "user",
+  "assistant",
+  "tool_edit",
+];
 
 export type { HistorySelectionDebounceOverrides } from "./useHistorySelectionState";
 
@@ -143,6 +169,23 @@ function compareProjectsByField(
     compareProjectName(left, right) ||
     left.id.localeCompare(right.id)
   );
+}
+
+function areHistorySelectionsEqual(left: HistorySelection, right: HistorySelection): boolean {
+  if (left.mode !== right.mode || left.projectId !== right.projectId) {
+    return false;
+  }
+  if (left.mode === "session") {
+    return right.mode === "session" && left.sessionId === right.sessionId;
+  }
+  if (left.mode === "bookmarks") {
+    return right.mode === "bookmarks" && (left.sessionId ?? "") === (right.sessionId ?? "");
+  }
+  return true;
+}
+
+function getTurnScopeKey(selection: HistorySelection): string {
+  return `${selection.mode}:${selection.projectId}:${"sessionId" in selection ? (selection.sessionId ?? "") : ""}`;
 }
 
 function sortSessionSummaries(
@@ -352,8 +395,12 @@ export function useHistoryController({
   const [projectAllSortDirection, setProjectAllSortDirection] = useState<SortDirection>(
     initialPaneState?.projectAllSortDirection ?? "desc",
   );
+  const [turnViewSortDirection, setTurnViewSortDirection] = useState<SortDirection>(
+    initialPaneState?.turnViewSortDirection ?? initialPaneState?.messageSortDirection ?? "desc",
+  );
   const [sessionQueryInput, setSessionQueryInput] = useState("");
   const [bookmarkQueryInput, setBookmarkQueryInput] = useState("");
+  const [turnQueryInput, setTurnQueryInput] = useState("");
   const [preferredAutoRefreshStrategy, setPreferredAutoRefreshStrategy] =
     useState<NonOffRefreshStrategy>(
       initialPaneState?.preferredAutoRefreshStrategy ?? DEFAULT_PREFERRED_REFRESH_STRATEGY,
@@ -369,6 +416,40 @@ export function useHistoryController({
   const [expandedByDefaultCategories, setExpandedByDefaultCategories] = useState<MessageCategory[]>(
     initialPaneState?.expandedByDefaultCategories ?? [...DEFAULT_MESSAGE_CATEGORIES],
   );
+  const [turnViewCategories, setTurnViewCategories] = useState<MessageCategory[]>(
+    initialPaneState?.turnViewCategories ?? [...DEFAULT_TURN_VIEW_MESSAGE_CATEGORIES],
+  );
+  const [turnViewExpandedByDefaultCategories, setTurnViewExpandedByDefaultCategories] = useState<
+    MessageCategory[]
+  >(
+    initialPaneState?.turnViewExpandedByDefaultCategories ?? [
+      ...DEFAULT_TURN_VIEW_EXPANDED_CATEGORIES,
+    ],
+  );
+  const [turnViewCombinedChangesExpanded, setTurnViewCombinedChangesExpanded] = useState(
+    initialPaneState?.turnViewCombinedChangesExpanded ?? false,
+  );
+  const [turnViewCombinedChangesExpandedOverride, setTurnViewCombinedChangesExpandedOverride] =
+    useState<boolean | null>(null);
+  const [visibleExpansionActionState, setVisibleExpansionActionState] =
+    useState<VisibleExpansionAction>("expand");
+  const visibleExpansionScopeKeyRef = useRef("");
+  const visibleExpansionItemCountRef = useRef(0);
+  const turnViewCategoriesRef = useRef<MessageCategory[]>(turnViewCategories);
+  const turnViewCategorySoloRestoreRef = useRef<{
+    mode: `solo:${MessageCategory}` | "preset:primary" | "preset:all";
+    categories: MessageCategory[];
+  } | null>(null);
+  const [historyVisualization, setHistoryVisualization] = useState<HistoryVisualization>(
+    deriveHistoryVisualization(
+      initialPaneState?.historyMode ?? "project_all",
+      initialPaneState?.historyDetailMode ?? "flat",
+    ),
+  );
+  const [turnAnchorMessageId, setTurnAnchorMessageId] = useState("");
+  const [turnSourceSessionId, setTurnSourceSessionId] = useState("");
+  const [sessionTurnDetail, setSessionTurnDetail] = useState<SessionTurnDetail | null>(null);
+  const turnScopeKeyRef = useRef("");
   const [liveWatchEnabled, setLiveWatchEnabled] = useState(
     initialPaneState?.liveWatchEnabled ?? true,
   );
@@ -410,6 +491,7 @@ export function useHistoryController({
     useState<HistorySearchNavigation | null>(null);
   const [sessionDetailRefreshNonce, setSessionDetailRefreshNonce] = useState(0);
   const [projectCombinedDetailRefreshNonce, setProjectCombinedDetailRefreshNonce] = useState(0);
+  const [turnDetailRefreshNonce, setTurnDetailRefreshNonce] = useState(0);
   const [historyExportState, setHistoryExportState] = useState<HistoryExportState>({
     open: false,
     exportId: null,
@@ -422,8 +504,10 @@ export function useHistoryController({
   const projectQuery = useDebouncedValue(projectQueryInput, 180);
   const sessionQuery = useDebouncedValue(sessionQueryInput, 400);
   const bookmarkQuery = useDebouncedValue(bookmarkQueryInput, 400);
+  const turnQuery = useDebouncedValue(turnQueryInput, 400);
   const effectiveSessionQuery = sessionQueryInput.trim().length === 0 ? "" : sessionQuery;
   const effectiveBookmarkQuery = bookmarkQueryInput.trim().length === 0 ? "" : bookmarkQuery;
+  const effectiveTurnQuery = turnQueryInput.trim().length === 0 ? "" : turnQuery;
 
   const focusedMessageRef = useRef<HTMLDivElement | null>(null);
   const messageListRef = useRef<HTMLDivElement | null>(null);
@@ -506,8 +590,9 @@ export function useHistoryController({
   });
 
   const rawUiSelectedProjectId = selection.projectId;
-  const rawUiSelectedSessionId = selection.mode === "session" ? selection.sessionId : "";
+  const rawUiSelectedSessionId = "sessionId" in selection ? (selection.sessionId ?? "") : "";
   const uiHistoryMode = selection.mode;
+  const historyDetailMode = getHistoryDetailModeForVisualization(historyVisualization);
 
   const naturallySortedProjects = useMemo(() => {
     const next = projects.filter((project) => enabledProviders.includes(project.provider));
@@ -553,12 +638,20 @@ export function useHistoryController({
   );
   const rawSelectedProjectId = committedSelection.projectId;
   const rawSelectedSessionId =
-    committedSelection.mode === "session" ? committedSelection.sessionId : "";
+    "sessionId" in committedSelection ? (committedSelection.sessionId ?? "") : "";
   const historyMode = committedSelection.mode;
   const selectedProjectId = rawSelectedProjectId || sortedProjects[0]?.id || "";
   const selectedSessionId = rawSelectedSessionId;
   const uiSelectedProjectId = rawUiSelectedProjectId || sortedProjects[0]?.id || "";
   const uiSelectedSessionId = rawUiSelectedSessionId;
+  const currentHistorySelection = useMemo(
+    () => createHistorySelection(historyMode, selectedProjectId, selectedSessionId),
+    [historyMode, selectedProjectId, selectedSessionId],
+  );
+  const currentUiHistorySelection = useMemo(
+    () => createHistorySelection(uiHistoryMode, uiSelectedProjectId, uiSelectedSessionId),
+    [uiHistoryMode, uiSelectedProjectId, uiSelectedSessionId],
+  );
 
   const naturallySortedSessions = useMemo(
     () => sortSessionSummaries(sessions, sessionSortDirection),
@@ -644,6 +737,22 @@ export function useHistoryController({
       ) as Record<string, SessionSummary[]>,
     [naturallySortedTreeProjectSessionsByProjectId, treeProjectSessionOrderIdsByProjectId],
   );
+  const turnSourceSession = useMemo(() => {
+    if (!turnSourceSessionId) {
+      return null;
+    }
+    const listedSession = sortedSessions.find((session) => session.id === turnSourceSessionId);
+    if (listedSession) {
+      return listedSession;
+    }
+    for (const projectSessions of Object.values(sortedTreeProjectSessionsByProjectId)) {
+      const matchedSession = projectSessions.find((session) => session.id === turnSourceSessionId);
+      if (matchedSession) {
+        return matchedSession;
+      }
+    }
+    return null;
+  }, [sortedSessions, sortedTreeProjectSessionsByProjectId, turnSourceSessionId]);
 
   useEffect(() => {
     treeProjectSessionsByProjectIdRef.current = treeProjectSessionsByProjectId;
@@ -865,6 +974,9 @@ export function useHistoryController({
       projectProviders,
       historyCategories,
       expandedByDefaultCategories,
+      turnViewCategories,
+      turnViewExpandedByDefaultCategories,
+      turnViewCombinedChangesExpanded,
       searchProviders,
       liveWatchEnabled,
       liveWatchRowHasBackground,
@@ -884,6 +996,9 @@ export function useHistoryController({
       removeMissingSessionsDuringIncrementalIndexing,
       searchProviders,
       systemMessageRegexRules,
+      turnViewCategories,
+      turnViewExpandedByDefaultCategories,
+      turnViewCombinedChangesExpanded,
     ],
   );
 
@@ -892,9 +1007,18 @@ export function useHistoryController({
       selectedProjectId,
       selectedSessionId,
       historyMode,
+      historyVisualization,
+      historyDetailMode,
       sessionPage,
     }),
-    [historyMode, selectedProjectId, selectedSessionId, sessionPage],
+    [
+      historyDetailMode,
+      historyMode,
+      historyVisualization,
+      selectedProjectId,
+      selectedSessionId,
+      sessionPage,
+    ],
   );
 
   const paneSortState = useMemo(
@@ -905,6 +1029,7 @@ export function useHistoryController({
       messageSortDirection,
       bookmarkSortDirection,
       projectAllSortDirection,
+      turnViewSortDirection,
     }),
     [
       bookmarkSortDirection,
@@ -913,6 +1038,7 @@ export function useHistoryController({
       projectSortField,
       projectSortDirection,
       sessionSortDirection,
+      turnViewSortDirection,
     ],
   );
 
@@ -946,7 +1072,7 @@ export function useHistoryController({
         typeof value === "function"
           ? setHistorySelectionSessionId(
               selectionState,
-              value(selectionState.mode === "session" ? selectionState.sessionId : ""),
+              value("sessionId" in selectionState ? (selectionState.sessionId ?? "") : ""),
             )
           : setHistorySelectionSessionId(selectionState, value),
       );
@@ -960,7 +1086,7 @@ export function useHistoryController({
         createHistorySelection(
           typeof value === "function" ? value(selectionState.mode) : value,
           selectionState.projectId,
-          selectionState.mode === "session" ? selectionState.sessionId : "",
+          "sessionId" in selectionState ? (selectionState.sessionId ?? "") : "",
         ),
       );
     },
@@ -982,6 +1108,9 @@ export function useHistoryController({
     setProjectProviders,
     setHistoryCategories,
     setExpandedByDefaultCategories,
+    setTurnViewCategories,
+    setTurnViewExpandedByDefaultCategories,
+    setTurnViewCombinedChangesExpanded,
     setSearchProviders,
     setLiveWatchEnabled,
     setLiveWatchRowHasBackground,
@@ -1010,6 +1139,7 @@ export function useHistoryController({
     setSelectedProjectId: setSelectedProjectIdForPaneStateSync,
     setSelectedSessionId: setSelectedSessionIdForPaneStateSync,
     setHistoryMode: setHistoryModeForPaneStateSync,
+    setHistoryVisualization,
     setProjectViewMode,
     setProjectSortField,
     setProjectSortDirection,
@@ -1017,6 +1147,7 @@ export function useHistoryController({
     setMessageSortDirection,
     setBookmarkSortDirection,
     setProjectAllSortDirection,
+    setTurnViewSortDirection,
     setSessionPage,
     setSessionScrollTop,
     setSystemMessageRegexRules,
@@ -1141,8 +1272,8 @@ export function useHistoryController({
     bookmarkOrphanedByMessageId,
     bookmarkedMessageIds,
     activeHistoryMessages,
-    visibleFocusedMessageId,
-    focusedMessagePosition,
+    visibleFocusedMessageId: visibleFocusedMessageIdFlat,
+    focusedMessagePosition: focusedMessagePositionFlat,
     loadedHistoryPage,
     selectedProject,
     selectedSession,
@@ -1162,8 +1293,8 @@ export function useHistoryController({
     historyQueryError,
     historyHighlightPatterns,
     isExpandedByDefault,
-    areAllMessagesExpanded,
-    globalExpandCollapseLabel,
+    areAllMessagesExpanded: areAllMessagesExpandedFlat,
+    globalExpandCollapseLabel: globalExpandCollapseLabelFlat,
     workspaceStyle,
     selectedSummaryMessageCount,
     historyCategoryExpandShortcutMap,
@@ -1201,16 +1332,98 @@ export function useHistoryController({
     () => activeHistoryMessages.map((message) => message.id),
     [activeHistoryMessages],
   );
+  const turnAnchorMessage = useMemo(() => {
+    if (!sessionTurnDetail) {
+      return null;
+    }
+    return (
+      sessionTurnDetail.anchorMessage ??
+      sessionTurnDetail.messages.find(
+        (message) => message.id === sessionTurnDetail.anchorMessageId,
+      ) ??
+      null
+    );
+  }, [sessionTurnDetail]);
+  const turnVisibleMessages = useMemo(
+    () =>
+      buildTurnVisibleMessages(
+        sessionTurnDetail?.messages ?? [],
+        turnAnchorMessage,
+        turnViewCategories,
+        sessionTurnDetail?.matchedMessageIds,
+      ),
+    [
+      sessionTurnDetail?.matchedMessageIds,
+      sessionTurnDetail?.messages,
+      turnAnchorMessage,
+      turnViewCategories,
+    ],
+  );
+  const detailMessages = historyDetailMode === "turn" ? turnVisibleMessages : activeHistoryMessages;
+  const detailMessageIds = useMemo(
+    () => detailMessages.map((message) => message.id),
+    [detailMessages],
+  );
+  const turnCategoryCounts = useMemo(
+    () =>
+      sessionTurnDetail?.categoryCounts ??
+      buildTurnCategoryCounts(sessionTurnDetail?.messages ?? [], turnAnchorMessage),
+    [sessionTurnDetail?.categoryCounts, sessionTurnDetail?.messages, turnAnchorMessage],
+  );
+  const turnTotalPages = Math.max(1, sessionTurnDetail?.totalTurns ?? 1);
+  const turnDisplayPage = useMemo(() => {
+    const canonicalTurnNumber = sessionTurnDetail?.turnNumber ?? 1;
+    if (turnViewSortDirection === "desc") {
+      return Math.max(0, turnTotalPages - canonicalTurnNumber);
+    }
+    return Math.max(0, canonicalTurnNumber - 1);
+  }, [sessionTurnDetail?.turnNumber, turnTotalPages, turnViewSortDirection]);
+  const turnVisualizationSelection = useMemo(
+    () =>
+      getTurnVisualizationSelection({
+        selection: currentUiHistorySelection,
+        selectedProjectId,
+      }),
+    [currentUiHistorySelection, selectedProjectId],
+  );
+  const canToggleTurnView =
+    historyDetailMode === "turn"
+      ? true
+      : turnVisualizationSelection.mode === "session"
+        ? Boolean(
+            ("sessionId" in turnVisualizationSelection && turnVisualizationSelection.sessionId) ||
+              selectedSessionId,
+          ) &&
+          ((sessionDetail?.categoryCounts.user ?? 0) > 0 ||
+            (selectedSession?.messageCount ?? 0) > 0)
+        : Boolean(turnVisualizationSelection.projectId) &&
+          (historyCategoryCounts.user > 0 || (selectedProject?.messageCount ?? 0) > 0);
+  const currentTurnScopeKey = useMemo(
+    () => getTurnScopeKey(turnVisualizationSelection),
+    [turnVisualizationSelection],
+  );
+  const visibleFocusedMessageId = useMemo(() => {
+    if (!focusMessageId) {
+      return "";
+    }
+    return detailMessages.some((message) => message.id === focusMessageId) ? focusMessageId : "";
+  }, [detailMessages, focusMessageId]);
+  const focusedMessagePosition = useMemo(() => {
+    if (!focusMessageId) {
+      return -1;
+    }
+    return detailMessages.findIndex((message) => message.id === focusMessageId);
+  }, [detailMessages, focusMessageId]);
   const stableActiveHistoryMessageIds = useMemo(() => {
     const previousIds = activeHistoryMessageIdsRef.current;
     if (
-      previousIds.length === activeHistoryMessageIds.length &&
-      previousIds.every((messageId, index) => messageId === activeHistoryMessageIds[index])
+      previousIds.length === detailMessageIds.length &&
+      previousIds.every((messageId, index) => messageId === detailMessageIds[index])
     ) {
       return previousIds;
     }
-    return activeHistoryMessageIds;
-  }, [activeHistoryMessageIds]);
+    return detailMessageIds;
+  }, [detailMessageIds]);
   const stableActiveHistoryMessageIdsSignature = useMemo(
     () => stableActiveHistoryMessageIds.join("\u0000"),
     [stableActiveHistoryMessageIds],
@@ -1231,6 +1444,44 @@ export function useHistoryController({
   }, [historyCategories]);
 
   useEffect(() => {
+    turnViewCategoriesRef.current = turnViewCategories;
+  }, [turnViewCategories]);
+
+  useEffect(() => {
+    if (historyVisualization === "turns") {
+      return;
+    }
+    if (historyVisualization === "bookmarks") {
+      if (historyMode === "bookmarks" || !selectedProjectId) {
+        return;
+      }
+      setHistorySelectionImmediate(
+        createHistorySelection(
+          "bookmarks",
+          selectedProjectId,
+          historyMode === "session" ? selectedSessionId : "",
+        ),
+      );
+      return;
+    }
+    if (historyMode === "bookmarks") {
+      setHistorySelectionImmediate(
+        createHistorySelection(
+          selectedSessionId ? "session" : "project_all",
+          selectedProjectId,
+          selectedSessionId,
+        ),
+      );
+    }
+  }, [
+    historyMode,
+    historyVisualization,
+    selectedProjectId,
+    selectedSessionId,
+    setHistorySelectionImmediate,
+  ]);
+
+  useEffect(() => {
     selectedProjectRefreshFingerprintRef.current = getProjectRefreshFingerprint(selectedProject);
   }, [selectedProject]);
 
@@ -1247,7 +1498,7 @@ export function useHistoryController({
   }, [bookmarkStateRequestKey]);
 
   useEffect(() => {
-    const visibleMessageIds = new Set(activeHistoryMessages.map((message) => message.id));
+    const visibleMessageIds = new Set(detailMessages.map((message) => message.id));
     setMessageExpansionOverrides((current) => {
       let changed = false;
       const next: Record<string, boolean> = {};
@@ -1260,14 +1511,14 @@ export function useHistoryController({
       }
       return changed ? next : current;
     });
-  }, [activeHistoryMessages]);
+  }, [detailMessages]);
 
   useEffect(() => {
     if (!selectedProjectId) {
       setVisibleBookmarkedMessageIds([]);
       return;
     }
-    if (historyMode === "bookmarks") {
+    if (historyMode === "bookmarks" && historyDetailMode !== "turn") {
       setVisibleBookmarkedMessageIds(
         bookmarksResponse.projectId === selectedProjectId
           ? bookmarksResponse.results.map((entry) => entry.message.id)
@@ -1283,14 +1534,29 @@ export function useHistoryController({
 
     let cancelled = false;
     const requestKey = bookmarkStateRequestKey;
-    void codetrail
-      .invoke("bookmarks:getStates", {
-        projectId: selectedProjectId,
-        messageIds: stableActiveHistoryMessageIds,
-      })
-      .then((response) => {
+    const loadBookmarkStates = async () => {
+      const collected = new Set<string>();
+      for (
+        let index = 0;
+        index < stableActiveHistoryMessageIds.length;
+        index += MESSAGE_ID_BATCH_SIZE
+      ) {
+        const batch = stableActiveHistoryMessageIds.slice(index, index + MESSAGE_ID_BATCH_SIZE);
+        const response = await codetrail.invoke("bookmarks:getStates", {
+          projectId: selectedProjectId,
+          messageIds: batch,
+        });
+        for (const messageId of response.bookmarkedMessageIds) {
+          collected.add(messageId);
+        }
+      }
+      return Array.from(collected);
+    };
+
+    void loadBookmarkStates()
+      .then((bookmarkedMessageIds) => {
         if (!cancelled && bookmarkStateRequestKeyRef.current === requestKey) {
-          setVisibleBookmarkedMessageIds(response.bookmarkedMessageIds);
+          setVisibleBookmarkedMessageIds(bookmarkedMessageIds);
         }
       })
       .catch(() => {
@@ -1307,6 +1573,7 @@ export function useHistoryController({
     bookmarksResponse.projectId,
     bookmarksResponse.results,
     codetrail,
+    historyDetailMode,
     historyMode,
     selectedProjectId,
     stableActiveHistoryMessageIds,
@@ -1328,7 +1595,7 @@ export function useHistoryController({
     refreshContextRef,
     pendingAutoScrollRef,
     prevMessageIdsRef,
-    activeHistoryMessages,
+    activeHistoryMessages: detailMessages,
     activeMessageSortDirection,
     focusMessageId,
     visibleFocusedMessageId,
@@ -1344,15 +1611,14 @@ export function useHistoryController({
   });
 
   const {
-    handleToggleHistoryCategoryShortcut,
-    handleSoloHistoryCategoryShortcut,
-    handleTogglePrimaryHistoryCategoriesShortcut,
-    handleToggleAllHistoryCategoriesShortcut,
-    handleFocusPrimaryHistoryCategoriesShortcut,
-    handleFocusAllHistoryCategoriesShortcut,
+    handleToggleHistoryCategoryShortcut: handleToggleHistoryCategoryShortcutFlat,
+    handleSoloHistoryCategoryShortcut: handleSoloHistoryCategoryShortcutFlat,
+    handleTogglePrimaryHistoryCategoriesShortcut: handleTogglePrimaryHistoryCategoriesShortcutFlat,
+    handleToggleAllHistoryCategoriesShortcut: handleToggleAllHistoryCategoriesShortcutFlat,
+    handleFocusPrimaryHistoryCategoriesShortcut: handleFocusPrimaryHistoryCategoriesShortcutFlat,
+    handleFocusAllHistoryCategoriesShortcut: handleFocusAllHistoryCategoriesShortcutFlat,
     handleToggleVisibleCategoryMessagesExpanded,
-    handleToggleCategoryDefaultExpansion,
-    handleToggleAllCategoryDefaultExpansion,
+    handleToggleCategoryDefaultExpansion: handleToggleCategoryDefaultExpansionFlat,
     handleToggleMessageExpanded,
     handleRevealInSession,
     handleRevealInProject,
@@ -1391,10 +1657,11 @@ export function useHistoryController({
     setSessionPage,
     isExpandedByDefault,
     historyMode: uiHistoryMode,
+    historyVisualization,
     selection,
     bookmarkReturnSelection,
     bookmarksResponse,
-    activeHistoryMessages,
+    activeHistoryMessages: detailMessages,
     selectedProjectId: uiSelectedProjectId,
     historyCategories,
     setPendingSearchNavigation,
@@ -1415,6 +1682,7 @@ export function useHistoryController({
         options?.commitMode ?? "immediate",
         options?.waitForKeyboardIdle ?? false,
       ),
+    setHistoryVisualization,
     setBookmarkReturnSelection,
     sessionListRef,
     selectedSessionId: uiSelectedSessionId,
@@ -1455,6 +1723,38 @@ export function useHistoryController({
     focusSessionPane: () => focusHistoryPane("session"),
   });
 
+  const clearTurnViewState = useCallback(() => {
+    setTurnAnchorMessageId("");
+    setTurnSourceSessionId("");
+    setSessionTurnDetail(null);
+    setTurnViewCombinedChangesExpandedOverride(null);
+    turnScopeKeyRef.current = "";
+  }, []);
+
+  const handleRevealInSessionWithTurnExit = useCallback(
+    (messageId: string, sourceId: string) => {
+      clearTurnViewState();
+      handleRevealInSession(messageId, sourceId);
+    },
+    [clearTurnViewState, handleRevealInSession],
+  );
+
+  const handleRevealInProjectWithTurnExit = useCallback(
+    (messageId: string, sourceId: string, sessionId: string) => {
+      clearTurnViewState();
+      handleRevealInProject(messageId, sourceId, sessionId);
+    },
+    [clearTurnViewState, handleRevealInProject],
+  );
+
+  const handleRevealInBookmarksWithTurnExit = useCallback(
+    (messageId: string, sourceId: string) => {
+      clearTurnViewState();
+      handleRevealInBookmarks(messageId, sourceId);
+    },
+    [clearTurnViewState, handleRevealInBookmarks],
+  );
+
   const handleToggleProjectExpansion = useCallback(
     (projectId: string) => {
       const collapsingSelectedSessionProject =
@@ -1478,6 +1778,824 @@ export function useHistoryController({
       uiSelectedSessionId,
     ],
   );
+
+  const buildTurnScopeRequestBase = useCallback(
+    (selectionState: HistorySelection) => ({
+      scopeMode: selectionState.mode,
+      ...(selectionState.projectId ? { projectId: selectionState.projectId } : {}),
+      ...(selectionState.mode === "session" ? { sessionId: selectionState.sessionId } : {}),
+    }),
+    [],
+  );
+
+  const loadTurnDetail = useCallback(
+    async (
+      request: Pick<
+        IpcRequestInput<"sessions:getTurn">,
+        "sessionId" | "anchorMessageId" | "turnNumber" | "latest"
+      >,
+      options: {
+        queryOverride?: string;
+        scopeSelection?: HistorySelection;
+      } = {},
+    ) => {
+      const scopeSelection = options.scopeSelection ?? turnVisualizationSelection;
+      const response = await codetrail.invoke("sessions:getTurn", {
+        ...buildTurnScopeRequestBase(scopeSelection),
+        ...request,
+        query: options.queryOverride ?? effectiveTurnQuery,
+        searchMode,
+        sortDirection: turnViewSortDirection,
+      });
+      return response;
+    },
+    [
+      buildTurnScopeRequestBase,
+      codetrail,
+      effectiveTurnQuery,
+      searchMode,
+      turnViewSortDirection,
+      turnVisualizationSelection,
+    ],
+  );
+
+  const handleEnterTurnView = useCallback(
+    (message: HistoryMessage) => {
+      if (
+        message.category !== "user" ||
+        (message.provider !== "claude" && message.provider !== "codex")
+      ) {
+        return;
+      }
+      const nextSelection = createHistorySelection("session", selectedProjectId, message.sessionId);
+      if (!areHistorySelectionsEqual(currentUiHistorySelection, nextSelection)) {
+        setHistorySelectionImmediate(nextSelection);
+      }
+      setHistoryVisualization("turns");
+      setTurnAnchorMessageId(message.id);
+      setTurnSourceSessionId(message.sessionId);
+      setTurnQueryInput("");
+      setSessionTurnDetail(null);
+      setFocusMessageId("");
+    },
+    [currentUiHistorySelection, selectedProjectId, setHistorySelectionImmediate],
+  );
+
+  const handleSelectMessagesView = useCallback(() => {
+    if (historyDetailMode === "turn") {
+      clearTurnViewState();
+    }
+    setHistoryVisualization("messages");
+  }, [clearTurnViewState, historyDetailMode]);
+
+  const handleSelectTurnsView = useCallback(async () => {
+    if (historyDetailMode === "turn") {
+      return;
+    }
+    if (!canToggleTurnView) {
+      return;
+    }
+    if (!areHistorySelectionsEqual(currentUiHistorySelection, turnVisualizationSelection)) {
+      setHistorySelectionImmediate(turnVisualizationSelection);
+    }
+    setHistoryVisualization("turns");
+    setTurnAnchorMessageId("");
+    setTurnSourceSessionId("");
+    setSessionTurnDetail(null);
+    setTurnViewCombinedChangesExpandedOverride(null);
+    setFocusMessageId("");
+  }, [
+    canToggleTurnView,
+    currentUiHistorySelection,
+    historyDetailMode,
+    setHistorySelectionImmediate,
+    turnVisualizationSelection,
+  ]);
+
+  const handleToggleTurnView = useCallback(async () => {
+    if (historyDetailMode === "turn") {
+      handleSelectMessagesView();
+      return;
+    }
+    await handleSelectTurnsView();
+  }, [handleSelectMessagesView, handleSelectTurnsView, historyDetailMode]);
+
+  const handleSelectBookmarksVisualization = useCallback(() => {
+    if (historyDetailMode === "turn") {
+      clearTurnViewState();
+    }
+    if (!currentUiHistorySelection.projectId) {
+      return;
+    }
+    setHistoryVisualization("bookmarks");
+    setHistorySelectionImmediate(
+      createHistorySelection("bookmarks", currentUiHistorySelection.projectId, uiSelectedSessionId),
+    );
+  }, [
+    clearTurnViewState,
+    currentUiHistorySelection.projectId,
+    historyDetailMode,
+    setHistorySelectionImmediate,
+    uiSelectedSessionId,
+  ]);
+
+  const handleToggleBookmarksView = useCallback(() => {
+    if (historyMode === "bookmarks" && historyDetailMode !== "turn") {
+      handleSelectMessagesView();
+      return;
+    }
+    handleSelectBookmarksVisualization();
+  }, [
+    handleSelectBookmarksVisualization,
+    handleSelectMessagesView,
+    historyDetailMode,
+    historyMode,
+  ]);
+
+  const handleCycleHistoryVisualization = useCallback(async () => {
+    if (historyVisualization === "messages") {
+      if (canToggleTurnView) {
+        await handleSelectTurnsView();
+        return;
+      }
+      handleSelectBookmarksVisualization();
+      return;
+    }
+    if (historyVisualization === "turns") {
+      handleSelectBookmarksVisualization();
+      return;
+    }
+    handleSelectMessagesView();
+  }, [
+    canToggleTurnView,
+    handleSelectBookmarksVisualization,
+    handleSelectMessagesView,
+    handleSelectTurnsView,
+    historyVisualization,
+  ]);
+
+  useEffect(() => {
+    if (historyDetailMode !== "turn") {
+      turnScopeKeyRef.current = "";
+      return;
+    }
+    if (turnScopeKeyRef.current === "") {
+      turnScopeKeyRef.current = currentTurnScopeKey;
+      return;
+    }
+    if (turnScopeKeyRef.current === currentTurnScopeKey) {
+      return;
+    }
+    turnScopeKeyRef.current = currentTurnScopeKey;
+    setTurnAnchorMessageId("");
+    setTurnSourceSessionId("");
+    setSessionTurnDetail(null);
+    setTurnViewCombinedChangesExpandedOverride(null);
+    setFocusMessageId("");
+  }, [currentTurnScopeKey, historyDetailMode]);
+
+  useEffect(() => {
+    if (historyDetailMode !== "turn") {
+      setSessionTurnDetail(null);
+      return;
+    }
+    if (!canToggleTurnView) {
+      setSessionTurnDetail(null);
+      return;
+    }
+
+    void turnDetailRefreshNonce;
+    let cancelled = false;
+    const request =
+      turnAnchorMessageId.length > 0
+        ? { anchorMessageId: turnAnchorMessageId }
+        : turnViewSortDirection === "desc"
+          ? { latest: true }
+          : { turnNumber: 1 };
+    void loadTurnDetail(request)
+      .then((response) => {
+        if (!cancelled) {
+          setSessionTurnDetail(response);
+          setTurnAnchorMessageId(response.anchorMessageId ?? "");
+          setTurnSourceSessionId(response.session?.id ?? "");
+        }
+      })
+      .catch((error: unknown) => {
+        if (!shouldIgnoreAsyncEffectError(cancelled, error)) {
+          logError("Failed loading session turn", error);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    canToggleTurnView,
+    historyDetailMode,
+    loadTurnDetail,
+    logError,
+    turnAnchorMessageId,
+    turnDetailRefreshNonce,
+    turnViewSortDirection,
+  ]);
+
+  const navigateToTurn = useCallback(
+    async (
+      request: Pick<
+        IpcRequestInput<"sessions:getTurn">,
+        "anchorMessageId" | "turnNumber" | "latest"
+      >,
+      options: { queryOverride?: string } = {},
+    ) => {
+      try {
+        const response = await loadTurnDetail(request, options);
+        setSessionTurnDetail(response);
+        setTurnAnchorMessageId(response.anchorMessageId ?? "");
+        return response;
+      } catch (error) {
+        logError("Failed loading session turn", error);
+        return null;
+      }
+    },
+    [loadTurnDetail, logError],
+  );
+
+  const goToPreviousTurn = useCallback(async () => {
+    const targetAnchorMessageId =
+      turnViewSortDirection === "desc"
+        ? sessionTurnDetail?.nextTurnAnchorMessageId
+        : sessionTurnDetail?.previousTurnAnchorMessageId;
+    if (!targetAnchorMessageId) {
+      return;
+    }
+    await navigateToTurn({
+      anchorMessageId: targetAnchorMessageId,
+    });
+  }, [
+    navigateToTurn,
+    sessionTurnDetail?.nextTurnAnchorMessageId,
+    sessionTurnDetail?.previousTurnAnchorMessageId,
+    turnViewSortDirection,
+  ]);
+
+  const goToNextTurn = useCallback(async () => {
+    const targetAnchorMessageId =
+      turnViewSortDirection === "desc"
+        ? sessionTurnDetail?.previousTurnAnchorMessageId
+        : sessionTurnDetail?.nextTurnAnchorMessageId;
+    if (!targetAnchorMessageId) {
+      return;
+    }
+    await navigateToTurn({
+      anchorMessageId: targetAnchorMessageId,
+    });
+  }, [
+    navigateToTurn,
+    sessionTurnDetail?.nextTurnAnchorMessageId,
+    sessionTurnDetail?.previousTurnAnchorMessageId,
+    turnViewSortDirection,
+  ]);
+
+  const goToFirstTurn = useCallback(async () => {
+    const targetAnchorMessageId =
+      turnViewSortDirection === "desc"
+        ? sessionTurnDetail?.latestTurnAnchorMessageId
+        : sessionTurnDetail?.firstTurnAnchorMessageId;
+    if (!targetAnchorMessageId) {
+      return;
+    }
+    await navigateToTurn({
+      anchorMessageId: targetAnchorMessageId,
+    });
+  }, [
+    navigateToTurn,
+    sessionTurnDetail?.firstTurnAnchorMessageId,
+    sessionTurnDetail?.latestTurnAnchorMessageId,
+    turnViewSortDirection,
+  ]);
+
+  const goToLatestTurn = useCallback(async () => {
+    const targetAnchorMessageId =
+      turnViewSortDirection === "desc"
+        ? sessionTurnDetail?.firstTurnAnchorMessageId
+        : sessionTurnDetail?.latestTurnAnchorMessageId;
+    if (!targetAnchorMessageId) {
+      return;
+    }
+    await navigateToTurn({
+      anchorMessageId: targetAnchorMessageId,
+    });
+  }, [
+    navigateToTurn,
+    sessionTurnDetail?.firstTurnAnchorMessageId,
+    sessionTurnDetail?.latestTurnAnchorMessageId,
+    turnViewSortDirection,
+  ]);
+
+  const goToTurnNumber = useCallback(
+    async (page: number) => {
+      if (historyDetailMode !== "turn") {
+        goToHistoryPage(page);
+        return;
+      }
+      const displayPageNumber = Math.max(1, Math.min(turnTotalPages, Math.trunc(page) + 1));
+      const targetTurnNumber =
+        turnViewSortDirection === "desc"
+          ? turnTotalPages - displayPageNumber + 1
+          : displayPageNumber;
+      await navigateToTurn({ turnNumber: targetTurnNumber });
+    },
+    [goToHistoryPage, historyDetailMode, navigateToTurn, turnTotalPages, turnViewSortDirection],
+  );
+
+  const resetVisibleHistoryFilters = useCallback(() => {
+    if (historyDetailMode === "turn") {
+      setTurnQueryInput("");
+      return;
+    }
+    if (historyMode === "bookmarks") {
+      setBookmarkQueryInput("");
+      return;
+    }
+    setSessionQueryInput("");
+    setSessionPage(0);
+  }, [historyDetailMode, historyMode]);
+
+  const handleSecondaryMessagePaneEscape = useCallback(() => {
+    const activeQuery =
+      historyDetailMode === "turn"
+        ? turnQueryInput.trim()
+        : historyMode === "bookmarks"
+          ? bookmarkQueryInput.trim()
+          : sessionQueryInput.trim();
+    if (activeQuery.length > 0) {
+      resetVisibleHistoryFilters();
+      return true;
+    }
+    return false;
+  }, [
+    bookmarkQueryInput,
+    historyDetailMode,
+    historyMode,
+    resetVisibleHistoryFilters,
+    sessionQueryInput,
+    turnQueryInput,
+  ]);
+
+  const handleToggleHistoryCategoryShortcut = useCallback(
+    (category: MessageCategory) => {
+      if (historyDetailMode !== "turn") {
+        handleToggleHistoryCategoryShortcutFlat(category);
+        return;
+      }
+      turnViewCategorySoloRestoreRef.current = null;
+      setTurnViewCategories((current) => {
+        const exists = current.includes(category);
+        const next = exists ? current.filter((item) => item !== category) : [...current, category];
+        turnViewCategoriesRef.current = next;
+        return next;
+      });
+    },
+    [handleToggleHistoryCategoryShortcutFlat, historyDetailMode],
+  );
+
+  const handleSoloHistoryCategoryShortcut = useCallback(
+    (category: MessageCategory) => {
+      if (historyDetailMode !== "turn") {
+        handleSoloHistoryCategoryShortcutFlat(category);
+        return;
+      }
+
+      const currentCategories = turnViewCategoriesRef.current;
+      const restoreState = turnViewCategorySoloRestoreRef.current;
+      const isCurrentSoloState =
+        currentCategories.length === 1 && currentCategories[0] === category;
+      const restoreCategories =
+        restoreState?.mode === `solo:${category}` ? restoreState.categories : null;
+      const hasUsefulRestore =
+        Array.isArray(restoreCategories) &&
+        (restoreCategories.length !== currentCategories.length ||
+          restoreCategories.some((item, index) => item !== currentCategories[index]));
+
+      const nextCategories = isCurrentSoloState
+        ? hasUsefulRestore
+          ? [...restoreCategories]
+          : [...DEFAULT_TURN_VIEW_MESSAGE_CATEGORIES]
+        : [category];
+
+      turnViewCategorySoloRestoreRef.current = isCurrentSoloState
+        ? null
+        : {
+            mode: `solo:${category}`,
+            categories: [...currentCategories],
+          };
+      turnViewCategoriesRef.current = nextCategories;
+      setTurnViewCategories(nextCategories);
+    },
+    [handleSoloHistoryCategoryShortcutFlat, historyDetailMode],
+  );
+
+  const handleTogglePrimaryHistoryCategoriesShortcut = useCallback(() => {
+    if (historyDetailMode !== "turn") {
+      handleTogglePrimaryHistoryCategoriesShortcutFlat();
+      return;
+    }
+
+    const currentCategories = turnViewCategoriesRef.current;
+    const targetCategories = new Set(TURN_PRIMARY_HISTORY_CATEGORIES);
+    const hasAllPrimary = TURN_PRIMARY_HISTORY_CATEGORIES.every((category) =>
+      currentCategories.includes(category),
+    );
+    const nextCategories = hasAllPrimary
+      ? currentCategories.filter((category) => !targetCategories.has(category))
+      : [
+          ...currentCategories.filter((category) => !targetCategories.has(category)),
+          ...TURN_PRIMARY_HISTORY_CATEGORIES,
+        ];
+    turnViewCategorySoloRestoreRef.current = null;
+    turnViewCategoriesRef.current = nextCategories;
+    setTurnViewCategories(nextCategories);
+  }, [handleTogglePrimaryHistoryCategoriesShortcutFlat, historyDetailMode]);
+
+  const handleToggleAllHistoryCategoriesShortcut = useCallback(() => {
+    if (historyDetailMode !== "turn") {
+      handleToggleAllHistoryCategoriesShortcutFlat();
+      return;
+    }
+
+    const currentCategories = turnViewCategoriesRef.current;
+    const nextCategories =
+      currentCategories.length === CATEGORIES.length &&
+      currentCategories.every((category, index) => category === CATEGORIES[index])
+        ? []
+        : [...CATEGORIES];
+    turnViewCategorySoloRestoreRef.current = null;
+    turnViewCategoriesRef.current = nextCategories;
+    setTurnViewCategories(nextCategories);
+  }, [handleToggleAllHistoryCategoriesShortcutFlat, historyDetailMode]);
+
+  const handleFocusPrimaryHistoryCategoriesShortcut = useCallback(() => {
+    if (historyDetailMode !== "turn") {
+      handleFocusPrimaryHistoryCategoriesShortcutFlat();
+      return;
+    }
+
+    const currentCategories = turnViewCategoriesRef.current;
+    const restoreState = turnViewCategorySoloRestoreRef.current;
+    const primaryCategories = [...TURN_PRIMARY_HISTORY_CATEGORIES];
+    const isCurrentPreset =
+      currentCategories.length === primaryCategories.length &&
+      currentCategories.every((category, index) => category === primaryCategories[index]);
+    const restoreCategories =
+      restoreState?.mode === "preset:primary" ? restoreState.categories : null;
+    const hasUsefulRestore =
+      Array.isArray(restoreCategories) &&
+      (restoreCategories.length !== currentCategories.length ||
+        restoreCategories.some((item, index) => item !== currentCategories[index]));
+    const nextCategories = isCurrentPreset
+      ? hasUsefulRestore
+        ? [...restoreCategories]
+        : [...DEFAULT_TURN_VIEW_MESSAGE_CATEGORIES]
+      : primaryCategories;
+    turnViewCategorySoloRestoreRef.current = isCurrentPreset
+      ? null
+      : {
+          mode: "preset:primary",
+          categories: [...currentCategories],
+        };
+    turnViewCategoriesRef.current = nextCategories;
+    setTurnViewCategories(nextCategories);
+  }, [handleFocusPrimaryHistoryCategoriesShortcutFlat, historyDetailMode]);
+
+  const handleFocusAllHistoryCategoriesShortcut = useCallback(() => {
+    if (historyDetailMode !== "turn") {
+      handleFocusAllHistoryCategoriesShortcutFlat();
+      return;
+    }
+
+    const currentCategories = turnViewCategoriesRef.current;
+    const restoreState = turnViewCategorySoloRestoreRef.current;
+    const isCurrentPreset =
+      currentCategories.length === CATEGORIES.length &&
+      currentCategories.every((category, index) => category === CATEGORIES[index]);
+    const restoreCategories = restoreState?.mode === "preset:all" ? restoreState.categories : null;
+    const hasUsefulRestore =
+      Array.isArray(restoreCategories) &&
+      (restoreCategories.length !== currentCategories.length ||
+        restoreCategories.some((item, index) => item !== currentCategories[index]));
+    const nextCategories = isCurrentPreset
+      ? hasUsefulRestore
+        ? [...restoreCategories]
+        : [...DEFAULT_TURN_VIEW_MESSAGE_CATEGORIES]
+      : [...CATEGORIES];
+    turnViewCategorySoloRestoreRef.current = isCurrentPreset
+      ? null
+      : {
+          mode: "preset:all",
+          categories: [...currentCategories],
+        };
+    turnViewCategoriesRef.current = nextCategories;
+    setTurnViewCategories(nextCategories);
+  }, [handleFocusAllHistoryCategoriesShortcutFlat, historyDetailMode]);
+
+  const handleToggleCategoryDefaultExpansion = useCallback(
+    (category: MessageCategory) => {
+      if (historyDetailMode !== "turn") {
+        handleToggleCategoryDefaultExpansionFlat(category);
+        return;
+      }
+
+      setTurnViewExpandedByDefaultCategories((current) =>
+        current.includes(category)
+          ? current.filter((item) => item !== category)
+          : [...current, category],
+      );
+      setMessageExpansionOverrides((current) => {
+        const next = { ...current };
+        for (const message of turnVisibleMessages) {
+          if (message.category !== category || !(message.id in next)) {
+            continue;
+          }
+          delete next[message.id];
+        }
+        return next;
+      });
+    },
+    [handleToggleCategoryDefaultExpansionFlat, historyDetailMode, turnVisibleMessages],
+  );
+  const isTurnExpandedByDefault = useCallback(
+    (category: MessageCategory) => turnViewExpandedByDefaultCategories.includes(category),
+    [turnViewExpandedByDefaultCategories],
+  );
+
+  const effectiveTurnCombinedChangesExpanded =
+    turnViewCombinedChangesExpandedOverride ?? turnViewCombinedChangesExpanded;
+
+  const handleToggleVisibleCategoryMessagesExpandedInTurn = useCallback(
+    (category: MessageCategory) => {
+      const categoryMessages = turnVisibleMessages.filter(
+        (message) => message.category === category,
+      );
+      if (categoryMessages.length === 0) {
+        return;
+      }
+      setMessageExpansionOverrides((current) => {
+        const expanded = !categoryMessages.every(
+          (message) => current[message.id] ?? isTurnExpandedByDefault(message.category),
+        );
+        const next = { ...current };
+        for (const message of categoryMessages) {
+          if (expanded === isTurnExpandedByDefault(message.category)) {
+            delete next[message.id];
+          } else {
+            next[message.id] = expanded;
+          }
+        }
+        return next;
+      });
+    },
+    [isTurnExpandedByDefault, turnVisibleMessages],
+  );
+
+  const handleToggleMessageExpandedInTurn = useCallback(
+    (messageId: string, category: MessageCategory) => {
+      setMessageExpansionOverrides((current) => {
+        const nextExpanded = !(current[messageId] ?? isTurnExpandedByDefault(category));
+        const next = { ...current };
+        if (nextExpanded === isTurnExpandedByDefault(category)) {
+          delete next[messageId];
+        } else {
+          next[messageId] = nextExpanded;
+        }
+        return next;
+      });
+    },
+    [isTurnExpandedByDefault],
+  );
+
+  const visibleExpansionItems = useMemo(
+    () => [
+      ...detailMessages.map((message) => {
+        const defaultExpanded =
+          historyDetailMode === "turn"
+            ? turnViewExpandedByDefaultCategories.includes(message.category)
+            : isExpandedByDefault(message.category);
+        const currentExpanded = messageExpansionOverrides[message.id] ?? defaultExpanded;
+        const atDefault = !(message.id in messageExpansionOverrides);
+        return {
+          id: message.id,
+          currentExpanded,
+          defaultExpanded,
+          atDefault,
+        };
+      }),
+      ...(historyDetailMode === "turn"
+        ? [
+            {
+              id: "__combined_changes__",
+              currentExpanded: effectiveTurnCombinedChangesExpanded,
+              defaultExpanded: turnViewCombinedChangesExpanded,
+              atDefault: turnViewCombinedChangesExpandedOverride === null,
+            },
+          ]
+        : []),
+    ],
+    [
+      detailMessages,
+      effectiveTurnCombinedChangesExpanded,
+      historyDetailMode,
+      isExpandedByDefault,
+      messageExpansionOverrides,
+      turnViewCombinedChangesExpanded,
+      turnViewCombinedChangesExpandedOverride,
+      turnViewExpandedByDefaultCategories,
+    ],
+  );
+  const visibleExpansionScopeKey = useMemo(
+    () =>
+      historyDetailMode === "turn"
+        ? [
+            "turn",
+            historyVisualization,
+            currentTurnScopeKey,
+            sessionTurnDetail?.anchorMessageId ?? "",
+            turnViewSortDirection,
+            effectiveTurnQuery,
+            turnViewCategories.join(","),
+            turnViewExpandedByDefaultCategories.join(","),
+            turnViewCombinedChangesExpanded ? "1" : "0",
+          ].join("\u0000")
+        : [
+            "flat",
+            historyVisualization,
+            historyMode,
+            selectedProjectId,
+            selectedSessionId,
+            loadedHistoryPage,
+            activeMessageSortDirection,
+            historyCategories.join(","),
+            expandedByDefaultCategories.join(","),
+            historyMode === "bookmarks" ? effectiveBookmarkQuery : effectiveSessionQuery,
+          ].join("\u0000"),
+    [
+      activeMessageSortDirection,
+      currentTurnScopeKey,
+      effectiveBookmarkQuery,
+      effectiveSessionQuery,
+      effectiveTurnQuery,
+      expandedByDefaultCategories,
+      historyDetailMode,
+      historyMode,
+      historyVisualization,
+      historyCategories,
+      loadedHistoryPage,
+      selectedProjectId,
+      selectedSessionId,
+      sessionTurnDetail?.anchorMessageId,
+      turnViewCategories,
+      turnViewCombinedChangesExpanded,
+      turnViewExpandedByDefaultCategories,
+      turnViewSortDirection,
+    ],
+  );
+
+  useEffect(() => {
+    const scopeChanged = visibleExpansionScopeKeyRef.current !== visibleExpansionScopeKey;
+    const becamePopulated =
+      visibleExpansionItemCountRef.current === 0 && visibleExpansionItems.length > 0;
+    visibleExpansionItemCountRef.current = visibleExpansionItems.length;
+    if (!scopeChanged && !becamePopulated) {
+      return;
+    }
+    visibleExpansionScopeKeyRef.current = visibleExpansionScopeKey;
+    setVisibleExpansionActionState(deriveVisibleExpansionAction(visibleExpansionItems));
+  }, [visibleExpansionItems, visibleExpansionScopeKey]);
+
+  const handleToggleAllCategoryDefaultExpansion = useCallback(() => {
+    if (visibleExpansionItems.length === 0) {
+      return;
+    }
+    const action = visibleExpansionActionState;
+    if (action === "restore") {
+      setMessageExpansionOverrides((current) => {
+        const next = { ...current };
+        let changed = false;
+        for (const item of visibleExpansionItems) {
+          if (item.id === "__combined_changes__") {
+            continue;
+          }
+          if (!(item.id in next)) {
+            continue;
+          }
+          delete next[item.id];
+          changed = true;
+        }
+        return changed ? next : current;
+      });
+      if (historyDetailMode === "turn") {
+        setTurnViewCombinedChangesExpandedOverride(null);
+      }
+      setVisibleExpansionActionState(getNextVisibleExpansionAction(action));
+      return;
+    }
+
+    const expanded = action === "expand";
+    setMessageExpansionOverrides((current) => {
+      const next = { ...current };
+      let changed = false;
+      for (const item of visibleExpansionItems) {
+        if (item.id === "__combined_changes__") {
+          continue;
+        }
+        if (expanded === item.defaultExpanded) {
+          if (item.id in next) {
+            delete next[item.id];
+            changed = true;
+          }
+          continue;
+        }
+        if (next[item.id] !== expanded) {
+          next[item.id] = expanded;
+          changed = true;
+        }
+      }
+      return changed ? next : current;
+    });
+    if (historyDetailMode === "turn") {
+      setTurnViewCombinedChangesExpandedOverride(
+        expanded === turnViewCombinedChangesExpanded ? null : expanded,
+      );
+    }
+    setVisibleExpansionActionState(getNextVisibleExpansionAction(action));
+  }, [
+    historyDetailMode,
+    turnViewCombinedChangesExpanded,
+    visibleExpansionActionState,
+    visibleExpansionItems,
+  ]);
+
+  const areAllMessagesExpanded =
+    visibleExpansionItems.length > 0 && visibleExpansionItems.every((item) => item.currentExpanded);
+  const globalExpandCollapseLabel =
+    visibleExpansionActionState === "collapse"
+      ? "Collapse"
+      : visibleExpansionActionState === "restore"
+        ? "Restore"
+        : "Expand";
+  const globalExpandCollapseIconName: "collapseAll" | "zoomReset" | "expandAll" =
+    visibleExpansionActionState === "collapse"
+      ? "collapseAll"
+      : visibleExpansionActionState === "restore"
+        ? "zoomReset"
+        : "expandAll";
+  const effectiveHistoryPage = historyDetailMode === "turn" ? turnDisplayPage : sessionPage;
+  const effectiveTotalPages = historyDetailMode === "turn" ? turnTotalPages : totalPages;
+  const effectiveCanNavigatePages =
+    historyDetailMode === "turn" ? turnTotalPages > 1 : canNavigatePages;
+  const effectiveCanGoToPreviousHistoryPage =
+    historyDetailMode === "turn"
+      ? turnViewSortDirection === "desc"
+        ? Boolean(sessionTurnDetail?.nextTurnAnchorMessageId)
+        : Boolean(sessionTurnDetail?.previousTurnAnchorMessageId)
+      : canGoToPreviousHistoryPage;
+  const effectiveCanGoToNextHistoryPage =
+    historyDetailMode === "turn"
+      ? turnViewSortDirection === "desc"
+        ? Boolean(sessionTurnDetail?.previousTurnAnchorMessageId)
+        : Boolean(sessionTurnDetail?.nextTurnAnchorMessageId)
+      : canGoToNextHistoryPage;
+
+  const goToPreviousHistoryPageEffective = useCallback(() => {
+    if (historyDetailMode === "turn") {
+      void goToPreviousTurn();
+      return;
+    }
+    goToPreviousHistoryPage();
+  }, [goToPreviousHistoryPage, goToPreviousTurn, historyDetailMode]);
+
+  const goToNextHistoryPageEffective = useCallback(() => {
+    if (historyDetailMode === "turn") {
+      void goToNextTurn();
+      return;
+    }
+    goToNextHistoryPage();
+  }, [goToNextHistoryPage, goToNextTurn, historyDetailMode]);
+
+  const goToFirstHistoryPageEffective = useCallback(() => {
+    if (historyDetailMode === "turn") {
+      void goToFirstTurn();
+      return;
+    }
+    goToFirstHistoryPage();
+  }, [goToFirstHistoryPage, goToFirstTurn, historyDetailMode]);
+
+  const goToLastHistoryPageEffective = useCallback(() => {
+    if (historyDetailMode === "turn") {
+      void goToLatestTurn();
+      return;
+    }
+    goToLastHistoryPage();
+  }, [goToLastHistoryPage, goToLatestTurn, historyDetailMode]);
 
   const pageHistoryMessages = useCallback(
     (direction: "up" | "down", { preserveFocus = false }: { preserveFocus?: boolean } = {}) => {
@@ -1526,6 +2644,12 @@ export function useHistoryController({
 
   const handleExportMessages = useCallback(
     async ({ scope }: { scope: HistoryExportScope }) => {
+      if (historyDetailMode === "turn") {
+        return {
+          canceled: true,
+          path: null,
+        };
+      }
       if (!selectedProjectId) {
         return {
           canceled: true,
@@ -1583,6 +2707,7 @@ export function useHistoryController({
       codetrail,
       effectiveBookmarkQuery,
       effectiveSessionQuery,
+      historyDetailMode,
       historyCategories,
       historyMode,
       loadedHistoryPage,
@@ -1603,6 +2728,8 @@ export function useHistoryController({
     },
     selection,
     historyMode,
+    historyDetailMode,
+    historyVisualization,
     selectedProjectId,
     selectedSessionId,
     uiHistoryMode,
@@ -1649,10 +2776,20 @@ export function useHistoryController({
     setBookmarkSortDirection,
     projectAllSortDirection,
     setProjectAllSortDirection,
+    turnViewSortDirection,
+    setTurnViewSortDirection,
     historyCategories,
     setHistoryCategories,
     expandedByDefaultCategories,
     setExpandedByDefaultCategories,
+    turnViewCategories,
+    setTurnViewCategories,
+    turnViewExpandedByDefaultCategories,
+    setTurnViewExpandedByDefaultCategories,
+    turnViewCombinedChangesExpanded,
+    setTurnViewCombinedChangesExpanded,
+    setTurnViewCombinedChangesExpandedOverride,
+    effectiveTurnCombinedChangesExpanded,
     liveWatchEnabled,
     setLiveWatchEnabled,
     liveWatchRowHasBackground,
@@ -1683,6 +2820,10 @@ export function useHistoryController({
     currentViewBookmarkCount,
     allSessionsCount,
     sessionDetail,
+    sessionTurnDetail,
+    turnAnchorMessage,
+    turnVisibleMessages,
+    turnCategoryCounts,
     projectCombinedDetail,
     bookmarksResponse,
     activeHistoryMessages,
@@ -1694,7 +2835,7 @@ export function useHistoryController({
     focusMessageId,
     setFocusMessageId,
     visibleFocusedMessageId,
-    sessionPage,
+    sessionPage: effectiveHistoryPage,
     messagePageSize: appearance.messagePageSize,
     setMessagePageSize: appearance.setMessagePageSize,
     loadedHistoryPage,
@@ -1703,16 +2844,20 @@ export function useHistoryController({
     setSessionQueryInput,
     bookmarkQueryInput,
     setBookmarkQueryInput,
+    turnQueryInput,
+    setTurnQueryInput,
     effectiveSessionQuery,
     effectiveBookmarkQuery,
-    totalPages,
-    canNavigatePages,
-    canGoToPreviousHistoryPage,
-    canGoToNextHistoryPage,
+    effectiveTurnQuery,
+    totalPages: effectiveTotalPages,
+    canNavigatePages: effectiveCanNavigatePages,
+    canGoToPreviousHistoryPage: effectiveCanGoToPreviousHistoryPage,
+    canGoToNextHistoryPage: effectiveCanGoToNextHistoryPage,
     activeMessageSortDirection,
     messageSortTooltip,
     areAllMessagesExpanded,
     globalExpandCollapseLabel,
+    globalExpandCollapseIconName,
     messageExpansionOverrides,
     messagePathRoots,
     isExpandedByDefault,
@@ -1723,13 +2868,27 @@ export function useHistoryController({
     handleFocusPrimaryHistoryCategoriesShortcut,
     handleFocusAllHistoryCategoriesShortcut,
     handleToggleVisibleCategoryMessagesExpanded,
+    handleToggleVisibleCategoryMessagesExpandedInTurn,
     handleToggleCategoryDefaultExpansion,
     handleToggleAllCategoryDefaultExpansion,
     handleToggleMessageExpanded,
+    handleToggleMessageExpandedInTurn,
     handleToggleBookmark,
     handleRevealInSession,
     handleRevealInProject,
     handleRevealInBookmarks,
+    handleRevealInSessionWithTurnExit,
+    handleRevealInProjectWithTurnExit,
+    handleRevealInBookmarksWithTurnExit,
+    handleEnterTurnView,
+    handleSelectMessagesView,
+    handleSelectTurnsView,
+    handleSelectBookmarksVisualization,
+    handleCycleHistoryVisualization,
+    handleToggleBookmarksView,
+    handleToggleTurnView,
+    handleSecondaryMessagePaneEscape,
+    canToggleTurnView,
     handleMessageListScroll,
     handleHistorySearchKeyDown,
     handleCopySessionDetails,
@@ -1753,11 +2912,11 @@ export function useHistoryController({
     selectAdjacentProject,
     handleProjectTreeArrow,
     handleProjectTreeEnter,
-    goToHistoryPage,
-    goToFirstHistoryPage,
-    goToLastHistoryPage,
-    goToPreviousHistoryPage,
-    goToNextHistoryPage,
+    goToHistoryPage: goToTurnNumber,
+    goToFirstHistoryPage: goToFirstHistoryPageEffective,
+    goToLastHistoryPage: goToLastHistoryPageEffective,
+    goToPreviousHistoryPage: goToPreviousHistoryPageEffective,
+    goToNextHistoryPage: goToNextHistoryPageEffective,
     handleRefresh,
     navigateFromSearchResult,
     setPendingSearchNavigation,
@@ -1779,24 +2938,28 @@ export function useHistoryController({
         const historyViewActive = options.historyViewActive ?? true;
 
         const sortDir =
-          historyMode === "project_all"
-            ? projectAllSortDirection
-            : historyMode === "bookmarks"
-              ? bookmarkSortDirection
-              : messageSortDirection;
-        const scopeKey = getHistoryRefreshScopeKey(
-          historyMode,
-          selectedProjectId,
-          selectedSessionId,
-        );
-        const baselineTotalCount = getRefreshBaselineTotalCount({
-          historyMode,
-          selectedProject,
-          selectedSession,
-          sessionDetail,
-          projectCombinedDetailTotalCount: projectCombinedDetail?.totalCount,
-          bookmarksResponse,
-        });
+          historyDetailMode === "turn"
+            ? turnViewSortDirection
+            : historyMode === "project_all"
+              ? projectAllSortDirection
+              : historyMode === "bookmarks"
+                ? bookmarkSortDirection
+                : messageSortDirection;
+        const scopeKey =
+          historyDetailMode === "turn"
+            ? `turn:${turnSourceSessionId}:${turnAnchorMessageId}`
+            : getHistoryRefreshScopeKey(historyMode, selectedProjectId, selectedSessionId);
+        const baselineTotalCount =
+          historyDetailMode === "turn"
+            ? (sessionTurnDetail?.totalCount ?? detailMessages.length)
+            : getRefreshBaselineTotalCount({
+                historyMode,
+                selectedProject,
+                selectedSession,
+                sessionDetail,
+                projectCombinedDetailTotalCount: projectCombinedDetail?.totalCount,
+                bookmarksResponse,
+              });
         const isAtVisualEdge = container
           ? isPinnedToVisualRefreshEdge({
               sortDirection: sortDir,
@@ -1809,7 +2972,7 @@ export function useHistoryController({
           historyMode !== "bookmarks" &&
           isLiveEdgePage({
             sortDirection: sortDir,
-            page: sessionPage,
+            page: effectiveHistoryPage,
             totalCount: baselineTotalCount,
             pageSize: appearance.messagePageSize,
           });
@@ -1819,7 +2982,7 @@ export function useHistoryController({
         let prevMessageIds = "";
 
         if (followEligible) {
-          prevMessageIds = getMessageListFingerprint(activeHistoryMessages);
+          prevMessageIds = getMessageListFingerprint(detailMessages);
         } else if (container) {
           const anchor = getVisibleMessageAnchor(container);
           scrollPreservation = anchor
@@ -1833,7 +2996,7 @@ export function useHistoryController({
 
         const refreshContext: RefreshContext = {
           refreshId: id,
-          originPage: sessionPage,
+          originPage: effectiveHistoryPage,
           scopeKey,
           baselineTotalCount,
           followEligible,
@@ -1845,7 +3008,7 @@ export function useHistoryController({
           startupWatchResortPendingRef.current,
         );
         const consumeRefreshContext = async (
-          target: "bookmarks" | "session" | "project_all" | null,
+          target: "bookmarks" | "session" | "project_all" | "turn" | null,
         ) => {
           if (target === null) {
             refreshContextRef.current = null;
@@ -1858,6 +3021,10 @@ export function useHistoryController({
           }
           if (target === "session") {
             setSessionDetailRefreshNonce((value) => value + 1);
+            return;
+          }
+          if (target === "turn") {
+            setTurnDetailRefreshNonce((value) => value + 1);
             return;
           }
           setProjectCombinedDetailRefreshNonce((value) => value + 1);
@@ -1877,13 +3044,15 @@ export function useHistoryController({
             startupWatchResortPendingRef.current = false;
           }
           const refreshTarget =
-            historyMode === "bookmarks" && selectedProjectId
-              ? "bookmarks"
-              : historyMode === "session" && selectedSessionId
-                ? "session"
-                : historyMode === "project_all" && selectedProjectId
-                  ? "project_all"
-                  : null;
+            historyDetailMode === "turn" && historyViewActive && canToggleTurnView
+              ? "turn"
+              : historyMode === "bookmarks" && selectedProjectId
+                ? "bookmarks"
+                : historyMode === "session" && selectedSessionId
+                  ? "session"
+                  : historyMode === "project_all" && selectedProjectId
+                    ? "project_all"
+                    : null;
           await consumeRefreshContext(refreshTarget);
           return;
         }
@@ -1913,19 +3082,26 @@ export function useHistoryController({
         }
 
         const refreshTarget =
-          historyMode === "bookmarks" && historyViewActive && selectedProjectId
-            ? "bookmarks"
-            : historyViewActive &&
-                historyMode === "session" &&
-                sessionFingerprintChanged &&
-                selectedSessionId
-              ? "session"
+          historyViewActive &&
+          historyDetailMode === "turn" &&
+          canToggleTurnView &&
+          (turnVisualizationSelection.mode === "session"
+            ? sessionFingerprintChanged && Boolean(turnVisualizationSelection.sessionId)
+            : projectFingerprintChanged && Boolean(turnVisualizationSelection.projectId))
+            ? "turn"
+            : historyMode === "bookmarks" && historyViewActive && selectedProjectId
+              ? "bookmarks"
               : historyViewActive &&
-                  historyMode === "project_all" &&
-                  projectFingerprintChanged &&
-                  selectedProjectId
-                ? "project_all"
-                : null;
+                  historyMode === "session" &&
+                  sessionFingerprintChanged &&
+                  selectedSessionId
+                ? "session"
+                : historyViewActive &&
+                    historyMode === "project_all" &&
+                    projectFingerprintChanged &&
+                    selectedProjectId
+                  ? "project_all"
+                  : null;
         await consumeRefreshContext(refreshTarget);
 
         if (
@@ -1937,25 +3113,32 @@ export function useHistoryController({
         }
       },
       [
-        activeHistoryMessages,
         appearance.messagePageSize,
         bookmarkSortDirection,
+        detailMessages,
+        effectiveHistoryPage,
+        historyDetailMode,
         historyMode,
         loadBookmarks,
         loadProjects,
         loadSessions,
         messageSortDirection,
         bookmarksResponse,
+        canToggleTurnView,
         projectCombinedDetail,
         projectAllSortDirection,
         projectViewMode,
         refreshTreeProjectSessions,
-        sessionPage,
+        sessionTurnDetail,
         selectedProject,
         selectedProjectId,
         selectedSession,
         selectedSessionId,
         sessionDetail,
+        turnAnchorMessageId,
+        turnVisualizationSelection,
+        turnSourceSessionId,
+        turnViewSortDirection,
       ],
     ),
   };

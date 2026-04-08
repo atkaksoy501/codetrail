@@ -547,6 +547,7 @@ export async function bootstrapMainProcess(
       "sessions:list": (payload) => queryService.listSessions(payload),
       "sessions:listMany": (payload) => queryService.listSessionsMany(payload),
       "sessions:getDetail": (payload) => queryService.getSessionDetail(payload),
+      "sessions:getTurn": (payload) => queryService.getSessionTurn(payload),
       "sessions:delete": (payload) => {
         const result = queryService.deleteSession(payload);
         invalidateAllowedRootsCache();
@@ -662,6 +663,13 @@ export async function bootstrapMainProcess(
         );
         return {
           ...result,
+          historyVisualization:
+            paneState?.historyVisualization ??
+            (paneState?.historyDetailMode === "turn"
+              ? "turns"
+              : paneState?.historyMode === "bookmarks"
+                ? "bookmarks"
+                : "messages"),
           // systemMessageRegexRules needs special resolution to fill in defaults for new providers.
           systemMessageRegexRules: resolveSystemMessageRegexRules(
             paneState?.systemMessageRegexRules,

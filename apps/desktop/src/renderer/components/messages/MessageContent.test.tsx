@@ -166,6 +166,34 @@ describe("MessageContent", () => {
     expect(document.querySelector(".content-viewer-body")).toBeNull();
   });
 
+  it("toggles collapsible diffs from the empty header area without making path text toggle", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <MessageContent
+        text={JSON.stringify({
+          input: {
+            path: "/workspace/src/file.ts",
+            old_string: "const beforeValue = 1;",
+            new_string: "const afterValue = 2;",
+          },
+        })}
+        category="tool_edit"
+        query=""
+      />,
+    );
+
+    await user.click(screen.getByText("/workspace/src/file.ts"));
+    expect(screen.getByRole("button", { name: "Collapse diff for file.ts" })).toBeInTheDocument();
+
+    const headerHitArea = document.querySelector<HTMLButtonElement>(
+      ".content-viewer-header-hit-area",
+    );
+    expect(headerHitArea).not.toBeNull();
+    await user.click(headerHitArea!);
+    expect(screen.getByRole("button", { name: "Expand diff for file.ts" })).toBeInTheDocument();
+  });
+
   it("resets multi-file diff expansion when the collapse setting changes", async () => {
     const user = userEvent.setup();
 

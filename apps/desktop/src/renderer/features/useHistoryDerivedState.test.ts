@@ -11,4 +11,8 @@ describe("formatSelectedSummaryMessageCount", () => {
       `${formatter.format(10_393)} of ${formatter.format(49_821)} messages`,
     );
   });
+
+  it("supports turn-specific labels", () => {
+    expect(formatSelectedSummaryMessageCount(3, 12, "turn messages")).toBe("3 of 12 turn messages");
+  });
 });

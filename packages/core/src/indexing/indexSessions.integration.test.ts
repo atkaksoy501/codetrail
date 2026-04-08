@@ -158,6 +158,9 @@ function tombstoneSession(dbPath: string, filePath: string): void {
   db.prepare(
     "DELETE FROM tool_calls WHERE message_id IN (SELECT id FROM messages WHERE session_id = ?)",
   ).run(session.id);
+  db.prepare(
+    "DELETE FROM message_tool_edit_files WHERE message_id IN (SELECT id FROM messages WHERE session_id = ?)",
+  ).run(session.id);
   db.prepare("DELETE FROM message_fts WHERE session_id = ?").run(session.id);
   db.prepare("DELETE FROM messages WHERE session_id = ?").run(session.id);
   db.prepare("DELETE FROM sessions WHERE id = ?").run(session.id);
@@ -572,6 +575,11 @@ describe("runIncrementalIndexing", () => {
       dbBeforeHeal
         .prepare(
           "DELETE FROM tool_calls WHERE message_id IN (SELECT id FROM messages WHERE session_id = ?)",
+        )
+        .run(codexSessionRow.id);
+      dbBeforeHeal
+        .prepare(
+          "DELETE FROM message_tool_edit_files WHERE message_id IN (SELECT id FROM messages WHERE session_id = ?)",
         )
         .run(codexSessionRow.id);
       dbBeforeHeal.prepare("DELETE FROM message_fts WHERE session_id = ?").run(codexSessionRow.id);
@@ -2026,14 +2034,14 @@ describe("runIncrementalIndexing", () => {
 
     writeFileSync(
       join(cursorRoot, encodedProjectName, "terminals", "1.txt"),
-      [
+      `${[
         "---",
         `cwd: "${actualProjectPath}"`,
         'command: "ls"',
         "started_at: 2026-03-04T00:00:00.000Z",
         "---",
         "",
-      ].join("\n"),
+      ].join("\n")}`,
     );
     writeFileSync(
       transcriptPath,
@@ -2714,6 +2722,411 @@ describe("runIncrementalIndexing", () => {
 
       expect(project.metadata_json).toBeNull();
       expect(session.metadata_json).toBeNull();
+    } finally {
+      db.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("normalizes Claude edit metadata from file-history snapshots without storing snapshot text", () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-claude-tool-edits-"));
+    const dbPath = join(dir, "index.db");
+    const claudeRoot = join(dir, ".claude", "projects");
+    const claudeProject = join(claudeRoot, "project-a");
+    const sessionId = "claude-session-edit";
+    const sessionFile = join(claudeProject, `${sessionId}.jsonl`);
+    const fileHistoryDir = join(dir, ".claude", "file-history", sessionId);
+    mkdirSync(claudeProject, { recursive: true });
+    mkdirSync(fileHistoryDir, { recursive: true });
+    writeFileSync(
+      join(fileHistoryDir, "edit-file@v1"),
+      ["export type LiveSessionStoreOptions = {", "  instrumentationEnabled?: boolean;", "};"].join(
+        "\n",
+      ),
+    );
+    writeFileSync(
+      sessionFile,
+      `${[
+        JSON.stringify({
+          type: "user",
+          cwd: "/workspace/repo",
+          sessionId,
+          timestamp: "2026-04-02T18:13:20.000Z",
+          message: { role: "user", content: [{ type: "text", text: "Patch the file" }] },
+        }),
+        JSON.stringify({
+          type: "assistant",
+          uuid: "assistant-edit-1",
+          cwd: "/workspace/repo",
+          sessionId,
+          timestamp: "2026-04-02T18:13:26.703Z",
+          message: {
+            id: "msg-edit-1",
+            role: "assistant",
+            type: "message",
+            content: [
+              {
+                type: "tool_use",
+                id: "tool-edit-1",
+                name: "Edit",
+                input: {
+                  replace_all: false,
+                  file_path: "/workspace/repo/src/liveSessionStore.ts",
+                  old_string: "  instrumentationEnabled?: boolean;",
+                  new_string:
+                    "  instrumentationEnabled?: boolean;\n  onSnapshotInvalidated?: () => void;",
+                },
+              },
+            ],
+          },
+        }),
+        JSON.stringify({
+          type: "file-history-snapshot",
+          messageId: "assistant-edit-1",
+          snapshot: {
+            trackedFileBackups: {
+              "src/liveSessionStore.ts": {
+                backupFileName: "edit-file@v1",
+                version: 1,
+                backupTime: "2026-04-02T18:13:26.731Z",
+              },
+            },
+          },
+        }),
+      ].join("\n")}\n`,
+    );
+
+    runIncrementalIndexing({ dbPath, discoveryConfig: createDiscoveryConfig(dir) });
+
+    const db = openDatabase(dbPath);
+    try {
+      const row = db
+        .prepare(
+          `SELECT file_path, change_type, unified_diff, added_line_count, removed_line_count, exactness, before_hash, after_hash
+           FROM message_tool_edit_files`,
+        )
+        .get() as {
+        file_path: string;
+        change_type: string;
+        unified_diff: string | null;
+        added_line_count: number;
+        removed_line_count: number;
+        exactness: string;
+        before_hash: string | null;
+        after_hash: string | null;
+      };
+
+      expect(row.file_path).toBe("/workspace/repo/src/liveSessionStore.ts");
+      expect(row.change_type).toBe("update");
+      expect(row.unified_diff).toContain("onSnapshotInvalidated?: () => void;");
+      expect(row.added_line_count).toBeGreaterThan(0);
+      expect(row.removed_line_count).toBeGreaterThanOrEqual(0);
+      expect(row.exactness).toBe("exact");
+      expect(row.before_hash).toBeTruthy();
+      expect(row.after_hash).toBeTruthy();
+    } finally {
+      db.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("stores best-effort Claude edit metadata when file-history is unavailable", () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-claude-tool-edits-fallback-"));
+    const dbPath = join(dir, "index.db");
+    const claudeRoot = join(dir, ".claude", "projects");
+    const claudeProject = join(claudeRoot, "project-a");
+    const sessionId = "claude-session-edit-fallback";
+    const sessionFile = join(claudeProject, `${sessionId}.jsonl`);
+    mkdirSync(claudeProject, { recursive: true });
+    writeFileSync(
+      sessionFile,
+      `${[
+        JSON.stringify({
+          type: "assistant",
+          uuid: "assistant-edit-fallback",
+          cwd: "/workspace/repo",
+          sessionId,
+          timestamp: "2026-04-02T18:13:26.703Z",
+          message: {
+            id: "msg-edit-fallback",
+            role: "assistant",
+            type: "message",
+            content: [
+              {
+                type: "tool_use",
+                id: "tool-edit-fallback",
+                name: "Edit",
+                input: {
+                  replace_all: false,
+                  file_path: "/workspace/repo/src/liveSessionStore.ts",
+                  old_string: "instrumentationEnabled",
+                  new_string: "onSnapshotInvalidated",
+                },
+              },
+            ],
+          },
+        }),
+      ].join("\n")}\n`,
+    );
+
+    runIncrementalIndexing({ dbPath, discoveryConfig: createDiscoveryConfig(dir) });
+
+    const db = openDatabase(dbPath);
+    try {
+      const row = db
+        .prepare(
+          `SELECT file_path, unified_diff, exactness, before_hash, after_hash
+           FROM message_tool_edit_files`,
+        )
+        .get() as {
+        file_path: string;
+        unified_diff: string | null;
+        exactness: string;
+        before_hash: string | null;
+        after_hash: string | null;
+      };
+
+      expect(row.file_path).toBe("/workspace/repo/src/liveSessionStore.ts");
+      expect(row.unified_diff).toContain("onSnapshotInvalidated");
+      expect(row.exactness).toBe("best_effort");
+      expect(row.before_hash).toBeNull();
+      expect(row.after_hash).toBeNull();
+    } finally {
+      db.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not invent a full-file Claude Write diff when no prior snapshot is known", () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-claude-tool-write-fallback-"));
+    const dbPath = join(dir, "index.db");
+    const claudeRoot = join(dir, ".claude", "projects");
+    const claudeProject = join(claudeRoot, "project-a");
+    const sessionId = "claude-session-write-fallback";
+    const sessionFile = join(claudeProject, `${sessionId}.jsonl`);
+    mkdirSync(claudeProject, { recursive: true });
+    writeFileSync(
+      sessionFile,
+      `${[
+        JSON.stringify({
+          type: "assistant",
+          uuid: "assistant-write-fallback",
+          cwd: "/workspace/repo",
+          sessionId,
+          timestamp: "2026-04-02T18:13:26.703Z",
+          message: {
+            id: "msg-write-fallback",
+            role: "assistant",
+            type: "message",
+            content: [
+              {
+                type: "tool_use",
+                id: "tool-write-fallback",
+                name: "Write",
+                input: {
+                  file_path: "/workspace/repo/src/liveSessionStore.ts",
+                  content: ["export const enabled = true;", "export const retries = 2;"].join("\n"),
+                },
+              },
+            ],
+          },
+        }),
+      ].join("\n")}\n`,
+    );
+
+    runIncrementalIndexing({ dbPath, discoveryConfig: createDiscoveryConfig(dir) });
+
+    const db = openDatabase(dbPath);
+    try {
+      const row = db
+        .prepare(
+          `SELECT change_type, unified_diff, exactness, before_hash, after_hash
+           FROM message_tool_edit_files`,
+        )
+        .get() as {
+        change_type: string;
+        unified_diff: string | null;
+        exactness: string;
+        before_hash: string | null;
+        after_hash: string | null;
+      };
+
+      expect(row.change_type).toBe("update");
+      expect(row.unified_diff).toBeNull();
+      expect(row.exactness).toBe("best_effort");
+      expect(row.before_hash).toBeNull();
+      expect(row.after_hash).toBeTruthy();
+    } finally {
+      db.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("recovers Claude tool-edit normalization after resuming before a later snapshot event", () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-claude-tool-edits-resume-"));
+    const dbPath = join(dir, "index.db");
+    const claudeRoot = join(dir, ".claude", "projects");
+    const claudeProject = join(claudeRoot, "project-a");
+    const sessionId = "claude-session-edit-resume";
+    const sessionFile = join(claudeProject, `${sessionId}.jsonl`);
+    const fileHistoryDir = join(dir, ".claude", "file-history", sessionId);
+    mkdirSync(claudeProject, { recursive: true });
+    mkdirSync(fileHistoryDir, { recursive: true });
+    writeFileSync(
+      join(fileHistoryDir, "resume-file@v1"),
+      ["export const enabled = false;", "export const retries = 1;"].join("\n"),
+    );
+    const toolUseEvent = JSON.stringify({
+      type: "assistant",
+      uuid: "assistant-edit-resume",
+      cwd: "/workspace/repo",
+      sessionId,
+      timestamp: "2026-04-02T18:13:26.703Z",
+      message: {
+        id: "msg-edit-resume",
+        role: "assistant",
+        type: "message",
+        content: [
+          {
+            type: "tool_use",
+            id: "tool-edit-resume",
+            name: "Edit",
+            input: {
+              replace_all: false,
+              file_path: "/workspace/repo/src/liveSessionStore.ts",
+              old_string: "export const enabled = false;",
+              new_string: "export const enabled = true;",
+            },
+          },
+        ],
+      },
+    });
+    writeFileSync(sessionFile, `${toolUseEvent}\n`);
+
+    runIncrementalIndexing({ dbPath, discoveryConfig: createDiscoveryConfig(dir) });
+
+    writeFileSync(
+      sessionFile,
+      `${toolUseEvent}\n${JSON.stringify({
+        type: "file-history-snapshot",
+        messageId: "assistant-edit-resume",
+        snapshot: {
+          trackedFileBackups: {
+            "src/liveSessionStore.ts": {
+              backupFileName: "resume-file@v1",
+              version: 1,
+              backupTime: "2026-04-02T18:13:26.731Z",
+            },
+          },
+        },
+      })}\n`,
+    );
+
+    runIncrementalIndexing({ dbPath, discoveryConfig: createDiscoveryConfig(dir) });
+
+    const db = openDatabase(dbPath);
+    try {
+      const row = db
+        .prepare(
+          `SELECT unified_diff, exactness, before_hash, after_hash
+           FROM message_tool_edit_files`,
+        )
+        .get() as {
+        unified_diff: string | null;
+        exactness: string;
+        before_hash: string | null;
+        after_hash: string | null;
+      };
+
+      expect(row.unified_diff).toContain("export const enabled = true;");
+      expect(row.exactness).toBe("exact");
+      expect(row.before_hash).toBeTruthy();
+      expect(row.after_hash).toBeTruthy();
+    } finally {
+      db.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("uses the latest known Claude snapshot text to build provisional Write diffs", () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-claude-tool-write-provisional-"));
+    const dbPath = join(dir, "index.db");
+    const claudeRoot = join(dir, ".claude", "projects");
+    const claudeProject = join(claudeRoot, "project-a");
+    const sessionId = "claude-session-write-provisional";
+    const sessionFile = join(claudeProject, `${sessionId}.jsonl`);
+    const fileHistoryDir = join(dir, ".claude", "file-history", sessionId);
+    mkdirSync(claudeProject, { recursive: true });
+    mkdirSync(fileHistoryDir, { recursive: true });
+    writeFileSync(
+      join(fileHistoryDir, "write-file@v1"),
+      ["export const enabled = false;", "export const retries = 1;"].join("\n"),
+    );
+    writeFileSync(
+      sessionFile,
+      `${[
+        JSON.stringify({
+          type: "file-history-snapshot",
+          messageId: "assistant-write-provisional",
+          snapshot: {
+            trackedFileBackups: {
+              "src/liveSessionStore.ts": {
+                backupFileName: "write-file@v1",
+                version: 1,
+                backupTime: "2026-04-02T18:13:26.731Z",
+              },
+            },
+          },
+        }),
+        JSON.stringify({
+          type: "assistant",
+          uuid: "assistant-write-provisional",
+          cwd: "/workspace/repo",
+          sessionId,
+          timestamp: "2026-04-02T18:13:26.900Z",
+          message: {
+            id: "msg-write-provisional",
+            role: "assistant",
+            type: "message",
+            content: [
+              {
+                type: "tool_use",
+                id: "tool-write-provisional",
+                name: "Write",
+                input: {
+                  file_path: "/workspace/repo/src/liveSessionStore.ts",
+                  content: ["export const enabled = true;", "export const retries = 2;"].join("\n"),
+                },
+              },
+            ],
+          },
+        }),
+      ].join("\n")}\n`,
+    );
+
+    runIncrementalIndexing({ dbPath, discoveryConfig: createDiscoveryConfig(dir) });
+
+    const db = openDatabase(dbPath);
+    try {
+      const row = db
+        .prepare(
+          `SELECT change_type, unified_diff, exactness, before_hash, after_hash
+           FROM message_tool_edit_files`,
+        )
+        .get() as {
+        change_type: string;
+        unified_diff: string | null;
+        exactness: string;
+        before_hash: string | null;
+        after_hash: string | null;
+      };
+
+      expect(row.change_type).toBe("update");
+      expect(row.unified_diff).toContain("-export const enabled = false;");
+      expect(row.unified_diff).toContain("+export const enabled = true;");
+      expect(row.exactness).toBe("best_effort");
+      expect(row.before_hash).toBeTruthy();
+      expect(row.after_hash).toBeTruthy();
     } finally {
       db.close();
       rmSync(dir, { recursive: true, force: true });

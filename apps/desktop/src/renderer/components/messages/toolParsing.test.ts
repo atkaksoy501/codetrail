@@ -52,6 +52,7 @@ describe("toolParsing", () => {
       files: [
         {
           filePath: "src/app.ts",
+          previousFilePath: null,
           changeType: "update",
           oldText: "const a = 1;",
           newText: "const a = 2;",
@@ -85,6 +86,7 @@ describe("toolParsing", () => {
     expect(payload?.files).toEqual([
       {
         filePath: "src/parser.ts",
+        previousFilePath: "src/parser.ts",
         changeType: "update",
         oldText: null,
         newText: null,
@@ -155,7 +157,8 @@ describe("toolParsing", () => {
     expect(payload?.files[0]?.diff).toContain("diff --git a/src/obsolete.ts /dev/null");
     expect(payload?.files[1]).toMatchObject({
       filePath: "src/new-name.ts",
-      changeType: "update",
+      changeType: "move",
+      previousFilePath: "src/old-name.ts",
     });
     expect(payload?.files[1]?.diff).toContain("diff --git a/src/old-name.ts b/src/new-name.ts");
     expect(payload?.files[1]?.diff).toContain("+++ b/src/new-name.ts");

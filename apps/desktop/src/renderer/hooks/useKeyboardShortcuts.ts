@@ -18,6 +18,7 @@ type ShortcutContext = ShortcutArgs & {
   key: string;
   code: string;
   isHistoryArrowNavigation: boolean;
+  lastEscapeAtRef: { current: number };
 };
 
 const HISTORY_CATEGORY_SHORTCUTS = [
@@ -36,6 +37,8 @@ export function useKeyboardShortcuts(args: {
   activeHistoryPane: HistoryPane | null;
   lastHistoryPane: HistoryPane;
   overlayOpen: boolean;
+  historyVisualization?: "messages" | "turns" | "bookmarks";
+  historyDetailMode: "flat" | "turn";
   hasFocusedHistoryMessage: boolean;
   projectListRef: RefObject<HTMLDivElement | null>;
   sessionListRef: RefObject<HTMLDivElement | null>;
@@ -84,14 +87,20 @@ export function useKeyboardShortcuts(args: {
   pageSearchResultsDown: () => void;
   goToPreviousHistoryPage: () => void;
   goToNextHistoryPage: () => void;
+  showMessagesView: () => void;
+  showTurnsView: () => void;
+  showBookmarksView: () => void;
+  canToggleTurnView: boolean;
   goToPreviousSearchPage: () => void;
   goToNextSearchPage: () => void;
+  handleSecondaryMessagePaneEscape: () => boolean;
   applyZoomAction: (action: "in" | "out" | "reset") => Promise<void>;
   triggerIncrementalRefresh: () => void;
   togglePeriodicRefresh: () => void;
 }): void {
   const shortcuts = useShortcutRegistry();
   const latestArgs = useRef(args);
+  const lastEscapeAtRef = useRef(0);
 
   useEffect(() => {
     latestArgs.current = args;
@@ -124,6 +133,7 @@ export function useKeyboardShortcuts(args: {
         key,
         code,
         isHistoryArrowNavigation,
+        lastEscapeAtRef,
       };
       if (event.defaultPrevented) {
         return;
@@ -238,30 +248,55 @@ function handleEscapeShortcut(context: ShortcutContext): boolean {
   if (context.event.key !== "Escape") {
     return false;
   }
+  const now =
+    typeof context.event.timeStamp === "number" && Number.isFinite(context.event.timeStamp)
+      ? context.event.timeStamp
+      : Date.now();
+  const isSecondaryEscape =
+    context.lastEscapeAtRef.current > 0 && now - context.lastEscapeAtRef.current <= 600;
+  if (isSecondaryEscape) {
+    const handled = context.handleSecondaryMessagePaneEscape();
+    if (handled) {
+      context.event.preventDefault();
+      context.lastEscapeAtRef.current = 0;
+      return true;
+    }
+  }
   if (context.mainView !== "history") {
     context.event.preventDefault();
+    context.lastEscapeAtRef.current = now;
     context.returnToHistoryWithPaneFocus();
     return true;
   }
   if (context.hasFocusedHistoryMessage) {
     context.event.preventDefault();
     context.clearFocusedHistoryMessage();
+    context.lastEscapeAtRef.current = now;
     return true;
   }
+  context.lastEscapeAtRef.current = now;
   return false;
 }
 
 function handleSearchShortcut(context: ShortcutContext): boolean {
-  if (!context.command || context.key !== "f") {
+  if (!context.command || context.event.altKey) {
     return false;
   }
-  context.event.preventDefault();
-  if (context.mainView === "search" || context.shift) {
+  if (context.key === "f" && context.shift) {
+    context.event.preventDefault();
     context.focusGlobalSearch();
-  } else {
-    context.focusSessionSearch();
+    return true;
   }
-  return true;
+  if (context.key === "f" && !context.shift) {
+    context.event.preventDefault();
+    if (context.mainView === "search") {
+      context.focusGlobalSearch();
+    } else {
+      context.focusSessionSearch();
+    }
+    return true;
+  }
+  return false;
 }
 
 function handleZoomShortcut(context: ShortcutContext): boolean {
@@ -616,9 +651,40 @@ function handleHistoryCommandShortcut(context: ShortcutContext): boolean {
   if (!context.command) {
     return false;
   }
-  if (context.mainView === "history" && context.shift && context.key === "m") {
+  if (
+    context.mainView === "history" &&
+    !context.event.altKey &&
+    !context.shift &&
+    context.key === "t"
+  ) {
+    if (context.historyVisualization === "turns") {
+      context.event.preventDefault();
+      context.showMessagesView();
+      return true;
+    }
+    if (!context.canToggleTurnView) {
+      return false;
+    }
     context.event.preventDefault();
-    context.toggleFocusMode();
+    context.showTurnsView();
+    return true;
+  }
+  if (!context.event.altKey && context.shift && context.key === "m") {
+    context.event.preventDefault();
+    context.showMessagesView();
+    return true;
+  }
+  if (!context.event.altKey && context.shift && context.key === "t") {
+    if (!context.canToggleTurnView) {
+      return false;
+    }
+    context.event.preventDefault();
+    context.showTurnsView();
+    return true;
+  }
+  if (!context.event.altKey && context.shift && context.key === "b") {
+    context.event.preventDefault();
+    context.showBookmarksView();
     return true;
   }
   if (!context.shift && context.key === "r") {
@@ -636,7 +702,12 @@ function handleHistoryCommandShortcut(context: ShortcutContext): boolean {
     context.toggleAllMessagesExpanded();
     return true;
   }
-  if (context.mainView === "history" && context.shift && context.key === "b") {
+  if (
+    context.mainView === "history" &&
+    context.event.altKey &&
+    !context.shift &&
+    context.key === "b"
+  ) {
     context.event.preventDefault();
     context.toggleSessionPaneCollapsed();
     return true;

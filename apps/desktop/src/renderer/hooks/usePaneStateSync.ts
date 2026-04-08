@@ -26,10 +26,15 @@ import { createHistorySelection } from "../app/historySelection";
 import type {
   HistorySelection,
   HistorySelectionMode,
+  HistoryVisualization,
   ProjectSortField,
   ProjectViewMode,
   SortDirection,
 } from "../app/types";
+import {
+  deriveHistoryVisualization,
+  getHistoryDetailModeForVisualization,
+} from "../features/historyVisualization";
 import { shouldIgnoreAsyncEffectError } from "../lib/asyncEffectUtils";
 import { useCodetrailClient } from "../lib/codetrailClient";
 import { PANE_STATE_UPDATED_EVENT, type PaneStateUpdatedDetail } from "../lib/paneStateEvents";
@@ -65,7 +70,9 @@ function hydrateIfPresent<T>(value: T | null, setter: (value: T) => void): void 
 export function usePaneStateSync(args: {
   initialPaneStateHydrated?: boolean;
   logError: (context: string, error: unknown) => void;
-  paneState: PaneStatePersistRequest & IndexingConfigPersistRequest;
+  paneState: (PaneStatePersistRequest & IndexingConfigPersistRequest) & {
+    historyVisualization: HistoryVisualization;
+  };
   setEnabledProviders: Dispatch<SetStateAction<Provider[]>>;
   setRemoveMissingSessionsDuringIncrementalIndexing: Dispatch<SetStateAction<boolean>>;
   setProjectPaneWidth: Dispatch<SetStateAction<number>>;
@@ -78,6 +85,9 @@ export function usePaneStateSync(args: {
   setProjectProviders: Dispatch<SetStateAction<Provider[]>>;
   setHistoryCategories: Dispatch<SetStateAction<MessageCategory[]>>;
   setExpandedByDefaultCategories: Dispatch<SetStateAction<MessageCategory[]>>;
+  setTurnViewCategories: Dispatch<SetStateAction<MessageCategory[]>>;
+  setTurnViewExpandedByDefaultCategories: Dispatch<SetStateAction<MessageCategory[]>>;
+  setTurnViewCombinedChangesExpanded: Dispatch<SetStateAction<boolean>>;
   setSearchProviders: Dispatch<SetStateAction<Provider[]>>;
   setLiveWatchEnabled: Dispatch<SetStateAction<boolean>>;
   setLiveWatchRowHasBackground: Dispatch<SetStateAction<boolean>>;
@@ -105,6 +115,7 @@ export function usePaneStateSync(args: {
   setSelectedProjectId: Dispatch<SetStateAction<string>>;
   setSelectedSessionId: Dispatch<SetStateAction<string>>;
   setHistoryMode: Dispatch<SetStateAction<HistorySelectionMode>>;
+  setHistoryVisualization: Dispatch<SetStateAction<HistoryVisualization>>;
   setProjectViewMode: Dispatch<SetStateAction<ProjectViewMode>>;
   setProjectSortField: Dispatch<SetStateAction<ProjectSortField>>;
   setProjectSortDirection: Dispatch<SetStateAction<SortDirection>>;
@@ -112,6 +123,7 @@ export function usePaneStateSync(args: {
   setMessageSortDirection: Dispatch<SetStateAction<SortDirection>>;
   setBookmarkSortDirection: Dispatch<SetStateAction<SortDirection>>;
   setProjectAllSortDirection: Dispatch<SetStateAction<SortDirection>>;
+  setTurnViewSortDirection: Dispatch<SetStateAction<SortDirection>>;
   setSessionPage: Dispatch<SetStateAction<number>>;
   setSessionScrollTop: Dispatch<SetStateAction<number>>;
   setSystemMessageRegexRules: Dispatch<SetStateAction<SystemMessageRegexRules>>;
@@ -134,6 +146,9 @@ export function usePaneStateSync(args: {
     setProjectProviders,
     setHistoryCategories,
     setExpandedByDefaultCategories,
+    setTurnViewCategories,
+    setTurnViewExpandedByDefaultCategories,
+    setTurnViewCombinedChangesExpanded,
     setSearchProviders,
     setLiveWatchEnabled,
     setLiveWatchRowHasBackground,
@@ -161,6 +176,7 @@ export function usePaneStateSync(args: {
     setSelectedProjectId,
     setSelectedSessionId,
     setHistoryMode,
+    setHistoryVisualization,
     setProjectViewMode,
     setProjectSortField,
     setProjectSortDirection,
@@ -168,6 +184,7 @@ export function usePaneStateSync(args: {
     setMessageSortDirection,
     setBookmarkSortDirection,
     setProjectAllSortDirection,
+    setTurnViewSortDirection,
     setSessionPage,
     setSessionScrollTop,
     setSystemMessageRegexRules,
@@ -234,6 +251,15 @@ export function usePaneStateSync(args: {
         hydrateIfPresent(paneResponse.projectProviders, setProjectProviders);
         hydrateIfPresent(paneResponse.historyCategories, setHistoryCategories);
         hydrateIfPresent(paneResponse.expandedByDefaultCategories, setExpandedByDefaultCategories);
+        hydrateIfPresent(paneResponse.turnViewCategories, setTurnViewCategories);
+        hydrateIfPresent(
+          paneResponse.turnViewExpandedByDefaultCategories,
+          setTurnViewExpandedByDefaultCategories,
+        );
+        hydrateIfPresent(
+          paneResponse.turnViewCombinedChangesExpanded,
+          setTurnViewCombinedChangesExpanded,
+        );
         hydrateIfPresent(paneResponse.searchProviders, setSearchProviders);
         hydrateIfPresent(paneResponse.liveWatchEnabled, setLiveWatchEnabled);
         hydrateIfPresent(paneResponse.liveWatchRowHasBackground, setLiveWatchRowHasBackground);
@@ -275,6 +301,7 @@ export function usePaneStateSync(args: {
         hydrateIfPresent(paneResponse.messageSortDirection, setMessageSortDirection);
         hydrateIfPresent(paneResponse.bookmarkSortDirection, setBookmarkSortDirection);
         hydrateIfPresent(paneResponse.projectAllSortDirection, setProjectAllSortDirection);
+        hydrateIfPresent(paneResponse.turnViewSortDirection, setTurnViewSortDirection);
         hydrateIfPresent(paneResponse.sessionPage, setSessionPage);
         hydrateIfPresent(paneResponse.sessionScrollTop, (value) => {
           sessionScrollTopRef.current = value;
@@ -289,6 +316,12 @@ export function usePaneStateSync(args: {
             ...paneResponse.systemMessageRegexRules,
           });
         }
+        const restoredHistoryVisualization =
+          paneResponse.historyVisualization ??
+          deriveHistoryVisualization(
+            paneResponse.historyMode ?? "project_all",
+            paneResponse.historyDetailMode ?? "flat",
+          );
         if (setHistorySelection) {
           setHistorySelection(
             createHistorySelection(
@@ -297,10 +330,12 @@ export function usePaneStateSync(args: {
               paneResponse.selectedSessionId ?? "",
             ),
           );
+          setHistoryVisualization(restoredHistoryVisualization);
         } else {
           hydrateIfPresent(paneResponse.selectedProjectId, setSelectedProjectId);
           hydrateIfPresent(paneResponse.selectedSessionId, setSelectedSessionId);
           hydrateIfPresent(paneResponse.historyMode, setHistoryMode);
+          setHistoryVisualization(restoredHistoryVisualization);
         }
         if (
           paneResponse.selectedSessionId !== null &&
@@ -327,7 +362,11 @@ export function usePaneStateSync(args: {
     return () => {
       cancelled = true;
       if (hydrationRafId !== null) {
-        window.cancelAnimationFrame(hydrationRafId);
+        if (typeof window.cancelAnimationFrame === "function") {
+          window.cancelAnimationFrame(hydrationRafId);
+        } else {
+          window.clearTimeout(hydrationRafId);
+        }
       }
     };
   }, [
@@ -346,6 +385,9 @@ export function usePaneStateSync(args: {
     setSingleClickProjectsExpand,
     setHideSessionsPaneInTreeView,
     setExpandedByDefaultCategories,
+    setTurnViewCategories,
+    setTurnViewExpandedByDefaultCategories,
+    setTurnViewCombinedChangesExpanded,
     setSearchProviders,
     setLiveWatchEnabled,
     setLiveWatchRowHasBackground,
@@ -354,6 +396,7 @@ export function usePaneStateSync(args: {
     setSelectedProjectId,
     setSelectedSessionId,
     setHistoryMode,
+    setHistoryVisualization,
     setProjectViewMode,
     setProjectSortField,
     setProjectSortDirection,
@@ -361,6 +404,7 @@ export function usePaneStateSync(args: {
     setMessageSortDirection,
     setBookmarkSortDirection,
     setProjectAllSortDirection,
+    setTurnViewSortDirection,
     setSessionPage,
     setSessionPaneWidth,
     setSessionPaneCollapsed,
@@ -399,6 +443,9 @@ export function usePaneStateSync(args: {
       projectProviders: paneState.projectProviders,
       historyCategories: paneState.historyCategories,
       expandedByDefaultCategories: paneState.expandedByDefaultCategories,
+      turnViewCategories: paneState.turnViewCategories,
+      turnViewExpandedByDefaultCategories: paneState.turnViewExpandedByDefaultCategories,
+      turnViewCombinedChangesExpanded: paneState.turnViewCombinedChangesExpanded,
       searchProviders: paneState.searchProviders,
       liveWatchEnabled: paneState.liveWatchEnabled,
       liveWatchRowHasBackground: paneState.liveWatchRowHasBackground,
@@ -425,6 +472,8 @@ export function usePaneStateSync(args: {
       selectedProjectId: paneState.selectedProjectId,
       selectedSessionId: paneState.selectedSessionId,
       historyMode: paneState.historyMode,
+      historyVisualization: paneState.historyVisualization,
+      historyDetailMode: getHistoryDetailModeForVisualization(paneState.historyVisualization),
       projectViewMode: paneState.projectViewMode,
       projectSortField: paneState.projectSortField,
       projectSortDirection: paneState.projectSortDirection,
@@ -432,6 +481,7 @@ export function usePaneStateSync(args: {
       messageSortDirection: paneState.messageSortDirection,
       bookmarkSortDirection: paneState.bookmarkSortDirection,
       projectAllSortDirection: paneState.projectAllSortDirection,
+      turnViewSortDirection: paneState.turnViewSortDirection,
       sessionPage: paneState.sessionPage,
       sessionScrollTop: Math.round(paneState.sessionScrollTop),
       systemMessageRegexRules: paneState.systemMessageRegexRules,

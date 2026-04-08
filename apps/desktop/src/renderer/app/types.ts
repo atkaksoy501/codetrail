@@ -9,6 +9,7 @@ export type ProjectSummary = IpcResponse<"projects:list">["projects"][number];
 export type SessionSummary = IpcResponse<"sessions:list">["sessions"][number];
 export type SessionListManyResponse = IpcResponse<"sessions:listMany">;
 export type SessionDetail = IpcResponse<"sessions:getDetail">;
+export type SessionTurnDetail = IpcResponse<"sessions:getTurn">;
 export type ProjectCombinedDetail = IpcResponse<"projects:getCombinedDetail">;
 export type BookmarkListResponse = IpcResponse<"bookmarks:listProject">;
 export type BookmarkStateResponse = IpcResponse<"bookmarks:getStates">;
@@ -28,10 +29,12 @@ export type MainView = "history" | "search" | "settings" | "help";
 export type SortDirection = "asc" | "desc";
 export type ProjectViewMode = "list" | "tree";
 export type ProjectSortField = "last_active" | "name";
+export type HistoryDetailMode = "flat" | "turn";
+export type HistoryVisualization = "messages" | "turns" | "bookmarks";
 
 export type HistorySelection =
   | { mode: "project_all"; projectId: string }
-  | { mode: "bookmarks"; projectId: string }
+  | { mode: "bookmarks"; projectId: string; sessionId?: string }
   | { mode: "session"; projectId: string; sessionId: string };
 
 export type SessionPaneNavigationItem =

@@ -251,6 +251,7 @@ export function useHistoryDataEffects({
     const isAllHistoryCategoriesSelected = historyCategories.length === CATEGORIES.length;
     const response = await codetrail.invoke("bookmarks:listProject", {
       projectId: selectedProjectId,
+      ...(selectedSessionId ? { sessionId: selectedSessionId } : {}),
       page: sessionPage,
       pageSize: messagePageSize,
       sortDirection: bookmarkSortDirection,
@@ -284,6 +285,7 @@ export function useHistoryDataEffects({
     searchMode,
     sessionPage,
     selectedProjectId,
+    selectedSessionId,
     setBookmarksLoadedProjectId,
     setPendingRevealTarget,
     setBookmarksResponse,
@@ -510,24 +512,6 @@ export function useHistoryDataEffects({
     setSessionPage,
     setSessionQueryInput,
     sortedSessions,
-  ]);
-
-  useEffect(() => {
-    if (historyMode !== "bookmarks" || bookmarksLoadedProjectId !== selectedProjectId) {
-      return;
-    }
-    if (bookmarksResponse.totalCount > 0) {
-      return;
-    }
-    setHistorySelection((selectionState) =>
-      createHistorySelection("project_all", selectionState.projectId),
-    );
-  }, [
-    bookmarksLoadedProjectId,
-    bookmarksResponse.totalCount,
-    historyMode,
-    selectedProjectId,
-    setHistorySelection,
   ]);
 
   // Invalidate stale refresh context when user-driven state changes (sort direction, category

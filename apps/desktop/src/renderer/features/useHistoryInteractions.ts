@@ -20,6 +20,7 @@ import type {
   HistorySearchNavigation,
   HistorySelection,
   HistorySelectionCommitMode,
+  HistoryVisualization,
   PendingMessagePageNavigation,
   PendingRevealTarget,
   ProjectSummary,
@@ -99,6 +100,7 @@ export function useHistoryInteractions({
   setSessionPage,
   isExpandedByDefault,
   historyMode,
+  historyVisualization,
   selection,
   bookmarkReturnSelection,
   bookmarksResponse,
@@ -118,6 +120,7 @@ export function useHistoryInteractions({
   setPendingMessageAreaFocus,
   setPendingMessagePageNavigation,
   setHistorySelection,
+  setHistoryVisualization,
   setBookmarkReturnSelection,
   sessionListRef,
   selectedSessionId,
@@ -167,6 +170,7 @@ export function useHistoryInteractions({
   setSessionPage: Dispatch<SetStateAction<number>>;
   isExpandedByDefault: (category: MessageCategory) => boolean;
   historyMode: HistorySelection["mode"];
+  historyVisualization: HistoryVisualization;
   selection: HistorySelection;
   bookmarkReturnSelection: HistorySelection | null;
   bookmarksResponse: {
@@ -195,6 +199,7 @@ export function useHistoryInteractions({
     value: SetStateAction<HistorySelection>,
     options?: HistorySelectionOptions,
   ) => void;
+  setHistoryVisualization: Dispatch<SetStateAction<HistoryVisualization>>;
   setBookmarkReturnSelection: Dispatch<SetStateAction<HistorySelection | null>>;
   sessionListRef: RefObject<HTMLDivElement | null>;
   selectedSessionId: string;
@@ -703,19 +708,34 @@ export function useHistoryInteractions({
       { commitMode = "immediate", waitForKeyboardIdle = false }: HistorySelectionOptions = {},
     ) => {
       resetHistorySelectionState();
-      clearBookmarkReturnSelection();
-      setHistorySelection(createHistorySelection("project_all", projectId, ""), {
-        commitMode,
-        waitForKeyboardIdle,
-      });
+      if (historyVisualization !== "bookmarks") {
+        clearBookmarkReturnSelection();
+      }
+      setHistorySelection(
+        createHistorySelection(
+          historyVisualization === "bookmarks" ? "bookmarks" : "project_all",
+          projectId,
+          "",
+        ),
+        {
+          commitMode,
+          waitForKeyboardIdle,
+        },
+      );
     },
-    [clearBookmarkReturnSelection, resetHistorySelectionState, setHistorySelection],
+    [
+      clearBookmarkReturnSelection,
+      historyVisualization,
+      resetHistorySelectionState,
+      setHistorySelection,
+    ],
   );
 
   const selectBookmarksView = useCallback(
     ({ commitMode = "immediate", waitForKeyboardIdle = false }: HistorySelectionOptions = {}) => {
       resetHistorySelectionState();
       setBookmarkReturnSelection((current) => (historyMode === "bookmarks" ? current : selection));
+      setHistoryVisualization("bookmarks");
       setHistorySelection(createHistorySelection("bookmarks", selectedProjectId, ""), {
         commitMode,
         waitForKeyboardIdle,
@@ -728,6 +748,7 @@ export function useHistoryInteractions({
       selection,
       setBookmarkReturnSelection,
       setHistorySelection,
+      setHistoryVisualization,
     ],
   );
 
@@ -739,29 +760,21 @@ export function useHistoryInteractions({
       if (!projectId) {
         return;
       }
-      if (historyMode === "bookmarks" && selectedProjectId === projectId) {
-        resetHistorySelectionState();
-        const nextSelection =
-          bookmarkReturnSelection ?? createHistorySelection("project_all", projectId, "");
-        setBookmarkReturnSelection(null);
-        setHistorySelection(nextSelection, { commitMode, waitForKeyboardIdle });
-        return;
-      }
       resetHistorySelectionState();
       setBookmarkReturnSelection((current) => (historyMode === "bookmarks" ? current : selection));
+      setHistoryVisualization("bookmarks");
       setHistorySelection(createHistorySelection("bookmarks", projectId, ""), {
         commitMode,
         waitForKeyboardIdle,
       });
     },
     [
-      bookmarkReturnSelection,
       historyMode,
       resetHistorySelectionState,
-      selectedProjectId,
       selection,
       setBookmarkReturnSelection,
       setHistorySelection,
+      setHistoryVisualization,
     ],
   );
 
@@ -806,14 +819,24 @@ export function useHistoryInteractions({
       { commitMode = "immediate", waitForKeyboardIdle = false }: HistorySelectionOptions = {},
     ) => {
       resetHistorySelectionState();
-      clearBookmarkReturnSelection();
-      setHistorySelection(createHistorySelection("session", projectId, sessionId), {
-        commitMode,
-        waitForKeyboardIdle,
-      });
+      if (historyVisualization !== "bookmarks") {
+        clearBookmarkReturnSelection();
+      }
+      setHistorySelection(
+        createHistorySelection(
+          historyVisualization === "bookmarks" ? "bookmarks" : "session",
+          projectId,
+          sessionId,
+        ),
+        {
+          commitMode,
+          waitForKeyboardIdle,
+        },
+      );
     },
     [
       clearBookmarkReturnSelection,
+      historyVisualization,
       resetHistorySelectionState,
       selectedProjectId,
       setHistorySelection,
@@ -1054,12 +1077,16 @@ export function useHistoryInteractions({
         );
         const expanded = folderElement.getAttribute("aria-expanded") === "true";
         if (direction === "right" && !expanded) {
-          folderToggleElement?.click();
+          flushSync(() => {
+            folderToggleElement?.click();
+          });
           focusVisibleProjectTarget(container, folderElement);
           return;
         }
         if (direction === "left" && expanded) {
-          folderToggleElement?.click();
+          flushSync(() => {
+            folderToggleElement?.click();
+          });
           focusVisibleProjectTarget(container, folderElement);
           return;
         }
@@ -1097,12 +1124,16 @@ export function useHistoryInteractions({
       );
 
       if (direction === "right" && canExpand && !expanded) {
-        toggle?.click();
+        flushSync(() => {
+          toggle?.click();
+        });
         focusVisibleProjectTarget(container, projectElement);
         return;
       }
       if (direction === "left" && canExpand && expanded) {
-        toggle?.click();
+        flushSync(() => {
+          toggle?.click();
+        });
         focusVisibleProjectTarget(container, projectElement);
         return;
       }

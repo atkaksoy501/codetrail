@@ -274,11 +274,7 @@ describe("bookmarkStore", () => {
     });
 
     expect(
-      store.getProjectBookmarkFocusIndex(
-        "p1",
-        { messageId: "m2" },
-        { sortDirection: "asc" },
-      ),
+      store.getProjectBookmarkFocusIndex("p1", { messageId: "m2" }, { sortDirection: "asc" }),
     ).toBe(1);
     expect(
       store.getProjectBookmarkFocusIndex(
@@ -288,11 +284,7 @@ describe("bookmarkStore", () => {
       ),
     ).toBe(0);
     expect(
-      store.getProjectBookmarkFocusIndex(
-        "p1",
-        { messageId: "m2" },
-        { sortDirection: "desc" },
-      ),
+      store.getProjectBookmarkFocusIndex("p1", { messageId: "m2" }, { sortDirection: "desc" }),
     ).toBe(1);
     expect(
       store.getProjectBookmarkFocusIndex(

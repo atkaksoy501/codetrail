@@ -43,6 +43,7 @@ type MessageCardProps = {
   onRevealInSession?: (messageId: string, sourceId: string) => void;
   onRevealInProject?: (messageId: string, sourceId: string, sessionId: string) => void;
   onRevealInBookmarks?: (messageId: string, sourceId: string) => void;
+  onViewTurn?: (message: SessionMessage) => void;
   cardRef?: Ref<HTMLDivElement> | null;
 };
 
@@ -61,6 +62,7 @@ function MessageCardComponent({
   onRevealInSession,
   onRevealInProject,
   onRevealInBookmarks,
+  onViewTurn,
   cardRef,
 }: MessageCardProps) {
   const paneFocus = usePaneFocus();
@@ -133,12 +135,6 @@ function MessageCardComponent({
     handleExpansionToggleClick(event);
   };
 
-  const handleCopyRawButtonClick = (event: MouseEvent<HTMLButtonElement>) => {
-    event.stopPropagation();
-    void copyTextToClipboard(JSON.stringify(message, null, 2));
-    paneFocus.focusHistoryPane("message");
-  };
-
   const handleCopyBodyButtonClick = (event: MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation();
     void copyTextToClipboard(formatMessageBodyForClipboard(message, parsedToolPayload));
@@ -177,6 +173,12 @@ function MessageCardComponent({
   const handleBookmarkButtonClick = (event: MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation();
     onToggleBookmark?.(message);
+    paneFocus.focusHistoryPane("message");
+  };
+
+  const handleViewTurnButtonClick = (event: MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    onViewTurn?.(message);
     paneFocus.focusHistoryPane("message");
   };
 
@@ -266,16 +268,6 @@ function MessageCardComponent({
           >
             Copy
           </button>
-          <button
-            type="button"
-            className="message-action-button"
-            {...preserveMessagePaneFocusProps}
-            onClick={handleCopyRawButtonClick}
-            aria-label="Copy raw message data"
-            title="Copy raw message"
-          >
-            Copy Raw
-          </button>
           {onRevealInSession ? (
             <button
               type="button"
@@ -310,6 +302,18 @@ function MessageCardComponent({
               title="Reveal in Bookmarks"
             >
               Reveal in Bookmarks
+            </button>
+          ) : null}
+          {onViewTurn ? (
+            <button
+              type="button"
+              className="message-action-button"
+              {...preserveMessagePaneFocusProps}
+              onClick={handleViewTurnButtonClick}
+              aria-label="View this turn"
+              title="View Turn"
+            >
+              View Turn
             </button>
           ) : null}
           {onToggleBookmark ? (

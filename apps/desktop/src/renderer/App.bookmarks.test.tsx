@@ -165,7 +165,7 @@ describe("App bookmarks", () => {
     expect(screen.queryByPlaceholderText(SEARCH_PLACEHOLDERS.historySession)).toBeNull();
   });
 
-  it("updates bookmark counts in the tree and header immediately after toggling", async () => {
+  it("keeps the bookmarks visualization available after toggling a bookmark", async () => {
     const user = userEvent.setup();
     let isBookmarked = false;
     const client = createAppClient({
@@ -268,16 +268,12 @@ describe("App bookmarks", () => {
     await waitFor(() => {
       expect(screen.getByText("Please review markdown table rendering")).toBeInTheDocument();
     });
-    expect(screen.queryByRole("button", { name: "1 bookmark" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Open 1 bookmarked messages" })).toBeNull();
+    expect(screen.getByRole("tab", { name: /Bookmarks/i })).toBeInTheDocument();
 
     await user.click(screen.getAllByRole("button", { name: "Bookmark this message" })[0]!);
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "1 bookmark" })).toBeInTheDocument();
-      expect(
-        screen.getByRole("button", { name: "Open 1 bookmarked messages" }),
-      ).toBeInTheDocument();
+      expect(screen.getByRole("tab", { name: /Bookmarks/i })).toBeInTheDocument();
     });
   });
 
@@ -347,9 +343,9 @@ describe("App bookmarks", () => {
       expect(screen.getByText(/Everything checks out\./)).toBeInTheDocument();
     });
 
-    expect(screen.getAllByRole("button", { name: "Reveal this message in bookmarks" })).toHaveLength(
-      1,
-    );
+    expect(
+      screen.getAllByRole("button", { name: "Reveal this message in bookmarks" }),
+    ).toHaveLength(1);
   });
 
   it("reveals a session message in bookmarks and hides the action once bookmarks are open", async () => {
@@ -460,12 +456,12 @@ describe("App bookmarks", () => {
       const focusSourceId =
         typeof request.focusSourceId === "string" ? request.focusSourceId : undefined;
       const focusIndex = bookmarkEntries.findIndex((entry) =>
-        focusMessageId ? entry.message.id === focusMessageId : entry.message.sourceId === focusSourceId,
+        focusMessageId
+          ? entry.message.id === focusMessageId
+          : entry.message.sourceId === focusSourceId,
       );
       const page =
-        focusIndex >= 0
-          ? Math.floor(focusIndex / requestedPageSize)
-          : Number(request.page ?? 0);
+        focusIndex >= 0 ? Math.floor(focusIndex / requestedPageSize) : Number(request.page ?? 0);
       const offset = page * requestedPageSize;
 
       return {
@@ -544,7 +540,7 @@ describe("App bookmarks", () => {
             historyMode: "session",
             sessionPage: 1,
             messagePageSize: 1,
-          } as PaneStateSnapshot
+          } as unknown as PaneStateSnapshot
         }
       />,
       client,
@@ -553,26 +549,286 @@ describe("App bookmarks", () => {
     await waitFor(() => {
       expect(screen.getByText(/Everything checks out\./)).toBeInTheDocument();
     });
-    expect(
-      screen.getByRole("button", { name: "Reveal this message in bookmarks" }),
-    ).toBeInTheDocument();
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: "Reveal this message in bookmarks" }),
+      ).toBeInTheDocument();
+    });
 
     await user.click(screen.getByRole("button", { name: "Reveal this message in bookmarks" }));
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Close bookmarks" })).toBeInTheDocument();
+      expect(screen.getByRole("tab", { name: /Bookmarks/i })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
       expect(screen.getByRole("textbox", { name: "Page number" })).toHaveValue("2");
     });
-    expect(
-      screen.queryByRole("button", { name: "Reveal this message in bookmarks" }),
-    ).toBeNull();
+    expect(screen.queryByRole("button", { name: "Reveal this message in bookmarks" })).toBeNull();
 
     await waitFor(() => {
       expect(
-        bookmarksListProject.mock.calls.some(([payload]) =>
-          (payload as { focusMessageId?: string }).focusMessageId === "m2",
+        bookmarksListProject.mock.calls.some(
+          ([payload]) => (payload as { focusMessageId?: string }).focusMessageId === "m2",
         ),
       ).toBe(true);
     });
+  });
+
+  it("shows an empty-state page for a session with no bookmarks and returns to session messages", async () => {
+    const user = userEvent.setup();
+    const client = createAppClient({
+      "bookmarks:listProject": () => ({
+        projectId: "project_1",
+        totalCount: 0,
+        filteredCount: 0,
+        page: 0,
+        pageSize: 100,
+        categoryCounts: {
+          user: 0,
+          assistant: 0,
+          tool_use: 0,
+          tool_edit: 0,
+          tool_result: 0,
+          thinking: 0,
+          system: 0,
+        },
+        results: [],
+      }),
+    });
+
+    renderWithClient(
+      <App
+        initialPaneState={
+          {
+            selectedProjectId: "project_1",
+            selectedSessionId: "session_1",
+            historyMode: "session",
+          } as PaneStateSnapshot
+        }
+      />,
+      client,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Please review markdown table rendering")).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("tab", { name: /^Bookmarks$/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText("There are no bookmarks for this session.")).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: "Go To Session Messages" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Please review markdown table rendering")).toBeInTheDocument();
+    });
+    expect(screen.getByRole("tab", { name: /^Messages$/i })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+  });
+
+  it("shows an empty-state page for a project with no bookmarks and returns to project messages", async () => {
+    const user = userEvent.setup();
+    const client = createAppClient({
+      "bookmarks:listProject": () => ({
+        projectId: "project_1",
+        totalCount: 0,
+        filteredCount: 0,
+        page: 0,
+        pageSize: 100,
+        categoryCounts: {
+          user: 0,
+          assistant: 0,
+          tool_use: 0,
+          tool_edit: 0,
+          tool_result: 0,
+          thinking: 0,
+          system: 0,
+        },
+        results: [],
+      }),
+    });
+
+    renderWithClient(
+      <App
+        initialPaneState={
+          {
+            selectedProjectId: "project_1",
+            historyMode: "project_all",
+          } as PaneStateSnapshot
+        }
+      />,
+      client,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Please review markdown table rendering")).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("tab", { name: /^Bookmarks$/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText("There are no bookmarks for this project.")).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: "Go To Project Messages" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Please review markdown table rendering")).toBeInTheDocument();
+    });
+    expect(screen.getByRole("tab", { name: /^Messages$/i })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+  });
+
+  it("keeps bookmarks visualization active when switching sessions and scopes bookmark requests by session", async () => {
+    const user = userEvent.setup();
+    const bookmarksListProject = vi.fn((request: { [key: string]: unknown }) => {
+      const sessionId = typeof request.sessionId === "string" ? request.sessionId : "";
+      const results =
+        sessionId === "session_1"
+          ? [
+              {
+                projectId: "project_1",
+                sessionId: "session_1",
+                sessionTitle: "Investigate markdown rendering",
+                bookmarkedAt: "2026-03-01T10:01:00.000Z",
+                isOrphaned: false,
+                orphanedAt: null,
+                message: {
+                  id: "bookmark_session_1",
+                  sourceId: "bookmark_source_1",
+                  sessionId: "session_1",
+                  provider: "claude" as const,
+                  category: "assistant" as const,
+                  content: "Session one bookmark",
+                  createdAt: "2026-03-01T10:00:05.000Z",
+                  tokenInput: null,
+                  tokenOutput: null,
+                  operationDurationMs: null,
+                  operationDurationSource: null,
+                  operationDurationConfidence: null,
+                },
+              },
+            ]
+          : [];
+
+      return {
+        projectId: "project_1",
+        totalCount: results.length,
+        filteredCount: results.length,
+        page: 0,
+        pageSize: 100,
+        categoryCounts: {
+          user: 0,
+          assistant: results.length,
+          tool_use: 0,
+          tool_edit: 0,
+          tool_result: 0,
+          thinking: 0,
+          system: 0,
+        },
+        results,
+      };
+    });
+    const client = createAppClient({
+      "projects:list": () => ({
+        projects: [
+          {
+            id: "project_1",
+            provider: "claude",
+            name: "Project One",
+            path: "/workspace/project-one",
+            sessionCount: 2,
+            messageCount: 4,
+            bookmarkCount: 1,
+            lastActivity: "2026-03-01T10:00:05.000Z",
+          },
+        ],
+      }),
+      "sessions:list": () => ({
+        sessions: [
+          {
+            id: "session_1",
+            projectId: "project_1",
+            provider: "claude",
+            filePath: "/workspace/project-one/session-1.jsonl",
+            title: "Investigate markdown rendering",
+            modelNames: "claude-opus-4-1",
+            startedAt: "2026-03-01T10:00:00.000Z",
+            endedAt: "2026-03-01T10:00:05.000Z",
+            durationMs: 5000,
+            gitBranch: "main",
+            cwd: "/workspace/project-one",
+            messageCount: 2,
+            bookmarkCount: 1,
+            tokenInputTotal: 14,
+            tokenOutputTotal: 8,
+          },
+          {
+            id: "session_2",
+            projectId: "project_1",
+            provider: "claude",
+            filePath: "/workspace/project-one/session-2.jsonl",
+            title: "Write release notes",
+            modelNames: "claude-opus-4-1",
+            startedAt: "2026-03-01T11:00:00.000Z",
+            endedAt: "2026-03-01T11:05:00.000Z",
+            durationMs: 5000,
+            gitBranch: "main",
+            cwd: "/workspace/project-one",
+            messageCount: 2,
+            bookmarkCount: 0,
+            tokenInputTotal: 14,
+            tokenOutputTotal: 8,
+          },
+        ],
+      }),
+      "bookmarks:listProject": bookmarksListProject,
+    });
+
+    renderWithClient(
+      <App
+        initialPaneState={
+          {
+            selectedProjectId: "project_1",
+            selectedSessionId: "session_1",
+            historyMode: "session",
+          } as PaneStateSnapshot
+        }
+      />,
+      client,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Please review markdown table rendering")).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("tab", { name: /^Bookmarks$/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Session one bookmark")).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: /Write release notes/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /^Bookmarks$/i })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
+      expect(screen.getByText("There are no bookmarks for this session.")).toBeInTheDocument();
+    });
+
+    expect(
+      bookmarksListProject.mock.calls.some(
+        ([payload]) => (payload as { sessionId?: string }).sessionId === "session_2",
+      ),
+    ).toBe(true);
   });
 });

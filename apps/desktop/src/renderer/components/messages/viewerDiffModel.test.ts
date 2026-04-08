@@ -31,6 +31,154 @@ describe("viewerDiffModel", () => {
     ]);
   });
 
+  it("keeps inserted lines unpaired when a changed line expands into nested JSX", () => {
+    const diff = [
+      "diff --git a/a.tsx b/a.tsx",
+      "--- a/a.tsx",
+      "+++ b/a.tsx",
+      "@@ -1,3 +1,5 @@",
+      '-<span className="content-viewer-path" title={metaPath ?? undefined}>',
+      "-  {displayedMetaPath}",
+      "-</span>",
+      '+<span className="content-viewer-path">',
+      '+  <span className="content-viewer-path-text" title={metaPath ?? undefined}>',
+      "+    {displayedMetaPath}",
+      "+  </span>",
+      "+</span>",
+    ].join("\n");
+
+    const model = buildDiffViewModel(diff, "/Users/acme/repo/a.tsx", ["/Users/acme/repo"]);
+
+    expect(model.rows).toEqual([
+      expect.objectContaining({
+        kind: "paired",
+        leftText: '<span className="content-viewer-path" title={metaPath ?? undefined}>',
+        rightText: '<span className="content-viewer-path">',
+      }),
+      expect.objectContaining({
+        kind: "add",
+        text: '  <span className="content-viewer-path-text" title={metaPath ?? undefined}>',
+      }),
+      expect.objectContaining({
+        kind: "paired",
+        leftText: "  {displayedMetaPath}",
+        rightText: "    {displayedMetaPath}",
+      }),
+      expect.objectContaining({
+        kind: "add",
+        text: "  </span>",
+      }),
+      expect.objectContaining({
+        kind: "paired",
+        leftText: "</span>",
+        rightText: "</span>",
+      }),
+    ]);
+  });
+
+  it("does not pair unrelated removals and additions just because they share a block", () => {
+    const diff = [
+      "diff --git a/a.ts b/a.ts",
+      "--- a/a.ts",
+      "+++ b/a.ts",
+      "@@ -4,2 +4,2 @@",
+      "-const removedValue = previousCall();",
+      "-return previousValue;",
+      "+const insertedNode = createElement();",
+      '+return <div className="next-value" />;',
+    ].join("\n");
+
+    const model = buildDiffViewModel(diff, "/Users/acme/repo/a.ts", ["/Users/acme/repo"]);
+
+    expect(model.rows).toEqual([
+      expect.objectContaining({
+        kind: "remove",
+        text: "const removedValue = previousCall();",
+      }),
+      expect.objectContaining({
+        kind: "remove",
+        text: "return previousValue;",
+      }),
+      expect.objectContaining({
+        kind: "add",
+        text: "const insertedNode = createElement();",
+      }),
+      expect.objectContaining({
+        kind: "add",
+        text: 'return <div className="next-value" />;',
+      }),
+    ]);
+  });
+
+  it("keeps identical changed lines paired without creating duplicate add/remove rows", () => {
+    const diff = [
+      "diff --git a/a.ts b/a.ts",
+      "--- a/a.ts",
+      "+++ b/a.ts",
+      "@@ -1,2 +1,2 @@",
+      "-const same = value;",
+      "-return same;",
+      "+const same = value;",
+      "+return same;",
+    ].join("\n");
+
+    const model = buildDiffViewModel(diff, "/Users/acme/repo/a.ts", ["/Users/acme/repo"]);
+
+    expect(model.rows).toEqual([
+      expect.objectContaining({
+        kind: "paired",
+        leftText: "const same = value;",
+        rightText: "const same = value;",
+      }),
+      expect.objectContaining({
+        kind: "paired",
+        leftText: "return same;",
+        rightText: "return same;",
+      }),
+    ]);
+  });
+
+  it("leaves blocks unpaired when changed lines share no meaningful similarity", () => {
+    const diff = [
+      "diff --git a/a.ts b/a.ts",
+      "--- a/a.ts",
+      "+++ b/a.ts",
+      "@@ -10,2 +10,2 @@",
+      "-fetchLegacyUserAccount();",
+      "-renderLegacySummary();",
+      "+const nextThemeColor = '#4f46e5';",
+      '+console.warn("render pipeline mismatch");',
+    ].join("\n");
+
+    const model = buildDiffViewModel(diff, "/Users/acme/repo/a.ts", ["/Users/acme/repo"]);
+
+    expect(model.rows).toEqual([
+      expect.objectContaining({ kind: "remove", text: "fetchLegacyUserAccount();" }),
+      expect.objectContaining({ kind: "remove", text: "renderLegacySummary();" }),
+      expect.objectContaining({ kind: "add", text: "const nextThemeColor = '#4f46e5';" }),
+      expect.objectContaining({ kind: "add", text: 'console.warn("render pipeline mismatch");' }),
+    ]);
+  });
+
+  it("handles large changed blocks without dropping rows", () => {
+    const removedLines = Array.from({ length: 20 }, (_, index) => `-oldValue${index}();`);
+    const addedLines = Array.from({ length: 20 }, (_, index) => `+newValue${index}();`);
+    const diff = [
+      "diff --git a/a.ts b/a.ts",
+      "--- a/a.ts",
+      "+++ b/a.ts",
+      "@@ -1,20 +1,20 @@",
+      ...removedLines,
+      ...addedLines,
+    ].join("\n");
+
+    const model = buildDiffViewModel(diff, "/Users/acme/repo/a.ts", ["/Users/acme/repo"]);
+
+    expect(model.rows).toHaveLength(40);
+    expect(model.rows.filter((row) => row.kind === "remove")).toHaveLength(20);
+    expect(model.rows.filter((row) => row.kind === "add")).toHaveLength(20);
+  });
+
   it("resolves relative diff header paths against the selected project root", () => {
     const diff = [
       "diff --git a/src/a.ts b/src/a.ts",

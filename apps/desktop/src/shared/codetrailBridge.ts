@@ -67,6 +67,9 @@ export type CodetrailBridge = {
   sessionsGetDetail(
     payload: IpcRequestInput<"sessions:getDetail">,
   ): Promise<IpcResponse<"sessions:getDetail">>;
+  sessionsGetTurn(
+    payload: IpcRequestInput<"sessions:getTurn">,
+  ): Promise<IpcResponse<"sessions:getTurn">>;
   sessionsList(payload: IpcRequestInput<"sessions:list">): Promise<IpcResponse<"sessions:list">>;
   sessionsListMany(
     payload: IpcRequestInput<"sessions:listMany">,
@@ -119,6 +122,7 @@ export const CHANNEL_TO_BRIDGE_METHOD = {
   "search:query": "searchQuery",
   "sessions:delete": "sessionsDelete",
   "sessions:getDetail": "sessionsGetDetail",
+  "sessions:getTurn": "sessionsGetTurn",
   "sessions:list": "sessionsList",
   "sessions:listMany": "sessionsListMany",
   "ui:getPaneState": "uiGetPaneState",

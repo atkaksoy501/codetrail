@@ -190,6 +190,7 @@ let paneStatePromise: Promise<{
 
 type EditorInfo = Awaited<ReturnType<typeof listAvailableEditors>>["editors"][number];
 type ShikiTokenLine = Array<{ content: string; color?: string; fontStyle?: number }>;
+type ContentViewerMetaBadge = { label: string; title?: string; onClick?: () => void };
 
 const defaultViewerExternalAppsSnapshot: ViewerExternalAppsSnapshot = {
   editors: [],
@@ -974,6 +975,7 @@ function ContentViewer({
   pathRoots = [],
   query = "",
   highlightPatterns = [],
+  metaBadges = [],
   startLine,
   collapsible = false,
   defaultExpanded = true,
@@ -988,6 +990,7 @@ function ContentViewer({
   pathRoots?: string[];
   query?: string;
   highlightPatterns?: string[];
+  metaBadges?: ContentViewerMetaBadge[];
   startLine?: number;
   collapsible?: boolean;
   defaultExpanded?: boolean;
@@ -1203,7 +1206,18 @@ function ContentViewer({
     <div
       className={`code-block${kind === "diff" ? " diff-block" : ""} content-viewer content-viewer-${kind}${wrap ? " wrap" : ""}`}
     >
-      <div className="code-meta content-viewer-header">
+      <div
+        className={`code-meta content-viewer-header${isCollapsibleDiff ? " is-collapsible" : ""}`}
+      >
+        {isCollapsibleDiff ? (
+          <button
+            type="button"
+            className="content-viewer-header-hit-area"
+            aria-hidden="true"
+            tabIndex={-1}
+            onClick={handleDiffToggle}
+          />
+        ) : null}
         {isCollapsibleDiff ? (
           <div className="content-viewer-meta">
             <button
@@ -1233,9 +1247,35 @@ function ContentViewer({
                 <span className="diff-meta-removed">-{diffModel.removedLineCount}</span>
               </span>
             ) : null}
+            {metaBadges.map((badge) =>
+              badge.onClick ? (
+                <button
+                  key={`${badge.label}\u0000${badge.title ?? ""}`}
+                  type="button"
+                  className="content-viewer-badge secondary interactive"
+                  title={badge.title ?? undefined}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    badge.onClick?.();
+                  }}
+                >
+                  {badge.label}
+                </button>
+              ) : (
+                <span
+                  key={`${badge.label}\u0000${badge.title ?? ""}`}
+                  className="content-viewer-badge secondary"
+                  title={badge.title ?? undefined}
+                >
+                  {badge.label}
+                </span>
+              ),
+            )}
             {displayedMetaPath ? (
-              <span className="content-viewer-path" title={metaPath ?? undefined}>
-                {displayedMetaPath}
+              <span className="content-viewer-path">
+                <span className="content-viewer-path-text" title={metaPath ?? undefined}>
+                  {displayedMetaPath}
+                </span>
               </span>
             ) : null}
           </div>
@@ -1255,9 +1295,35 @@ function ContentViewer({
                 <span className="diff-meta-removed">-{diffModel.removedLineCount}</span>
               </span>
             ) : null}
+            {metaBadges.map((badge) =>
+              badge.onClick ? (
+                <button
+                  key={`${badge.label}\u0000${badge.title ?? ""}`}
+                  type="button"
+                  className="content-viewer-badge secondary interactive"
+                  title={badge.title ?? undefined}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    badge.onClick?.();
+                  }}
+                >
+                  {badge.label}
+                </button>
+              ) : (
+                <span
+                  key={`${badge.label}\u0000${badge.title ?? ""}`}
+                  className="content-viewer-badge secondary"
+                  title={badge.title ?? undefined}
+                >
+                  {badge.label}
+                </span>
+              ),
+            )}
             {displayedMetaPath ? (
-              <span className="content-viewer-path" title={metaPath ?? undefined}>
-                {displayedMetaPath}
+              <span className="content-viewer-path">
+                <span className="content-viewer-path-text" title={metaPath ?? undefined}>
+                  {displayedMetaPath}
+                </span>
               </span>
             ) : null}
           </div>
@@ -2633,6 +2699,11 @@ export function CodeBlock({
   startLine,
   query = "",
   highlightPatterns = [],
+  metaBadges = [],
+  collapsible = false,
+  defaultExpanded = true,
+  expanded,
+  onExpandedChange,
 }: {
   language: string;
   codeValue: string;
@@ -2642,6 +2713,11 @@ export function CodeBlock({
   startLine?: number;
   query?: string;
   highlightPatterns?: string[];
+  metaBadges?: ContentViewerMetaBadge[];
+  collapsible?: boolean;
+  defaultExpanded?: boolean;
+  expanded?: boolean;
+  onExpandedChange?: (expanded: boolean) => void;
 }) {
   const normalizedLanguage = language.trim().toLowerCase();
   const kind = detectViewerKind(normalizedLanguage, codeValue);
@@ -2655,6 +2731,11 @@ export function CodeBlock({
       pathRoots={pathRoots}
       query={query}
       highlightPatterns={highlightPatterns}
+      metaBadges={metaBadges}
+      collapsible={collapsible}
+      defaultExpanded={defaultExpanded}
+      {...(expanded !== undefined ? { expanded } : {})}
+      {...(onExpandedChange ? { onExpandedChange } : {})}
       {...(startLine ? { startLine } : {})}
     />
   );
@@ -2743,6 +2824,7 @@ export function DiffBlock({
   pathRoots = [],
   query = "",
   highlightPatterns = [],
+  metaBadges = [],
   collapsible = false,
   defaultExpanded = true,
   expanded,
@@ -2753,6 +2835,7 @@ export function DiffBlock({
   pathRoots?: string[];
   query?: string;
   highlightPatterns?: string[];
+  metaBadges?: ContentViewerMetaBadge[];
   collapsible?: boolean;
   defaultExpanded?: boolean;
   expanded?: boolean;
@@ -2768,6 +2851,7 @@ export function DiffBlock({
       pathRoots={pathRoots}
       query={query}
       highlightPatterns={highlightPatterns}
+      metaBadges={metaBadges}
       collapsible={collapsible}
       defaultExpanded={defaultExpanded}
       {...(expanded !== undefined ? { expanded } : {})}

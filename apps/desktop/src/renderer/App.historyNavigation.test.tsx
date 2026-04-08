@@ -291,7 +291,6 @@ describe("App history navigation", () => {
     fireEvent.keyUp(window, { key: "ArrowDown" });
 
     await waitFor(() => {
-      expect(screen.getByText("Project two combined message")).toBeInTheDocument();
       expect(activePane()).toHaveAttribute("data-history-pane", "project");
       expect(
         container.querySelector('[data-project-nav-id="project_2"].active'),

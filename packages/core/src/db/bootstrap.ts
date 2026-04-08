@@ -114,6 +114,22 @@ const tableStatements = [
     completed_at TEXT,
     FOREIGN KEY(message_id) REFERENCES messages(id)
   )`,
+  `CREATE TABLE IF NOT EXISTS message_tool_edit_files (
+    id TEXT PRIMARY KEY,
+    message_id TEXT NOT NULL,
+    file_ordinal INTEGER NOT NULL,
+    file_path TEXT NOT NULL,
+    previous_file_path TEXT,
+    change_type TEXT NOT NULL,
+    unified_diff TEXT,
+    added_line_count INTEGER NOT NULL DEFAULT 0,
+    removed_line_count INTEGER NOT NULL DEFAULT 0,
+    exactness TEXT NOT NULL,
+    before_hash TEXT,
+    after_hash TEXT,
+    FOREIGN KEY(message_id) REFERENCES messages(id),
+    UNIQUE(message_id, file_ordinal)
+  )`,
   `CREATE TABLE IF NOT EXISTS indexed_files (
     file_path TEXT PRIMARY KEY,
     provider TEXT NOT NULL,
@@ -181,6 +197,7 @@ const indexStatements = [
   "CREATE INDEX IF NOT EXISTS idx_messages_session_created ON messages(session_id, created_at_ms, created_at, id)",
   "CREATE INDEX IF NOT EXISTS idx_messages_session_category_created ON messages(session_id, category, created_at_ms, created_at, id)",
   "CREATE INDEX IF NOT EXISTS idx_messages_session_source_id ON messages(session_id, source_id)",
+  "CREATE INDEX IF NOT EXISTS idx_message_tool_edit_files_message_id ON message_tool_edit_files(message_id, file_ordinal)",
   "CREATE INDEX IF NOT EXISTS idx_projects_provider_name ON projects(provider, name_folded, id)",
   "CREATE INDEX IF NOT EXISTS idx_project_stats_last_activity ON project_stats(last_activity_ms DESC, project_id)",
   "CREATE INDEX IF NOT EXISTS idx_deleted_sessions_project_path ON deleted_sessions(provider, project_path)",
@@ -188,6 +205,7 @@ const indexStatements = [
 
 const dataTables = [
   "tool_calls",
+  "message_tool_edit_files",
   "messages",
   "sessions",
   "projects",
@@ -266,6 +284,9 @@ export function clearProvidersData(db: SqliteDatabase, providers: Provider[]): v
       `DELETE FROM tool_calls WHERE message_id IN (SELECT id FROM messages WHERE provider IN (${placeholders}))`,
     );
     deleteByProvider(
+      `DELETE FROM message_tool_edit_files WHERE message_id IN (SELECT id FROM messages WHERE provider IN (${placeholders}))`,
+    );
+    deleteByProvider(
       `DELETE FROM project_stats WHERE project_id IN (SELECT id FROM projects WHERE provider IN (${placeholders}))`,
     );
     deleteByProvider(`DELETE FROM message_fts WHERE provider IN (${placeholders})`);
@@ -305,6 +326,7 @@ function clearAllSchemaObjects(db: SqliteDatabase): void {
   db.exec("DROP TRIGGER IF EXISTS sessions_delete_project_stats");
   db.exec("DROP TABLE IF EXISTS message_fts");
   db.exec("DROP TABLE IF EXISTS tool_calls");
+  db.exec("DROP TABLE IF EXISTS message_tool_edit_files");
   db.exec("DROP TABLE IF EXISTS messages");
   db.exec("DROP TABLE IF EXISTS sessions");
   db.exec("DROP TABLE IF EXISTS project_stats");

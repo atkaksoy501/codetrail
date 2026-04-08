@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 
 import { act, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
@@ -88,6 +88,11 @@ function Harness({ logError }: { logError: (context: string, error: unknown) => 
   const [expandedByDefaultCategories, setExpandedByDefaultCategories] = useState<MessageCategory[]>(
     ["assistant"],
   );
+  const [turnViewCategories, setTurnViewCategories] = useState<MessageCategory[]>(["assistant"]);
+  const [turnViewExpandedByDefaultCategories, setTurnViewExpandedByDefaultCategories] = useState<
+    MessageCategory[]
+  >(["assistant"]);
+  const [turnViewCombinedChangesExpanded, setTurnViewCombinedChangesExpanded] = useState(false);
   const [searchProviders, setSearchProviders] = useState<Provider[]>(["claude"]);
   const [liveWatchEnabled, setLiveWatchEnabled] = useState(true);
   const [liveWatchRowHasBackground, setLiveWatchRowHasBackground] = useState(true);
@@ -123,6 +128,28 @@ function Harness({ logError }: { logError: (context: string, error: unknown) => 
   const [historyMode, setHistoryMode] = useState<"session" | "bookmarks" | "project_all">(
     "session",
   );
+  const [historyDetailMode, setHistoryDetailMode] = useState<"flat" | "turn">("flat");
+  const historyVisualization =
+    historyDetailMode === "turn" ? "turns" : historyMode === "bookmarks" ? "bookmarks" : "messages";
+  const handleSetHistoryVisualization = useCallback(
+    (
+      value:
+        | "messages"
+        | "turns"
+        | "bookmarks"
+        | ((current: "messages" | "turns" | "bookmarks") => "messages" | "turns" | "bookmarks"),
+    ) => {
+      const next = typeof value === "function" ? value(historyVisualization) : value;
+      setHistoryDetailMode(next === "turns" ? "turn" : "flat");
+      setHistoryMode((current) => {
+        if (next === "bookmarks") {
+          return "bookmarks";
+        }
+        return current === "bookmarks" ? "project_all" : current;
+      });
+    },
+    [historyVisualization],
+  );
   const [projectViewMode, setProjectViewMode] = useState<"list" | "tree">("list");
   const [projectSortField, setProjectSortField] = useState<"last_active" | "name">("last_active");
   const [projectSortDirection, setProjectSortDirection] = useState<"asc" | "desc">("desc");
@@ -130,6 +157,7 @@ function Harness({ logError }: { logError: (context: string, error: unknown) => 
   const [messageSortDirection, setMessageSortDirection] = useState<"asc" | "desc">("asc");
   const [bookmarkSortDirection, setBookmarkSortDirection] = useState<"asc" | "desc">("asc");
   const [projectAllSortDirection, setProjectAllSortDirection] = useState<"asc" | "desc">("desc");
+  const [turnViewSortDirection, setTurnViewSortDirection] = useState<"asc" | "desc">("desc");
   const [sessionPage, setSessionPage] = useState(0);
   const [sessionScrollTop, setSessionScrollTop] = useState(0);
   const [systemMessageRegexRules, setSystemMessageRegexRules] = useState<
@@ -163,6 +191,9 @@ function Harness({ logError }: { logError: (context: string, error: unknown) => 
       projectProviders,
       historyCategories,
       expandedByDefaultCategories,
+      turnViewCategories,
+      turnViewExpandedByDefaultCategories,
+      turnViewCombinedChangesExpanded,
       searchProviders,
       liveWatchEnabled,
       liveWatchRowHasBackground,
@@ -189,6 +220,8 @@ function Harness({ logError }: { logError: (context: string, error: unknown) => 
       selectedProjectId,
       selectedSessionId,
       historyMode,
+      historyVisualization,
+      historyDetailMode,
       projectViewMode,
       projectSortField,
       projectSortDirection,
@@ -196,6 +229,7 @@ function Harness({ logError }: { logError: (context: string, error: unknown) => 
       messageSortDirection,
       bookmarkSortDirection,
       projectAllSortDirection,
+      turnViewSortDirection,
       sessionPage,
       sessionScrollTop,
       systemMessageRegexRules,
@@ -212,6 +246,9 @@ function Harness({ logError }: { logError: (context: string, error: unknown) => 
     setProjectProviders,
     setHistoryCategories,
     setExpandedByDefaultCategories,
+    setTurnViewCategories,
+    setTurnViewExpandedByDefaultCategories,
+    setTurnViewCombinedChangesExpanded,
     setSearchProviders,
     setLiveWatchEnabled,
     setLiveWatchRowHasBackground,
@@ -238,6 +275,7 @@ function Harness({ logError }: { logError: (context: string, error: unknown) => 
     setSelectedProjectId,
     setSelectedSessionId,
     setHistoryMode,
+    setHistoryVisualization: handleSetHistoryVisualization,
     setProjectViewMode,
     setProjectSortField,
     setProjectSortDirection,
@@ -245,6 +283,7 @@ function Harness({ logError }: { logError: (context: string, error: unknown) => 
     setMessageSortDirection,
     setBookmarkSortDirection,
     setProjectAllSortDirection,
+    setTurnViewSortDirection,
     setSessionPage,
     setSessionScrollTop,
     setSystemMessageRegexRules,
@@ -294,6 +333,9 @@ describe("usePaneStateSync", () => {
             projectProviders: ["claude", "codex"],
             historyCategories: ["assistant", "user"],
             expandedByDefaultCategories: ["assistant"],
+            turnViewCategories: ["assistant", "user"],
+            turnViewExpandedByDefaultCategories: ["assistant"],
+            turnViewCombinedChangesExpanded: true,
             searchProviders: ["claude"],
             liveWatchEnabled: false,
             liveWatchRowHasBackground: false,
@@ -321,6 +363,8 @@ describe("usePaneStateSync", () => {
             selectedProjectId: "project_1",
             selectedSessionId: "session_1",
             historyMode: "bookmarks",
+            historyVisualization: "turns",
+            historyDetailMode: "turn",
             projectViewMode: "tree",
             projectSortField: "name",
             projectSortDirection: "desc",
@@ -328,6 +372,7 @@ describe("usePaneStateSync", () => {
             messageSortDirection: "asc",
             bookmarkSortDirection: "asc",
             projectAllSortDirection: "desc",
+            turnViewSortDirection: "desc",
             sessionPage: 2,
             sessionScrollTop: 222,
             systemMessageRegexRules: {
@@ -356,7 +401,7 @@ describe("usePaneStateSync", () => {
       expect(screen.getByTestId("hydrated").textContent).toBe("yes");
 
       expect(screen.getByTestId("project-width").textContent).toBe("340");
-      expect(screen.getByTestId("history-mode").textContent).toBe("bookmarks");
+      expect(screen.getByTestId("history-mode").textContent).toBe("project_all");
       expect(screen.getByTestId("scroll").textContent).toBe("222");
 
       const paneSaveCalls = client.invoke.mock.calls.filter(
@@ -446,6 +491,9 @@ describe("usePaneStateSync", () => {
             projectProviders: null,
             historyCategories: null,
             expandedByDefaultCategories: null,
+            turnViewCategories: null,
+            turnViewExpandedByDefaultCategories: null,
+            turnViewCombinedChangesExpanded: null,
             searchProviders: null,
             liveWatchEnabled: null,
             liveWatchRowHasBackground: null,
@@ -472,6 +520,8 @@ describe("usePaneStateSync", () => {
             selectedProjectId: null,
             selectedSessionId: null,
             historyMode: null,
+            historyVisualization: null,
+            historyDetailMode: null,
             projectViewMode: null,
             projectSortField: null,
             projectSortDirection: null,
@@ -479,6 +529,7 @@ describe("usePaneStateSync", () => {
             messageSortDirection: null,
             bookmarkSortDirection: null,
             projectAllSortDirection: null,
+            turnViewSortDirection: null,
             sessionPage: null,
             sessionScrollTop: null,
             systemMessageRegexRules: {

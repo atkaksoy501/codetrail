@@ -62,6 +62,7 @@ export function ProjectPane({
     selectedProjectId,
     viewMode,
     historyMode = "project_all",
+    historyVisualization = "messages",
     collapsed,
     projectQueryInput,
     projectProviders,
@@ -443,16 +444,8 @@ export function ProjectPane({
                   onSetTreeFocusedRow({ kind: "project", id: project.id });
                   onSelectProjectBookmarks(project.id);
                 }}
-                title={
-                  bookmarkButtonActive
-                    ? `Close ${formatInteger(project.bookmarkCount ?? 0)} bookmarked messages`
-                    : `Open ${formatInteger(project.bookmarkCount ?? 0)} bookmarked messages`
-                }
-                aria-label={
-                  bookmarkButtonActive
-                    ? `Close ${formatInteger(project.bookmarkCount ?? 0)} bookmarked messages`
-                    : `Open ${formatInteger(project.bookmarkCount ?? 0)} bookmarked messages`
-                }
+                title={`Show ${formatInteger(project.bookmarkCount ?? 0)} bookmarked messages`}
+                aria-label={`Show ${formatInteger(project.bookmarkCount ?? 0)} bookmarked messages`}
               >
                 <ToolbarIcon name="bookmark" />
                 <span>{formatCompactInteger(project.bookmarkCount ?? 0)}</span>
@@ -479,7 +472,7 @@ export function ProjectPane({
 
   return (
     <aside
-      className={`panel history-focus-pane project-pane${collapsed ? " collapsed" : ""}`}
+      className={`panel history-focus-pane history-visualization-${historyVisualization} project-pane${collapsed ? " collapsed" : ""}`}
       {...paneFocus.getHistoryPaneRootProps("project")}
       ref={(element) => {
         paneFocus.registerHistoryPaneRoot("project", element);

@@ -94,8 +94,31 @@ function getShortcutItems(platform: DesktopPlatform) {
       shortcut: `${modifier}+Shift+F`,
       description: "Open global search",
     },
-    { group: "Search & Navigation", shortcut: `${modifier}+Left`, description: "Previous page" },
-    { group: "Search & Navigation", shortcut: `${modifier}+Right`, description: "Next page" },
+    {
+      group: "Search & Navigation",
+      shortcut: `${modifier}+Left`,
+      description: "Previous page or turn",
+    },
+    {
+      group: "Search & Navigation",
+      shortcut: `${modifier}+Right`,
+      description: "Next page or turn",
+    },
+    {
+      group: "Search & Navigation",
+      shortcut: `${modifier}+Shift+M`,
+      description: "Show Messages view",
+    },
+    {
+      group: "Search & Navigation",
+      shortcut: `${modifier}+T`,
+      description: "Show Turns view",
+    },
+    {
+      group: "Search & Navigation",
+      shortcut: `${modifier}+Shift+B`,
+      description: "Show Bookmarks view",
+    },
     {
       group: "Search & Navigation",
       shortcut: `${modifier}+Up`,
@@ -153,15 +176,14 @@ function getShortcutItems(platform: DesktopPlatform) {
     { group: "Panels", shortcut: `${modifier}+B`, description: "Toggle Projects pane" },
     {
       group: "Panels",
-      shortcut: `${modifier}+Shift+B`,
+      shortcut: `${modifier}+Alt+B`,
       description: "Toggle Sessions pane",
     },
     {
       group: "Panels",
       shortcut: `${modifier}+E`,
-      description: "Expand or collapse shown message types",
+      description: "Expand, collapse, or restore shown items",
     },
-    { group: "Panels", shortcut: `${modifier}+Shift+M`, description: "Toggle focus mode" },
     ...CATEGORY_DIGIT_SHORTCUTS.flatMap(([category, digit]) => {
       const categoryLabel =
         category === "tool_edit"
@@ -220,7 +242,12 @@ function getShortcutItems(platform: DesktopPlatform) {
     { group: "System", shortcut: `${modifier}+-`, description: "Zoom out" },
     { group: "System", shortcut: `${modifier}+0`, description: "Reset zoom" },
     { group: "System", shortcut: "?", description: "Open help" },
-    { group: "System", shortcut: "Esc", description: "Close help or clear message focus" },
+    {
+      group: "System",
+      shortcut: "Esc",
+      description:
+        "Close help or clear message focus; press twice to reset the current message search",
+    },
   ] as const;
 }
 
@@ -239,6 +266,9 @@ export type ShortcutRegistry = {
     toggleSessionPane: string;
     previousPage: string;
     nextPage: string;
+    showMessagesView: string;
+    showTurnsView: string;
+    showBookmarksView: string;
     zoomIn: string;
     zoomOut: string;
     zoomReset: string;
@@ -277,11 +307,14 @@ export function createShortcutRegistry(platform: DesktopPlatform): ShortcutRegis
       refreshNow: `${modifier}+R`,
       toggleAutoRefresh: `${modifier}+Shift+R`,
       toggleAllMessagesExpanded: `${modifier}+E`,
-      toggleFocusMode: `${modifier}+Shift+M`,
+      toggleFocusMode: "",
       toggleProjectPane: `${modifier}+B`,
-      toggleSessionPane: `${modifier}+Shift+B`,
+      toggleSessionPane: `${modifier}+Alt+B`,
       previousPage: `${modifier}+Left`,
       nextPage: `${modifier}+Right`,
+      showMessagesView: `${modifier}+Shift+M`,
+      showTurnsView: `${modifier}+T`,
+      showBookmarksView: `${modifier}+Shift+B`,
       zoomIn: `${modifier}++`,
       zoomOut: `${modifier}+-`,
       zoomReset: `${modifier}+0`,

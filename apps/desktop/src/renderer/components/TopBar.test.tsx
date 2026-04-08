@@ -57,7 +57,7 @@ describe("TopBar", () => {
     );
     expect(screen.getByRole("button", { name: "Enter focus mode" })).toHaveAttribute(
       "title",
-      "Enter Focus mode  ⌘⇧M",
+      "Enter Focus mode",
     );
     expect(screen.getByRole("button", { name: "Open settings" })).toHaveAttribute(
       "title",
@@ -519,7 +519,7 @@ describe("TopBar", () => {
     );
     expect(screen.getByRole("button", { name: "Exit focus mode" })).toHaveAttribute(
       "title",
-      "Exit Focus mode  ⌘⇧M",
+      "Exit Focus mode",
     );
     expect(screen.getByRole("button", { name: "Indexing in progress" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Exit focus mode" })).toBeDisabled();

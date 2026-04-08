@@ -3,6 +3,7 @@ import type { Ref } from "react";
 
 import type {
   HistorySelectionCommitMode,
+  HistoryVisualization,
   ProjectSortField,
   ProjectSummary,
   ProjectViewMode,
@@ -40,6 +41,7 @@ export type ProjectPaneData = {
   viewMode: ProjectViewMode;
   updateSource: "auto" | "resort";
   historyMode?: ProjectPaneHistoryMode;
+  historyVisualization?: HistoryVisualization;
   collapsed: boolean;
   projectQueryInput: string;
   projectProviders: Provider[];

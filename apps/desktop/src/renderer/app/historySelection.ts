@@ -12,6 +12,13 @@ export function createHistorySelection(
       sessionId,
     };
   }
+  if (mode === "bookmarks" && sessionId) {
+    return {
+      mode,
+      projectId,
+      sessionId,
+    };
+  }
   return {
     mode,
     projectId,
@@ -49,6 +56,9 @@ export function setHistorySelectionSessionId(
   selection: HistorySelection,
   sessionId: string,
 ): HistorySelection {
+  if (selection.mode === "bookmarks") {
+    return createHistorySelection("bookmarks", selection.projectId, sessionId);
+  }
   return {
     mode: "session",
     projectId: selection.projectId,

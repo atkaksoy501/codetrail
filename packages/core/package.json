@@ -7,7 +7,8 @@
     ".": "./src/index.ts",
     "./browser": "./src/browser.ts",
     "./testing": "./src/testing/index.ts",
-    "./tooling/editOperations": "./src/tooling/editOperations.ts"
+    "./tooling/editOperations": "./src/tooling/editOperations.ts",
+    "./tooling/unifiedDiff": "./src/tooling/unifiedDiff.ts"
   },
   "dependencies": {
     "better-sqlite3": "11.8.1",

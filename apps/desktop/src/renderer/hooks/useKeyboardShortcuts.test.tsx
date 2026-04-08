@@ -57,6 +57,7 @@ function createProps(
     activeHistoryPane: "message",
     lastHistoryPane: "message",
     overlayOpen: false,
+    historyDetailMode: "flat",
     hasFocusedHistoryMessage: false,
     projectListRef: createRef<HTMLDivElement>(),
     sessionListRef: createRef<HTMLDivElement>(),
@@ -105,8 +106,13 @@ function createProps(
     pageSearchResultsDown: vi.fn(),
     goToPreviousHistoryPage: vi.fn(),
     goToNextHistoryPage: vi.fn(),
+    showMessagesView: vi.fn(),
+    showTurnsView: vi.fn(),
+    showBookmarksView: vi.fn(),
+    canToggleTurnView: false,
     goToPreviousSearchPage: vi.fn(),
     goToNextSearchPage: vi.fn(),
+    handleSecondaryMessagePaneEscape: vi.fn(() => false),
     applyZoomAction: vi.fn(async () => undefined),
     triggerIncrementalRefresh: vi.fn(),
     togglePeriodicRefresh: vi.fn(),
@@ -135,6 +141,15 @@ function renderHarness(
   );
 }
 
+function dispatchKeyDownWithTimeStamp(
+  init: KeyboardEventInit & { key: string },
+  timeStamp: number,
+) {
+  const event = new KeyboardEvent("keydown", init);
+  Object.defineProperty(event, "timeStamp", { value: timeStamp });
+  window.dispatchEvent(event);
+}
+
 describe("useKeyboardShortcuts", () => {
   it("routes search, zoom, and history shortcuts", () => {
     const props = createProps();
@@ -142,10 +157,10 @@ describe("useKeyboardShortcuts", () => {
     renderHarness(props);
 
     window.dispatchEvent(new KeyboardEvent("keydown", { key: ",", metaKey: true }));
-    window.dispatchEvent(new KeyboardEvent("keydown", { key: "f", metaKey: true, shiftKey: true }));
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true }));
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "f", metaKey: true }));
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "=", metaKey: true }));
-    window.dispatchEvent(new KeyboardEvent("keydown", { key: "m", metaKey: true, shiftKey: true }));
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "f", metaKey: true, shiftKey: true }));
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "e", metaKey: true }));
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "1", code: "Digit1", metaKey: true }));
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "1", code: "Digit1", ctrlKey: true }));
@@ -158,6 +173,7 @@ describe("useKeyboardShortcuts", () => {
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "9", code: "Digit9", ctrlKey: true }));
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "b", metaKey: true }));
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "b", metaKey: true, shiftKey: true }));
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "b", metaKey: true, altKey: true }));
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", metaKey: true }));
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", metaKey: true }));
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", metaKey: true }));
@@ -179,7 +195,7 @@ describe("useKeyboardShortcuts", () => {
     expect(props.focusSessionSearch).toHaveBeenCalledTimes(1);
     expect(props.openSettingsView).toHaveBeenCalledTimes(1);
     expect(props.applyZoomAction).toHaveBeenCalledWith("in");
-    expect(props.toggleFocusMode).toHaveBeenCalledTimes(1);
+    expect(props.toggleFocusMode).not.toHaveBeenCalled();
     expect(props.toggleAllMessagesExpanded).toHaveBeenCalledTimes(1);
     expect(props.toggleHistoryCategory).toHaveBeenCalledWith("user");
     expect(props.soloHistoryCategory).toHaveBeenCalledWith("user");
@@ -190,6 +206,7 @@ describe("useKeyboardShortcuts", () => {
     expect(props.focusAllHistoryCategoriesVisibility).toHaveBeenCalledTimes(1);
     expect(props.toggleProjectPaneCollapsed).toHaveBeenCalledTimes(1);
     expect(props.toggleSessionPaneCollapsed).toHaveBeenCalledTimes(1);
+    expect(props.showBookmarksView).toHaveBeenCalledTimes(1);
     expect(props.goToPreviousHistoryPage).toHaveBeenCalledTimes(1);
     expect(props.goToNextHistoryPage).toHaveBeenCalledTimes(1);
     expect(props.focusPreviousHistoryMessage).toHaveBeenCalledTimes(1);
@@ -792,6 +809,140 @@ describe("useKeyboardShortcuts", () => {
 
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
     expect(clearFocusedHistoryMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("routes Cmd+T to show Turns view when available", () => {
+    const showTurnsView = vi.fn();
+
+    render(
+      <Harness
+        {...createProps({
+          canToggleTurnView: true,
+          showTurnsView,
+        })}
+      />,
+    );
+
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "T", metaKey: true }));
+    expect(showTurnsView).toHaveBeenCalledTimes(1);
+  });
+
+  it("routes Cmd+T to show Turns view even when another history pane is focused", () => {
+    const showTurnsView = vi.fn();
+
+    render(
+      <Harness
+        {...createProps({
+          canToggleTurnView: true,
+          activeHistoryPane: "project",
+          lastHistoryPane: "project",
+          showTurnsView,
+        })}
+      />,
+    );
+
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "T", metaKey: true }));
+    expect(showTurnsView).toHaveBeenCalledTimes(1);
+  });
+
+  it("routes Cmd+T to show Turns view even when a history search input is focused", () => {
+    const showTurnsView = vi.fn();
+    const props = createProps({
+      canToggleTurnView: true,
+      showTurnsView,
+    });
+
+    renderHarness(props);
+    props.searchInputRef.current?.focus();
+
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "T", metaKey: true }));
+    expect(showTurnsView).toHaveBeenCalledTimes(1);
+  });
+
+  it("routes Cmd+T to show Messages view when Turns are active", () => {
+    const showMessagesView = vi.fn();
+
+    render(
+      <Harness
+        {...createProps({
+          historyVisualization: "turns",
+          showMessagesView,
+        })}
+      />,
+    );
+
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "T", metaKey: true }));
+    expect(showMessagesView).toHaveBeenCalledTimes(1);
+  });
+
+  it("routes Cmd+Shift+M to show Messages view", () => {
+    const showMessagesView = vi.fn();
+
+    render(
+      <Harness
+        {...createProps({
+          showMessagesView,
+        })}
+      />,
+    );
+
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "M", metaKey: true, shiftKey: true }));
+    expect(showMessagesView).toHaveBeenCalledTimes(1);
+  });
+
+  it("routes Cmd+Shift+B to show Bookmarks view", () => {
+    const showBookmarksView = vi.fn();
+
+    render(
+      <Harness
+        {...createProps({
+          showBookmarksView,
+        })}
+      />,
+    );
+
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "B", metaKey: true, shiftKey: true }));
+    expect(showBookmarksView).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses a second Escape in the message pane to trigger the secondary history escape action", () => {
+    const handleSecondaryMessagePaneEscape = vi.fn(() => true);
+
+    render(
+      <Harness
+        {...createProps({
+          handleSecondaryMessagePaneEscape,
+        })}
+      />,
+    );
+
+    dispatchKeyDownWithTimeStamp({ key: "Escape" }, 100);
+    dispatchKeyDownWithTimeStamp({ key: "Escape" }, 200);
+
+    expect(handleSecondaryMessagePaneEscape).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses double Escape from another pane to trigger the secondary history escape action", () => {
+    const returnToHistoryWithPaneFocus = vi.fn();
+    const handleSecondaryMessagePaneEscape = vi.fn(() => true);
+
+    render(
+      <Harness
+        {...createProps({
+          mainView: "search",
+          activeHistoryPane: "project",
+          lastHistoryPane: "project",
+          returnToHistoryWithPaneFocus,
+          handleSecondaryMessagePaneEscape,
+        })}
+      />,
+    );
+
+    dispatchKeyDownWithTimeStamp({ key: "Escape" }, 100);
+    dispatchKeyDownWithTimeStamp({ key: "Escape" }, 200);
+
+    expect(returnToHistoryWithPaneFocus).toHaveBeenCalledTimes(1);
+    expect(handleSecondaryMessagePaneEscape).toHaveBeenCalledTimes(1);
   });
 
   it("routes Option+Arrow navigation through session shortcuts", () => {

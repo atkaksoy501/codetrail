@@ -35,6 +35,7 @@ describe("initializeDatabase", () => {
         "index_checkpoints",
         "indexed_files",
         "message_fts",
+        "message_tool_edit_files",
         "messages",
         "meta",
         "projects",
