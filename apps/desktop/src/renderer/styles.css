@@ -4081,8 +4081,6 @@ button svg *,
   background: var(--sequence-header-bg);
 }
 
-.diff-split-pane .diff-sequence-marker:not(:first-child) .diff-sequence-marker-button,
-.diff-split-pane .diff-sequence-marker:not(:first-child) .diff-sequence-marker-spacer,
 .diff-table-split.wrap .diff-sequence-marker:not(:first-child) .diff-sequence-marker-button {
   margin-top: 8px;
 }
@@ -4140,7 +4138,12 @@ button svg *,
   outline: none;
 }
 
-.content-viewer-action:focus-visible,
+.content-viewer-action:focus-visible {
+  outline: none;
+  border-color: transparent;
+  box-shadow: none;
+}
+
 .settings-input:focus-visible,
 .settings-textarea:focus-visible,
 .settings-tool-disclosure:focus-visible,
