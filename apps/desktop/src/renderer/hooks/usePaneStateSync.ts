@@ -103,6 +103,7 @@ export function usePaneStateSync(args: {
   setMessagePageSize: Dispatch<SetStateAction<MessagePageSize>>;
   setUseMonospaceForAllMessages: Dispatch<SetStateAction<boolean>>;
   setAutoHideMessageActions: Dispatch<SetStateAction<boolean>>;
+  setExpandPreviewOnHiddenActions: Dispatch<SetStateAction<boolean>>;
   setAutoHideViewerHeaderActions: Dispatch<SetStateAction<boolean>>;
   setDefaultViewerWrapMode: Dispatch<SetStateAction<"nowrap" | "wrap">>;
   setDefaultDiffViewMode: Dispatch<SetStateAction<"unified" | "split">>;
@@ -164,6 +165,7 @@ export function usePaneStateSync(args: {
     setMessagePageSize,
     setUseMonospaceForAllMessages,
     setAutoHideMessageActions,
+    setExpandPreviewOnHiddenActions,
     setAutoHideViewerHeaderActions,
     setDefaultViewerWrapMode,
     setDefaultDiffViewMode,
@@ -286,6 +288,10 @@ export function usePaneStateSync(args: {
         hydrateIfPresent(paneResponse.messagePageSize, setMessagePageSize);
         hydrateIfPresent(paneResponse.useMonospaceForAllMessages, setUseMonospaceForAllMessages);
         hydrateIfPresent(paneResponse.autoHideMessageActions, setAutoHideMessageActions);
+        hydrateIfPresent(
+          paneResponse.expandPreviewOnHiddenActions,
+          setExpandPreviewOnHiddenActions,
+        );
         hydrateIfPresent(paneResponse.autoHideViewerHeaderActions, setAutoHideViewerHeaderActions);
         hydrateIfPresent(paneResponse.defaultViewerWrapMode, setDefaultViewerWrapMode);
         hydrateIfPresent(paneResponse.defaultDiffViewMode, setDefaultDiffViewMode);
@@ -420,6 +426,7 @@ export function usePaneStateSync(args: {
     setMessagePageSize,
     setUseMonospaceForAllMessages,
     setAutoHideMessageActions,
+    setExpandPreviewOnHiddenActions,
     setAutoHideViewerHeaderActions,
     setDefaultViewerWrapMode,
     setDefaultDiffViewMode,
@@ -461,6 +468,7 @@ export function usePaneStateSync(args: {
       messagePageSize: paneState.messagePageSize,
       useMonospaceForAllMessages: paneState.useMonospaceForAllMessages,
       autoHideMessageActions: paneState.autoHideMessageActions,
+      expandPreviewOnHiddenActions: paneState.expandPreviewOnHiddenActions,
       autoHideViewerHeaderActions: paneState.autoHideViewerHeaderActions,
       defaultViewerWrapMode: paneState.defaultViewerWrapMode,
       defaultDiffViewMode: paneState.defaultDiffViewMode,

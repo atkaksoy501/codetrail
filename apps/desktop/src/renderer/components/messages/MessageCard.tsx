@@ -250,74 +250,71 @@ function MessageCardComponent({
           {writeDiffCount > 0 ? (
             <button
               type="button"
-              className="message-action-button"
+              className="message-action-button message-icon-button"
               {...preserveMessagePaneFocusProps}
               onClick={handleToggleDiffsButtonClick}
               aria-label={allWriteDiffsExpanded ? "Collapse Diffs" : "Expand Diffs"}
-              title="Expand or collapse all diffs in this message"
+              title={allWriteDiffsExpanded ? "Collapse Diffs" : "Expand Diffs"}
             >
-              {allWriteDiffsExpanded ? "Collapse Diffs" : "Expand Diffs"}
+              <ToolbarIcon name={allWriteDiffsExpanded ? "collapseAll" : "expandAll"} />
             </button>
           ) : null}
           <button
             type="button"
-            className="message-action-button"
+            className="message-action-button message-icon-button"
             {...preserveMessagePaneFocusProps}
             onClick={handleCopyBodyButtonClick}
             aria-label="Copy formatted message body"
             title="Copy message"
           >
-            Copy
+            <ToolbarIcon name="copy" />
           </button>
           {onRevealInSession ? (
             <button
               type="button"
-              className="message-action-button message-reveal-button"
+              className="message-action-button message-icon-button"
               {...preserveMessagePaneFocusProps}
               onClick={handleRevealButtonClick}
               aria-label="Reveal this message in session"
               title="Reveal in Session"
             >
-              <ToolbarIcon name="folderOpen" />
-              <span>Session</span>
+              <ToolbarIcon name="turns" />
             </button>
           ) : null}
           {onRevealInProject ? (
             <button
               type="button"
-              className="message-action-button message-reveal-button"
+              className="message-action-button message-icon-button"
               {...preserveMessagePaneFocusProps}
               onClick={handleRevealInProjectButtonClick}
               aria-label="Reveal this message in project"
               title="Reveal in Project"
             >
-              <ToolbarIcon name="folderOpen" />
-              <span>Project</span>
+              <ToolbarIcon name="project" />
             </button>
           ) : null}
           {onRevealInBookmarks ? (
             <button
               type="button"
-              className="message-action-button message-reveal-button"
+              className="message-action-button message-icon-button"
               {...preserveMessagePaneFocusProps}
               onClick={handleRevealInBookmarksButtonClick}
               aria-label="Reveal this message in bookmarks"
               title="Reveal in Bookmarks"
             >
-              Reveal in Bookmarks
+              <ToolbarIcon name="bookmark" />
             </button>
           ) : null}
           {onRevealInTurn ? (
             <button
               type="button"
-              className="message-action-button message-reveal-button"
+              className="message-action-button message-icon-button"
               {...preserveMessagePaneFocusProps}
               onClick={handleRevealInTurnButtonClick}
               aria-label="Reveal this message in turn"
               title="Reveal in Turn"
             >
-              <ToolbarIcon name="folderOpen" />
-              <span>Turn</span>
+              <ToolbarIcon name="turn" />
             </button>
           ) : null}
           {onToggleBookmark ? (
@@ -599,13 +596,14 @@ function formatJsonIfParsable(value: string): string {
   }
 }
 
-function compactInlineText(value: string, maxLength = 120): string {
+function compactInlineText(value: string): string {
   const compact = value.replace(/\s+/g, " ").trim();
   if (!compact) {
     return "Empty message";
   }
-  if (compact.length <= maxLength) {
-    return compact;
+  // Cap at a reasonable DOM limit; visual truncation is handled by CSS text-overflow.
+  if (compact.length > 500) {
+    return compact.slice(0, 500);
   }
-  return `${compact.slice(0, maxLength - 1)}…`;
+  return compact;
 }

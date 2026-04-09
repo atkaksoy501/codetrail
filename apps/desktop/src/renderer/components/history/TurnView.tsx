@@ -4,6 +4,7 @@ import type { useHistoryController } from "../../features/useHistoryController";
 import { copyTextToClipboard } from "../../lib/clipboard";
 import { usePaneFocus } from "../../lib/paneFocusController";
 import { MessageCard } from "../messages/MessageCard";
+import { ToolbarIcon } from "../ToolbarIcon";
 import {
   CodeBlock,
   DiffBlock,
@@ -200,7 +201,7 @@ function CombinedChangesCard({
           {files.length > 0 ? (
             <button
               type="button"
-              className="message-action-button"
+              className="message-action-button message-icon-button"
               {...preserveMessagePaneFocusProps}
               onClick={() => {
                 const nextExpanded = !allFilesExpanded;
@@ -208,20 +209,20 @@ function CombinedChangesCard({
                 paneFocus.focusHistoryPane("message");
               }}
               aria-label={allFilesExpanded ? "Collapse Diffs" : "Expand Diffs"}
-              title="Expand or collapse all diffs in combined changes"
+              title={allFilesExpanded ? "Collapse Diffs" : "Expand Diffs"}
             >
-              {allFilesExpanded ? "Collapse Diffs" : "Expand Diffs"}
+              <ToolbarIcon name={allFilesExpanded ? "collapseAll" : "expandAll"} />
             </button>
           ) : null}
           <button
             type="button"
-            className="message-action-button"
+            className="message-action-button message-icon-button"
             {...preserveMessagePaneFocusProps}
             onClick={handleCopy}
             aria-label="Copy combined changes"
             title="Copy combined changes"
           >
-            Copy
+            <ToolbarIcon name="copy" />
           </button>
         </div>
       </header>

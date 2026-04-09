@@ -302,6 +302,7 @@ export const paneStateBaseSchema = z.object({
   messagePageSize: messagePageSizeSchema,
   useMonospaceForAllMessages: z.boolean(),
   autoHideMessageActions: z.boolean(),
+  expandPreviewOnHiddenActions: z.boolean(),
   autoHideViewerHeaderActions: z.boolean(),
   defaultViewerWrapMode: viewerWrapModeSchema,
   defaultDiffViewMode: diffViewModeSchema,

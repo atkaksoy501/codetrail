@@ -1405,6 +1405,7 @@ export function App({
                     regularFontSize: appearance.regularFontSize,
                     useMonospaceForAllMessages: appearance.useMonospaceForAllMessages,
                     autoHideMessageActions: appearance.autoHideMessageActions,
+                    expandPreviewOnHiddenActions: appearance.expandPreviewOnHiddenActions,
                     autoHideViewerHeaderActions: appearance.autoHideViewerHeaderActions,
                     defaultViewerWrapMode: appearance.defaultViewerWrapMode,
                     defaultDiffViewMode: appearance.defaultDiffViewMode,
@@ -1425,6 +1426,8 @@ export function App({
                     onRegularFontSizeChange: appearance.setRegularFontSize,
                     onUseMonospaceForAllMessagesChange: appearance.setUseMonospaceForAllMessages,
                     onAutoHideMessageActionsChange: appearance.setAutoHideMessageActions,
+                    onExpandPreviewOnHiddenActionsChange:
+                      appearance.setExpandPreviewOnHiddenActions,
                     onAutoHideViewerHeaderActionsChange: appearance.setAutoHideViewerHeaderActions,
                     onDefaultViewerWrapModeChange: appearance.setDefaultViewerWrapMode,
                     onDefaultDiffViewModeChange: appearance.setDefaultDiffViewMode,

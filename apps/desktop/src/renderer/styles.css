@@ -3113,6 +3113,10 @@ button svg *,
   min-height: 40px;
 }
 
+:root[data-expand-preview-on-hidden-actions="true"] .message-header {
+  gap: 0;
+}
+
 .message-toggle-button {
   border: 0;
   background: transparent;
@@ -3254,18 +3258,32 @@ button svg *,
   transition: opacity 0.12s ease;
 }
 
+:root[data-expand-preview-on-hidden-actions="true"] .message-header-actions {
+  overflow: hidden;
+  max-width: 0;
+}
+
 :root[data-auto-hide-message-actions="false"] .message .message-header-actions {
   opacity: 1;
+  max-width: none;
+  overflow: visible;
+  padding-left: 10px;
 }
 
 :root[data-auto-hide-message-actions="true"] .message:hover .message-header-actions,
 :root[data-auto-hide-message-actions="true"] .message:has(:focus-visible) .message-header-actions {
   opacity: 1;
+  max-width: none;
+  overflow: visible;
+  padding-left: 10px;
 }
 
 :root[data-auto-hide-message-actions="true"] .message.is-bookmarked .message-header-actions,
 :root[data-auto-hide-message-actions="false"] .message.is-bookmarked .message-header-actions {
   opacity: 1;
+  max-width: none;
+  overflow: visible;
+  padding-left: 10px;
 }
 
 .message.is-bookmarked .message-action-button:not(.message-bookmark-button) {
@@ -3279,14 +3297,15 @@ button svg *,
   pointer-events: auto;
 }
 
-.message-reveal-button {
-  gap: 4px;
-  white-space: nowrap;
+.message-icon-button {
+  width: 24px;
+  padding: 0;
+  justify-content: center;
 }
 
-.message-reveal-button .toolbar-icon {
-  width: 12px;
-  height: 12px;
+.message-icon-button .toolbar-icon {
+  width: 13px;
+  height: 13px;
 }
 
 .message-preview {
@@ -3739,15 +3758,13 @@ button svg *,
   pointer-events: auto;
 }
 
-:root[data-auto-hide-viewer-header-actions="true"] .message:hover .content-viewer-actions,
+:root[data-auto-hide-viewer-header-actions="true"] .content-viewer:hover .content-viewer-actions,
 :root[data-auto-hide-viewer-header-actions="true"]
-  .message:has(:focus-visible)
+  .content-viewer:has(:focus-visible)
   .content-viewer-actions,
 :root[data-auto-hide-viewer-header-actions="true"]
-  .message
   .content-viewer-actions:has(.content-viewer-menu-popover),
 :root[data-auto-hide-viewer-header-actions="true"]
-  .message
   .content-viewer-actions:has(.content-viewer-action[aria-expanded="true"]) {
   opacity: 1;
   pointer-events: auto;
@@ -3756,6 +3773,29 @@ button svg *,
 .content-viewer-action {
   min-height: 24px;
   padding: 0 6px;
+}
+
+.viewer-icon-button {
+  width: 24px;
+  padding: 0;
+  justify-content: center;
+}
+
+.viewer-icon-button .toolbar-icon {
+  width: 13px;
+  height: 13px;
+}
+
+.viewer-menu-trigger {
+  width: auto;
+  gap: 1px;
+  padding: 0 4px;
+}
+
+.viewer-menu-trigger .toolbar-icon:last-child {
+  width: 10px;
+  height: 10px;
+  opacity: 0.6;
 }
 
 .diff-meta-added {
@@ -5926,6 +5966,11 @@ mark {
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.24);
   transform: translateX(0);
   transition: transform 0.18s ease, background 0.18s ease;
+}
+
+.settings-switch-disabled {
+  opacity: 0.4;
+  pointer-events: none;
 }
 
 .settings-switch input:checked + .settings-switch-track {

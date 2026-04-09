@@ -94,6 +94,9 @@ export function useAppearanceController({
   const [autoHideMessageActions, setAutoHideMessageActions] = useState(
     initialPaneState?.autoHideMessageActions ?? true,
   );
+  const [expandPreviewOnHiddenActions, setExpandPreviewOnHiddenActions] = useState(
+    initialPaneState?.expandPreviewOnHiddenActions ?? true,
+  );
   const [autoHideViewerHeaderActions, setAutoHideViewerHeaderActions] = useState(
     initialPaneState?.autoHideViewerHeaderActions ?? false,
   );
@@ -298,6 +301,11 @@ export function useAppearanceController({
   }, [autoHideMessageActions]);
 
   useEffect(() => {
+    document.documentElement.dataset.expandPreviewOnHiddenActions =
+      autoHideMessageActions && expandPreviewOnHiddenActions ? "true" : "false";
+  }, [autoHideMessageActions, expandPreviewOnHiddenActions]);
+
+  useEffect(() => {
     document.documentElement.dataset.autoHideViewerHeaderActions = autoHideViewerHeaderActions
       ? "true"
       : "false";
@@ -407,6 +415,8 @@ export function useAppearanceController({
     setUseMonospaceForAllMessages,
     autoHideMessageActions,
     setAutoHideMessageActions,
+    expandPreviewOnHiddenActions,
+    setExpandPreviewOnHiddenActions,
     autoHideViewerHeaderActions,
     setAutoHideViewerHeaderActions,
     defaultViewerWrapMode,

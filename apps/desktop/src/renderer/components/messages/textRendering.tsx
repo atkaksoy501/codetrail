@@ -23,6 +23,7 @@ import {
   normalizeAbsolutePath,
   normalizePathForComparison,
 } from "@codetrail/core/browser";
+import { ToolbarIcon } from "../ToolbarIcon";
 import {
   type ExternalToolConfig,
   getDefaultShikiThemeForUiTheme,
@@ -1423,24 +1424,27 @@ function ContentViewer({
           {kind === "diff" ? (
             <button
               type="button"
-              className="content-viewer-action message-action-button"
-              title="Switch between unified and split diff views"
+              className="content-viewer-action message-action-button viewer-icon-button"
+              aria-label={diffMode === "unified" ? "Split" : "Unified"}
+              title={diffMode === "unified" ? "Switch to split view" : "Switch to unified view"}
               onClick={() => setDiffMode((value) => (value === "unified" ? "split" : "unified"))}
             >
-              {diffMode === "unified" ? "Split" : "Unified"}
+              <ToolbarIcon name={diffMode === "unified" ? "splitView" : "unifiedView"} />
             </button>
           ) : null}
           <button
             type="button"
-            className="content-viewer-action message-action-button"
-            title="Toggle line wrapping in the viewer"
+            className="content-viewer-action message-action-button viewer-icon-button"
+            aria-label={wrap ? "No Wrap" : "Wrap"}
+            title={wrap ? "Disable line wrapping" : "Enable line wrapping"}
             onClick={() => setWrap((value) => !value)}
           >
-            {wrap ? "No Wrap" : "Wrap"}
+            <ToolbarIcon name={wrap ? "noWrapText" : "wrapText"} />
           </button>
           <button
             type="button"
-            className="content-viewer-action message-action-button"
+            className="content-viewer-action message-action-button viewer-icon-button"
+            aria-label="Copy"
             title="Copy content"
             onClick={() => {
               void copyTextToClipboard(
@@ -1448,30 +1452,33 @@ function ContentViewer({
               );
             }}
           >
-            Copy
+            <ToolbarIcon name="copy" />
           </button>
           {kind === "diff" && canOpenFile ? (
             <button
               type="button"
-              className="content-viewer-action message-action-button"
+              className="content-viewer-action message-action-button viewer-icon-button"
+              aria-label="Open"
               title="Open in editor"
               onClick={() => void handleOpenFileOrContent(defaultEditorApp?.id)}
             >
-              Open
+              <ToolbarIcon name="openExternal" />
             </button>
           ) : null}
           {kind !== "diff" && canOpenViewerContent ? (
             <button
               type="button"
-              className="content-viewer-action message-action-button"
+              className="content-viewer-action message-action-button viewer-icon-button"
+              aria-label="Open"
               title="Open in editor"
               onClick={() => void handleOpenFileOrContent()}
             >
-              Open
+              <ToolbarIcon name="openExternal" />
             </button>
           ) : null}
           {kind === "diff" && absoluteFilePath && editorApps.length > 0 ? (
             <ViewerAppMenu
+              icon="openExternal"
               label="Open With"
               apps={editorApps}
               onSelect={(editorId) => void handleOpenFileOrContent(editorId)}
@@ -1480,15 +1487,17 @@ function ContentViewer({
           {canOpenDiff ? (
             <button
               type="button"
-              className="content-viewer-action message-action-button"
+              className="content-viewer-action message-action-button viewer-icon-button"
+              aria-label="Diff"
               title="Open in diff tool"
               onClick={() => void handleOpenDiff()}
             >
-              Diff
+              <ToolbarIcon name="diff" />
             </button>
           ) : null}
           {kind === "diff" && diffApps.length > 0 ? (
             <ViewerAppMenu
+              icon="diff"
               label="Diff With"
               apps={diffApps}
               onSelect={(editorId) => void handleOpenDiff(editorId)}
@@ -1496,6 +1505,7 @@ function ContentViewer({
           ) : null}
           {kind !== "diff" && editorApps.length > 1 ? (
             <ViewerAppMenu
+              icon="openExternal"
               label="Open With"
               apps={editorApps}
               onSelect={(editorId) => void handleOpenFileOrContent(editorId)}
@@ -1504,13 +1514,14 @@ function ContentViewer({
           {canReveal && absoluteFilePath ? (
             <button
               type="button"
-              className="content-viewer-action message-action-button"
+              className="content-viewer-action message-action-button viewer-icon-button"
+              aria-label="Reveal"
               title="Reveal in Finder"
               onClick={() => {
                 void openPath(absoluteFilePath);
               }}
             >
-              Reveal
+              <ToolbarIcon name="reveal" />
             </button>
           ) : null}
         </div>
@@ -1630,10 +1641,12 @@ function renderCodeLineContent(
 }
 
 function ViewerAppMenu({
+  icon,
   label,
   apps,
   onSelect,
 }: {
+  icon: "openExternal" | "diff";
   label: string;
   apps: EditorInfo[];
   onSelect: (editorId: EditorInfo["id"]) => void;
@@ -1673,15 +1686,12 @@ function ViewerAppMenu({
       if (!rect) {
         return;
       }
-      const estimatedWidth = Math.max(rect.width, 220);
-      const left = Math.max(
-        12,
-        Math.min(rect.right - estimatedWidth, window.innerWidth - estimatedWidth - 12),
-      );
+      const minWidth = Math.max(rect.width, 180);
+      const left = Math.max(12, Math.min(rect.right - minWidth, window.innerWidth - minWidth - 12));
       setMenuPosition({
         top: rect.bottom + 6,
         left,
-        minWidth: Math.max(rect.width, 180),
+        minWidth,
       });
     };
 
@@ -1721,9 +1731,11 @@ function ViewerAppMenu({
     <div ref={menuRef} className="content-viewer-menu">
       <button
         type="button"
-        className="content-viewer-action message-action-button"
+        className="content-viewer-action message-action-button viewer-icon-button viewer-menu-trigger"
         aria-haspopup="menu"
         aria-expanded={open}
+        aria-label={label}
+        title={label}
         ref={buttonRef}
         onMouseDown={(event) => {
           returnFocusRef.current =
@@ -1745,7 +1757,8 @@ function ViewerAppMenu({
         }}
         onClick={() => setOpen((value) => !value)}
       >
-        {label}
+        <ToolbarIcon name={icon} />
+        <ToolbarIcon name="chevronDown" />
       </button>
       {open && menuPosition && typeof document !== "undefined"
         ? createPortal(

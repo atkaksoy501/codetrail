@@ -487,11 +487,11 @@ describe("theme-aware Shiki rendering", () => {
     });
     expect(screen.getByRole("button", { name: "Unified" })).toHaveAttribute(
       "title",
-      "Switch between unified and split diff views",
+      "Switch to unified view",
     );
     expect(screen.getByRole("button", { name: "No Wrap" })).toHaveAttribute(
       "title",
-      "Toggle line wrapping in the viewer",
+      "Disable line wrapping",
     );
   });
 

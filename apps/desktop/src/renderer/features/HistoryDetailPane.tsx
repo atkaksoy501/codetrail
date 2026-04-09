@@ -414,7 +414,7 @@ export function HistoryDetailPane({
                 },
               ])}
             >
-              <ToolbarIcon name="turns" />
+              <ToolbarIcon name="turn" />
               <span>Turns</span>
             </button>
             <button

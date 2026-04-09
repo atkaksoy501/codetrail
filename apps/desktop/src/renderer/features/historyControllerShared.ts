@@ -37,6 +37,8 @@ export type AppearanceState = {
   setUseMonospaceForAllMessages: Dispatch<SetStateAction<boolean>>;
   autoHideMessageActions: boolean;
   setAutoHideMessageActions: Dispatch<SetStateAction<boolean>>;
+  expandPreviewOnHiddenActions: boolean;
+  setExpandPreviewOnHiddenActions: Dispatch<SetStateAction<boolean>>;
   autoHideViewerHeaderActions: boolean;
   setAutoHideViewerHeaderActions: Dispatch<SetStateAction<boolean>>;
   defaultViewerWrapMode: ViewerWrapMode;

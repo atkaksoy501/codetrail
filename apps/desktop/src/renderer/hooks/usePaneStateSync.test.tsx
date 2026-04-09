@@ -109,6 +109,7 @@ function Harness({ logError }: { logError: (context: string, error: unknown) => 
   const [messagePageSize, setMessagePageSize] = useState<MessagePageSize>(50);
   const [useMonospaceForAllMessages, setUseMonospaceForAllMessages] = useState(false);
   const [autoHideMessageActions, setAutoHideMessageActions] = useState(true);
+  const [expandPreviewOnHiddenActions, setExpandPreviewOnHiddenActions] = useState(true);
   const [autoHideViewerHeaderActions, setAutoHideViewerHeaderActions] = useState(false);
   const [defaultViewerWrapMode, setDefaultViewerWrapMode] = useState<"nowrap" | "wrap">("nowrap");
   const [defaultDiffViewMode, setDefaultDiffViewMode] = useState<"unified" | "split">("unified");
@@ -209,6 +210,7 @@ function Harness({ logError }: { logError: (context: string, error: unknown) => 
       messagePageSize,
       useMonospaceForAllMessages,
       autoHideMessageActions,
+      expandPreviewOnHiddenActions,
       autoHideViewerHeaderActions,
       defaultViewerWrapMode,
       defaultDiffViewMode,
@@ -264,6 +266,7 @@ function Harness({ logError }: { logError: (context: string, error: unknown) => 
     setMessagePageSize,
     setUseMonospaceForAllMessages,
     setAutoHideMessageActions,
+    setExpandPreviewOnHiddenActions,
     setAutoHideViewerHeaderActions,
     setDefaultViewerWrapMode,
     setDefaultDiffViewMode,
@@ -352,6 +355,7 @@ describe("usePaneStateSync", () => {
             messagePageSize: 25,
             useMonospaceForAllMessages: true,
             autoHideMessageActions: false,
+            expandPreviewOnHiddenActions: true,
             autoHideViewerHeaderActions: true,
             defaultViewerWrapMode: "wrap",
             defaultDiffViewMode: "split",
@@ -423,6 +427,7 @@ describe("usePaneStateSync", () => {
         preferredExternalEditor: createKnownToolId("zed"),
         preferredExternalDiffTool: createKnownToolId("cursor"),
         autoHideMessageActions: false,
+        expandPreviewOnHiddenActions: true,
         autoHideViewerHeaderActions: true,
         defaultViewerWrapMode: "wrap",
         defaultDiffViewMode: "split",
@@ -509,6 +514,7 @@ describe("usePaneStateSync", () => {
             regularFontSize: null,
             useMonospaceForAllMessages: null,
             autoHideMessageActions: null,
+            expandPreviewOnHiddenActions: null,
             autoHideViewerHeaderActions: null,
             defaultViewerWrapMode: null,
             defaultDiffViewMode: null,

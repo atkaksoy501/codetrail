@@ -26,7 +26,18 @@ export type ToolbarIconName =
   | "trash"
   | "export"
   | "sortAsc"
-  | "sortDesc";
+  | "sortDesc"
+  | "turn"
+  | "project"
+  | "messages"
+  | "splitView"
+  | "unifiedView"
+  | "wrapText"
+  | "noWrapText"
+  | "openExternal"
+  | "diff"
+  | "reveal"
+  | "chevronDown";
 
 const TOOLBAR_ICON_PATHS = {
   history: "M4 3h16v4H4zM4 10h16v4H4zM4 17h16v4H4z",
@@ -58,6 +69,17 @@ const TOOLBAR_ICON_PATHS = {
   export: "M12 3v11M8 10l4 4 4-4M5 19h14",
   sortAsc: "M7 17V6M7 6l-3 3M7 6l3 3M12 17h8M12 13h6M12 9h4M12 5h2",
   sortDesc: "M7 6v11M7 17l-3-3M7 17l3-3M12 17h2M12 13h4M12 9h6M12 5h8",
+  turn: "M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z",
+  project: "M3 6l9-3 9 3M3 6v12l9 3 9-3V6M3 6l9 3 9-3M12 9v12",
+  messages: "M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.4 8.4 0 0 1 3.8-.9h.5a8.5 8.5 0 0 1 8 8z",
+  splitView: "M3 3h8v18H3zM13 3h8v18h-8z",
+  unifiedView: "M3 3h18v18H3z",
+  wrapText: "M3 6h18M3 12h15a3 3 0 1 1 0 6H9M12 15l-3 3 3 3",
+  noWrapText: "M3 6h18M3 12h18M3 18h18",
+  openExternal: "M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14L21 3",
+  diff: "M10 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h4M14 3h4a2 2 0 0 0 2 2v14a2 2 0 0 0-2 2h-4M9 12h6",
+  reveal: "M5 19a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v2M14 15l3 3 3-3M17 18v-7",
+  chevronDown: "M6 9l6 6 6-6",
 } satisfies Record<Exclude<ToolbarIconName, "copy" | "folderOpen" | "trash">, string>;
 
 const TOOLBAR_ICON_TITLES: Record<ToolbarIconName, string> = {
@@ -89,6 +111,17 @@ const TOOLBAR_ICON_TITLES: Record<ToolbarIconName, string> = {
   export: "Export",
   sortAsc: "Sort ascending",
   sortDesc: "Sort descending",
+  turn: "Turn",
+  project: "Project",
+  messages: "Messages",
+  splitView: "Split view",
+  unifiedView: "Unified view",
+  wrapText: "Wrap text",
+  noWrapText: "No wrap",
+  openExternal: "Open",
+  diff: "Diff",
+  reveal: "Reveal",
+  chevronDown: "Menu",
 };
 
 function isPathToolbarIconName(name: ToolbarIconName): name is keyof typeof TOOLBAR_ICON_PATHS {

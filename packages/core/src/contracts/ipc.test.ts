@@ -378,6 +378,7 @@ const channelExamples: Record<IpcChannel, ChannelExample> = {
       messagePageSize: 50,
       useMonospaceForAllMessages: false,
       autoHideMessageActions: true,
+      expandPreviewOnHiddenActions: true,
       autoHideViewerHeaderActions: false,
       defaultViewerWrapMode: "nowrap",
       defaultDiffViewMode: "unified",

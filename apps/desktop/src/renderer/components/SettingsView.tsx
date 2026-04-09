@@ -61,6 +61,7 @@ type SettingsAppearanceProps = {
   regularFontSize: RegularFontSize;
   useMonospaceForAllMessages: boolean;
   autoHideMessageActions: boolean;
+  expandPreviewOnHiddenActions: boolean;
   autoHideViewerHeaderActions: boolean;
   defaultViewerWrapMode: ViewerWrapMode;
   defaultDiffViewMode: DiffViewMode;
@@ -109,6 +110,7 @@ type SettingsAppearanceProps = {
   onRegularFontSizeChange: (fontSize: RegularFontSize) => void;
   onUseMonospaceForAllMessagesChange: (enabled: boolean) => void;
   onAutoHideMessageActionsChange: (enabled: boolean) => void;
+  onExpandPreviewOnHiddenActionsChange: (enabled: boolean) => void;
   onAutoHideViewerHeaderActionsChange: (enabled: boolean) => void;
   onDefaultViewerWrapModeChange: (mode: ViewerWrapMode) => void;
   onDefaultDiffViewModeChange: (mode: DiffViewMode) => void;
@@ -404,6 +406,14 @@ export function SettingsView({
                     checked={appearance.autoHideMessageActions}
                     onChange={appearance.onAutoHideMessageActionsChange}
                     ariaLabel="Auto-hide message actions"
+                  />
+                </InlineSwitchRow>
+                <InlineSwitchRow label="Expand message preview into hidden actions space">
+                  <SettingsSwitch
+                    checked={appearance.expandPreviewOnHiddenActions}
+                    onChange={appearance.onExpandPreviewOnHiddenActionsChange}
+                    disabled={!appearance.autoHideMessageActions}
+                    ariaLabel="Expand message preview into hidden actions space"
                   />
                 </InlineSwitchRow>
                 <InlineSwitchRow label="Auto-hide text viewer header actions">

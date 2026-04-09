@@ -199,6 +199,7 @@ function createBaseProps(): Omit<
       regularFontSize: "13.5px" as const,
       useMonospaceForAllMessages: false,
       autoHideMessageActions: true,
+      expandPreviewOnHiddenActions: true,
       autoHideViewerHeaderActions: false,
       defaultViewerWrapMode: "nowrap" as ViewerWrapMode,
       defaultDiffViewMode: "unified" as DiffViewMode,
@@ -281,6 +282,7 @@ function createBaseProps(): Omit<
       onRegularFontSizeChange: vi.fn(),
       onUseMonospaceForAllMessagesChange: vi.fn(),
       onAutoHideMessageActionsChange: vi.fn(),
+      onExpandPreviewOnHiddenActionsChange: vi.fn(),
       onAutoHideViewerHeaderActionsChange: vi.fn(),
       onDefaultViewerWrapModeChange: vi.fn(),
       onDefaultDiffViewModeChange: vi.fn(),
@@ -596,6 +598,11 @@ describe("SettingsView", () => {
               initialProps.appearance.onUseMonospaceForAllMessagesChange,
             onAutoHideMessageActionsChange: (enabled) =>
               setAppearanceState((current) => ({ ...current, autoHideMessageActions: enabled })),
+            onExpandPreviewOnHiddenActionsChange: (enabled) =>
+              setAppearanceState((current) => ({
+                ...current,
+                expandPreviewOnHiddenActions: enabled,
+              })),
             onAutoHideViewerHeaderActionsChange: (enabled) =>
               setAppearanceState((current) => ({
                 ...current,

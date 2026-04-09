@@ -779,6 +779,7 @@ describe("bootstrapMainProcess", () => {
       messagePageSize: 50,
       useMonospaceForAllMessages: true,
       autoHideMessageActions: null,
+      expandPreviewOnHiddenActions: null,
       autoHideViewerHeaderActions: null,
       defaultViewerWrapMode: null,
       defaultDiffViewMode: null,

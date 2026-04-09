@@ -68,19 +68,24 @@ export function SettingsSwitch({
   onChange,
   ariaLabel,
   tone,
+  disabled,
 }: {
   checked: boolean;
   onChange: (checked: boolean) => void;
   ariaLabel: string;
   tone?: Provider;
+  disabled?: boolean;
 }) {
   return (
-    <label className={`settings-switch${tone ? ` settings-switch-${tone}` : ""}`}>
+    <label
+      className={`settings-switch${tone ? ` settings-switch-${tone}` : ""}${disabled ? " settings-switch-disabled" : ""}`}
+    >
       <input
         type="checkbox"
         checked={checked}
         onChange={(event) => onChange(event.target.checked)}
         aria-label={ariaLabel}
+        disabled={disabled}
       />
       <span className="settings-switch-track" aria-hidden>
         <span className="settings-switch-thumb" />

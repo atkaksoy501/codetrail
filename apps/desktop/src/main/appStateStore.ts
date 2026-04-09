@@ -351,6 +351,9 @@ function sanitizePaneState(
     sanitizeNumericValue(record.messagePageSize, MESSAGE_PAGE_SIZE_VALUES) ?? 50;
   const useMonospaceForAllMessages = sanitizeOptionalBoolean(record.useMonospaceForAllMessages);
   const autoHideMessageActions = sanitizeOptionalBoolean(record.autoHideMessageActions);
+  const expandPreviewOnHiddenActions = sanitizeOptionalBoolean(
+    record.expandPreviewOnHiddenActions,
+  );
   const autoHideViewerHeaderActions = sanitizeOptionalBoolean(record.autoHideViewerHeaderActions);
   const defaultViewerWrapMode =
     sanitizeStringValue(record.defaultViewerWrapMode, VIEWER_WRAP_MODE_VALUES) ?? "nowrap";
@@ -455,6 +458,7 @@ function sanitizePaneState(
     messagePageSize,
     ...(useMonospaceForAllMessages === null ? {} : { useMonospaceForAllMessages }),
     ...(autoHideMessageActions === null ? {} : { autoHideMessageActions }),
+    ...(expandPreviewOnHiddenActions === null ? {} : { expandPreviewOnHiddenActions }),
     ...(autoHideViewerHeaderActions === null ? {} : { autoHideViewerHeaderActions }),
     defaultViewerWrapMode,
     defaultDiffViewMode,

@@ -490,7 +490,7 @@ describe("TurnView", () => {
     expect(screen.getAllByRole("button", { name: "Collapse diff for controller.ts" })).toHaveLength(
       1,
     );
-    expect(screen.getAllByText("Wrap")).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "Wrap" })).toHaveLength(1);
     expect(container.textContent).not.toContain("========= Edit 1");
     expect(screen.queryByRole("button", { name: "Combined" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Sequence" })).toBeNull();
