@@ -48,8 +48,14 @@ export type IndexingConfig = {
   forceReindex?: boolean;
   discoveryConfig?: Partial<DiscoveryConfig>;
   enabledProviders?: Provider[];
+  projectScope?: ProjectIndexingScope;
   removeMissingSessionsDuringIncrementalIndexing?: boolean;
   systemMessageRegexRules?: SystemMessageRegexRuleOverrides;
+};
+
+export type ProjectIndexingScope = {
+  provider: Provider;
+  projectPath: string;
 };
 
 export type IndexingResult = {
@@ -101,6 +107,7 @@ export type PrefetchedJsonlChunk = {
 type IndexedFileRow = {
   file_path: string;
   provider: Provider;
+  project_path: string;
   session_identity: string;
   file_size: number;
   file_mtime_ms: number;
@@ -482,13 +489,20 @@ export function runIncrementalIndexing(
   const db = resolvedDependencies.openDatabase(config.dbPath);
   try {
     const schema = resolvedDependencies.ensureDatabaseSchema(db);
-    const discoveredFiles = normalizeDiscoveredProjectPaths(db, initiallyDiscoveredFiles);
+    const discoveredFiles = filterDiscoveredFilesByProjectScope(
+      normalizeDiscoveredProjectPaths(db, initiallyDiscoveredFiles),
+      config.projectScope,
+    );
     const discoveredByFilePath = new Map(discoveredFiles.map((file) => [file.filePath, file]));
 
     if (config.forceReindex) {
-      // Force reindex intentionally drops delete tombstones too so this pass fully trusts disk and
-      // rebuilds the indexed cache from scratch.
-      resolvedDependencies.clearIndexedData(db);
+      if (config.projectScope) {
+        clearProjectIndexedData(db, config.projectScope);
+      } else {
+        // Force reindex intentionally drops delete tombstones too so this pass fully trusts disk
+        // and rebuilds the indexed cache from scratch.
+        resolvedDependencies.clearIndexedData(db);
+      }
     }
 
     const existingRows = listIndexedFiles(db);
@@ -518,6 +532,9 @@ export function runIncrementalIndexing(
     if (!config.forceReindex) {
       const enabledProviderSet = new Set(discoveryConfig.enabledProviders);
       for (const existing of existingRows) {
+        if (!matchesProjectScope(existing.provider, existing.project_path, config.projectScope)) {
+          continue;
+        }
         if (discoveredByFilePath.has(existing.file_path)) {
           continue;
         }
@@ -600,11 +617,22 @@ export function indexChangedFiles(
   const db = resolvedDependencies.openDatabase(config.dbPath);
   try {
     const schema = resolvedDependencies.ensureDatabaseSchema(db);
-    const discoveredFiles = normalizeDiscoveredProjectPaths(db, initiallyDiscoveredFiles);
+    const discoveredFiles = filterDiscoveredFilesByProjectScope(
+      normalizeDiscoveredProjectPaths(db, initiallyDiscoveredFiles),
+      config.projectScope,
+    );
 
     // Query only the specific rows for the targeted files — no full table scans.
     const getIndexedFile = db.prepare(
-      "SELECT file_path, provider, session_identity, file_size, file_mtime_ms FROM indexed_files WHERE file_path = ?",
+      `SELECT
+         file_path,
+         provider,
+         project_path,
+         session_identity,
+         file_size,
+         file_mtime_ms
+       FROM indexed_files
+       WHERE file_path = ?`,
     );
     const getCheckpoint = db.prepare(
       `SELECT file_path, provider, session_id, session_identity, file_size, file_mtime_ms,
@@ -658,6 +686,16 @@ export function indexChangedFiles(
         const existingIndexedFile = getIndexedFile.get(filePath) as IndexedFileRow | undefined;
         if (
           existingIndexedFile &&
+          !matchesProjectScope(
+            existingIndexedFile.provider,
+            existingIndexedFile.project_path,
+            config.projectScope,
+          )
+        ) {
+          continue;
+        }
+        if (
+          existingIndexedFile &&
           enabledProviderSet.has(existingIndexedFile.provider) &&
           !config.removeMissingSessionsDuringIncrementalIndexing
         ) {
@@ -705,6 +743,33 @@ export function indexChangedFiles(
   } finally {
     db.close();
   }
+}
+
+function filterDiscoveredFilesByProjectScope(
+  discoveredFiles: ReturnType<typeof discoverSessionFiles>,
+  projectScope: ProjectIndexingScope | undefined,
+): ReturnType<typeof discoverSessionFiles> {
+  if (!projectScope) {
+    return discoveredFiles;
+  }
+  return discoveredFiles.filter((discovered) =>
+    matchesProjectScope(
+      discovered.provider,
+      discovered.canonicalProjectPath || discovered.projectPath,
+      projectScope,
+    ),
+  );
+}
+
+function matchesProjectScope(
+  provider: Provider,
+  projectPath: string,
+  projectScope: ProjectIndexingScope | undefined,
+): boolean {
+  if (!projectScope) {
+    return true;
+  }
+  return provider === projectScope.provider && projectPath === projectScope.projectPath;
 }
 
 function normalizeDiscoveredProjectPaths(
@@ -4152,7 +4217,7 @@ function hashFileSlice(filePath: string, start: number, length: number): string 
 function listIndexedFiles(db: SqliteDatabase): IndexedFileRow[] {
   return db
     .prepare(
-      `SELECT file_path, provider, session_identity, file_size, file_mtime_ms
+      `SELECT file_path, provider, project_path, session_identity, file_size, file_mtime_ms
        FROM indexed_files`,
     )
     .all() as IndexedFileRow[];
@@ -4181,6 +4246,62 @@ function deleteSessionDataForFilePath(db: SqliteDatabase, filePath: string): voi
   for (const row of rows) {
     deleteSessionData(db, row.id);
   }
+}
+
+function clearProjectIndexedData(db: SqliteDatabase, projectScope: ProjectIndexingScope): void {
+  const clear = db.transaction(() => {
+    const listProjectIds = db.prepare("SELECT id FROM projects WHERE provider = ? AND path = ?");
+    const listSessionsForProject = db.prepare(
+      "SELECT id, file_path FROM sessions WHERE project_id = ?",
+    );
+    const listIndexedFilesForProject = db.prepare(
+      "SELECT file_path FROM indexed_files WHERE provider = ? AND project_path = ?",
+    );
+    const deleteIndexedFile = db.prepare("DELETE FROM indexed_files WHERE file_path = ?");
+    const deleteIndexCheckpoint = db.prepare("DELETE FROM index_checkpoints WHERE file_path = ?");
+    const deleteProjectStats = db.prepare("DELETE FROM project_stats WHERE project_id = ?");
+    const deleteProject = db.prepare("DELETE FROM projects WHERE id = ?");
+    const projectIds = listProjectIds.all(
+      projectScope.provider,
+      projectScope.projectPath,
+    ) as Array<{ id: string }>;
+    const sessionRows = projectIds.flatMap(
+      (project) =>
+        listSessionsForProject.all(project.id) as Array<{ id: string; file_path: string }>,
+    );
+    const indexedFileRows = listIndexedFilesForProject.all(
+      projectScope.provider,
+      projectScope.projectPath,
+    ) as Array<{ file_path: string }>;
+
+    for (const row of sessionRows) {
+      deleteSessionData(db, row.id);
+    }
+
+    const filePaths = [
+      ...new Set([...sessionRows, ...indexedFileRows].map((row) => row.file_path)),
+    ];
+    for (const filePath of filePaths) {
+      deleteIndexedFile.run(filePath);
+      deleteIndexCheckpoint.run(filePath);
+    }
+
+    db.prepare("DELETE FROM deleted_sessions WHERE provider = ? AND project_path = ?").run(
+      projectScope.provider,
+      projectScope.projectPath,
+    );
+    db.prepare("DELETE FROM deleted_projects WHERE provider = ? AND project_path = ?").run(
+      projectScope.provider,
+      projectScope.projectPath,
+    );
+
+    for (const project of projectIds) {
+      deleteProjectStats.run(project.id);
+      deleteProject.run(project.id);
+    }
+  });
+
+  clear();
 }
 
 function removeDeletedSessionTombstone(db: SqliteDatabase, filePath: string): void {

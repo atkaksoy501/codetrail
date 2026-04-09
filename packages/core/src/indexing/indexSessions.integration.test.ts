@@ -2529,6 +2529,175 @@ describe("runIncrementalIndexing", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
+  it("force reindexes only the selected project and clears only its tombstones", () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-project-force-reindex-"));
+    const dbPath = join(dir, "index.db");
+    const claudeRoot = join(dir, ".claude", "projects");
+    const projectARoot = join(claudeRoot, "project-a");
+    const projectBRoot = join(claudeRoot, "project-b");
+    const projectAFile = join(projectARoot, "session-a.jsonl");
+    const projectBFile = join(projectBRoot, "session-b.jsonl");
+
+    mkdirSync(projectARoot, { recursive: true });
+    mkdirSync(projectBRoot, { recursive: true });
+    writeFileSync(
+      projectAFile,
+      `${JSON.stringify({
+        sessionId: "session-a",
+        type: "user",
+        cwd: "/workspace/project-a",
+        timestamp: "2026-02-27T10:00:00Z",
+        message: { role: "user", content: [{ type: "text", text: "Project A original" }] },
+      })}\n`,
+    );
+    writeFileSync(
+      projectBFile,
+      `${JSON.stringify({
+        sessionId: "session-b",
+        type: "user",
+        cwd: "/workspace/project-b",
+        timestamp: "2026-02-27T11:00:00Z",
+        message: { role: "user", content: [{ type: "text", text: "Project B original" }] },
+      })}\n`,
+    );
+
+    runIncrementalIndexing({ dbPath, discoveryConfig: createDiscoveryConfig(dir) });
+    tombstoneSession(dbPath, projectAFile);
+
+    let db = openDatabase(dbPath);
+    db.prepare(
+      `INSERT INTO deleted_projects (provider, project_path, deleted_at_ms)
+       VALUES (?, ?, ?)
+       ON CONFLICT(provider, project_path) DO UPDATE SET deleted_at_ms = excluded.deleted_at_ms`,
+    ).run("claude", "/workspace/project-a", Date.now());
+    db.prepare(
+      `INSERT INTO deleted_projects (provider, project_path, deleted_at_ms)
+       VALUES (?, ?, ?)
+       ON CONFLICT(provider, project_path) DO UPDATE SET deleted_at_ms = excluded.deleted_at_ms`,
+    ).run("claude", "/workspace/project-b", Date.now());
+    db.close();
+
+    writeFileSync(
+      projectAFile,
+      `${JSON.stringify({
+        sessionId: "session-a",
+        type: "user",
+        cwd: "/workspace/project-a",
+        timestamp: "2026-02-27T10:00:00Z",
+        message: { role: "user", content: [{ type: "text", text: "Project A reindexed" }] },
+      })}\n`,
+    );
+
+    const result = runIncrementalIndexing({
+      dbPath,
+      discoveryConfig: createDiscoveryConfig(dir),
+      forceReindex: true,
+      projectScope: {
+        provider: "claude",
+        projectPath: "/workspace/project-a",
+      },
+    });
+
+    expect(result.indexedFiles).toBe(1);
+
+    db = openDatabase(dbPath);
+    const sessions = db
+      .prepare("SELECT file_path FROM sessions ORDER BY file_path")
+      .all() as Array<{ file_path: string }>;
+    const projectAMessages = db
+      .prepare(
+        `SELECT m.content
+         FROM messages m
+         JOIN sessions s ON s.id = m.session_id
+         WHERE s.file_path = ?`,
+      )
+      .all(projectAFile) as Array<{ content: string }>;
+    const projectBMessages = db
+      .prepare(
+        `SELECT m.content
+         FROM messages m
+         JOIN sessions s ON s.id = m.session_id
+         WHERE s.file_path = ?`,
+      )
+      .all(projectBFile) as Array<{ content: string }>;
+    const deletedProjectRows = db
+      .prepare("SELECT project_path FROM deleted_projects ORDER BY project_path")
+      .all() as Array<{ project_path: string }>;
+    const deletedSessionCount = (
+      db
+        .prepare("SELECT COUNT(*) as c FROM deleted_sessions WHERE file_path = ?")
+        .get(projectAFile) as { c: number }
+    ).c;
+    db.close();
+
+    expect(sessions.map((session) => session.file_path)).toEqual([projectAFile, projectBFile]);
+    expect(projectAMessages.map((message) => message.content)).toEqual(["Project A reindexed"]);
+    expect(projectBMessages.map((message) => message.content)).toEqual(["Project B original"]);
+    expect(deletedProjectRows.map((row) => row.project_path)).toEqual(["/workspace/project-b"]);
+    expect(deletedSessionCount).toBe(0);
+
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("limits missing-session cleanup to the selected project scope", () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-project-cleanup-scope-"));
+    const dbPath = join(dir, "index.db");
+    const claudeRoot = join(dir, ".claude", "projects");
+    const projectARoot = join(claudeRoot, "project-a");
+    const projectBRoot = join(claudeRoot, "project-b");
+    const projectAFile = join(projectARoot, "session-a.jsonl");
+    const projectBFile = join(projectBRoot, "session-b.jsonl");
+
+    mkdirSync(projectARoot, { recursive: true });
+    mkdirSync(projectBRoot, { recursive: true });
+    writeFileSync(
+      projectAFile,
+      `${JSON.stringify({
+        sessionId: "session-a",
+        type: "user",
+        cwd: "/workspace/project-a",
+        timestamp: "2026-02-27T10:00:00Z",
+        message: { role: "user", content: [{ type: "text", text: "Project A" }] },
+      })}\n`,
+    );
+    writeFileSync(
+      projectBFile,
+      `${JSON.stringify({
+        sessionId: "session-b",
+        type: "user",
+        cwd: "/workspace/project-b",
+        timestamp: "2026-02-27T11:00:00Z",
+        message: { role: "user", content: [{ type: "text", text: "Project B" }] },
+      })}\n`,
+    );
+
+    runIncrementalIndexing({ dbPath, discoveryConfig: createDiscoveryConfig(dir) });
+    rmSync(projectBFile, { force: true });
+
+    runIncrementalIndexing({
+      dbPath,
+      discoveryConfig: createDiscoveryConfig(dir),
+      projectScope: {
+        provider: "claude",
+        projectPath: "/workspace/project-a",
+      },
+      removeMissingSessionsDuringIncrementalIndexing: true,
+    });
+
+    const db = openDatabase(dbPath);
+    const remainingSessions = db
+      .prepare("SELECT file_path FROM sessions ORDER BY file_path")
+      .all() as Array<{ file_path: string }>;
+    db.close();
+
+    expect(remainingSessions.map((session) => session.file_path)).toEqual([
+      projectAFile,
+      projectBFile,
+    ]);
+
+    rmSync(dir, { recursive: true, force: true });
+  });
+
   it("groups Codex worktree sessions under the canonical project path", () => {
     const dir = mkdtempSync(join(tmpdir(), "codetrail-index-worktree-grouping-"));
     const dbPath = join(dir, "index.db");

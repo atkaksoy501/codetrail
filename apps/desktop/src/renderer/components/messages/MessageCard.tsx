@@ -14,6 +14,7 @@ import { copyTextToClipboard } from "../../lib/clipboard";
 import { usePaneFocus } from "../../lib/paneFocusController";
 import { useShortcutRegistry } from "../../lib/shortcutRegistry";
 import { compactPath, formatDate, prettyCategory } from "../../lib/viewUtils";
+import { ToolbarIcon } from "../ToolbarIcon";
 
 import { MessageContent } from "./MessageContent";
 import { type ParsedMessageToolPayload, parseMessageToolPayload } from "./messageToolPayload";
@@ -277,7 +278,8 @@ function MessageCardComponent({
               aria-label="Reveal this message in session"
               title="Reveal in Session"
             >
-              Reveal in Session
+              <ToolbarIcon name="folderOpen" />
+              <span>Session</span>
             </button>
           ) : null}
           {onRevealInProject ? (
@@ -289,7 +291,8 @@ function MessageCardComponent({
               aria-label="Reveal this message in project"
               title="Reveal in Project"
             >
-              Reveal in Project
+              <ToolbarIcon name="folderOpen" />
+              <span>Project</span>
             </button>
           ) : null}
           {onRevealInBookmarks ? (
@@ -307,13 +310,14 @@ function MessageCardComponent({
           {onRevealInTurn ? (
             <button
               type="button"
-              className="message-action-button"
+              className="message-action-button message-reveal-button"
               {...preserveMessagePaneFocusProps}
               onClick={handleRevealInTurnButtonClick}
               aria-label="Reveal this message in turn"
               title="Reveal in Turn"
             >
-              Reveal in Turn
+              <ToolbarIcon name="folderOpen" />
+              <span>Turn</span>
             </button>
           ) : null}
           {onToggleBookmark ? (

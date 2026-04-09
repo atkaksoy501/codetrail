@@ -10,8 +10,10 @@ import {
   type DiscoveryConfig,
   type IndexingFileIssue,
   type IndexingNotice,
+  type IpcRequest,
   type IpcResponse,
   PROVIDER_LIST,
+  type ProjectIndexingScope,
   type Provider,
   createProviderRecord,
   hasFileExtension,
@@ -58,6 +60,7 @@ export type BootstrapOptions = {
   runStartupIndexing?: boolean;
   instrumentationEnabled?: boolean;
   appStateStore?: AppStateStore;
+  onCommandStateChanged?: (state: IpcRequest<"app:setCommandState">) => void;
   onIndexingFileIssue?: (issue: IndexingFileIssue) => void;
   onIndexingNotice?: (notice: IndexingNotice) => void;
   onBackgroundError?: (message: string, error: unknown, details?: Record<string, unknown>) => void;
@@ -258,6 +261,16 @@ export async function bootstrapMainProcess(
     providers
       ? providers.filter((provider) => getEnabledProviders().includes(provider))
       : [...getEnabledProviders()];
+  const resolveProjectScope = (projectId: string): ProjectIndexingScope | null => {
+    const project = queryService.getProjectById(projectId);
+    if (!project) {
+      return null;
+    }
+    return {
+      provider: project.provider,
+      projectPath: project.path,
+    };
+  };
   const isLiveWatchEnabled = (): boolean =>
     options.appStateStore?.getPaneState()?.liveWatchEnabled ?? true;
   let liveSessionStoreSync: Promise<void> = Promise.resolve();
@@ -522,12 +535,30 @@ export async function bootstrapMainProcess(
       "db:getSchemaVersion": () => ({
         schemaVersion: dbBootstrap.schemaVersion,
       }),
+      "app:setCommandState": (payload) => {
+        options.onCommandStateChanged?.(payload);
+        return { ok: true };
+      },
       "indexer:refresh": async (payload) => {
         invalidateAllowedRootsCache();
+        if (payload.projectId && !payload.force) {
+          throw new Error("Project-scoped reindex is only supported for force reindex.");
+        }
+        const projectScope = payload.projectId ? resolveProjectScope(payload.projectId) : null;
+        if (payload.projectId && !projectScope) {
+          throw new Error("This project no longer exists in the database.");
+        }
         const job = await indexingRunner.enqueue(
-          { force: payload.force },
           {
-            source: payload.force ? "manual_force_reindex" : "manual_incremental",
+            force: payload.force,
+            ...(projectScope ? { projectScope } : {}),
+          },
+          {
+            source: payload.projectId
+              ? "manual_project_force_reindex"
+              : payload.force
+                ? "manual_force_reindex"
+                : "manual_incremental",
           },
         );
         return { jobId: job.jobId };

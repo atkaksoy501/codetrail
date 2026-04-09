@@ -20,6 +20,7 @@ describe("WatchStatsStore", () => {
         startupIncremental: emptyBucket(),
         manualIncremental: emptyBucket(),
         manualForceReindex: emptyBucket(),
+        manualProjectForceReindex: emptyBucket(),
         watchTriggered: emptyBucket(),
         watchTargeted: emptyBucket(),
         watchFallbackIncremental: emptyBucket(),
@@ -68,6 +69,7 @@ describe("WatchStatsStore", () => {
           lastDurationMs: 150,
         },
         manualForceReindex: emptyBucket(),
+        manualProjectForceReindex: emptyBucket(),
         watchTriggered: {
           runs: 2,
           failedRuns: 1,

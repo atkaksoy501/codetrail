@@ -148,6 +148,7 @@ function createProjectPaneProps(
     canCopyProjectDetails: true,
     canDeleteProject: true,
     canOpenProjectLocation: true,
+    canReindexProject: true,
   };
   const actions: ComponentProps<typeof ProjectPane>["actions"] = {
     onToggleCollapsed: vi.fn(),
@@ -163,6 +164,7 @@ function createProjectPaneProps(
     onCopySession: vi.fn(),
     onSelectProject: vi.fn(),
     onOpenProjectLocation: vi.fn(),
+    onReindexProject: vi.fn(),
     onOpenSessionLocation: vi.fn(),
     onDeleteProject: vi.fn(),
     onDeleteSession: vi.fn(),
@@ -277,7 +279,7 @@ describe("ProjectPane", () => {
     expect(screen.getByText("+3")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Collapse Projects pane" })).toHaveAttribute(
       "title",
-      "Collapse Projects  ⌘B",
+      "Toggle Projects pane  ⌘B",
     );
 
     await user.click(screen.getByRole("button", { name: "Collapse Projects pane" }));
@@ -307,6 +309,39 @@ describe("ProjectPane", () => {
     expect(onOpenProjectLocation).not.toHaveBeenCalled();
   });
 
+  it("offers project reindex from the project options menu for the selected project", async () => {
+    const user = userEvent.setup();
+    const onReindexProject = vi.fn();
+
+    renderProjectPane({
+      data: {
+        selectedProjectId: "project_1",
+      },
+      actions: {
+        onReindexProject,
+      },
+    });
+
+    await user.click(screen.getByRole("button", { name: "Project options" }));
+    await user.click(screen.getByRole("button", { name: "Reindex Project…" }));
+
+    expect(onReindexProject).toHaveBeenCalledWith("project_1");
+  });
+
+  it("disables project reindex in the project options menu when unavailable", async () => {
+    const user = userEvent.setup();
+
+    renderProjectPane({
+      capabilities: {
+        canReindexProject: false,
+      },
+    });
+
+    await user.click(screen.getByRole("button", { name: "Project options" }));
+
+    expect(screen.getByRole("button", { name: "Reindex Project…" })).toBeDisabled();
+  });
+
   it("hides sort and overflow actions when collapsed", () => {
     renderProjectPane({
       data: {
@@ -327,7 +362,7 @@ describe("ProjectPane", () => {
     expect(screen.getByRole("button", { name: "Expand Projects pane" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Expand Projects pane" })).toHaveAttribute(
       "title",
-      "Expand Projects  ⌘B",
+      "Toggle Projects pane  ⌘B",
     );
     expect(screen.queryByRole("button", { name: "Project sort field: Last Active" })).toBeNull();
     expect(
@@ -742,11 +777,13 @@ describe("ProjectPane", () => {
     const user = userEvent.setup();
     const onSelectProject = vi.fn();
     const onOpenProjectLocation = vi.fn();
+    const onReindexProject = vi.fn();
 
     renderProjectPane({
       actions: {
         onSelectProject,
         onOpenProjectLocation,
+        onReindexProject,
       },
     });
 
@@ -754,13 +791,27 @@ describe("ProjectPane", () => {
 
     expect(screen.getByRole("menuitem", { name: "Copy" })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: "Open Folder" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Reindex Project…" })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: "Delete" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("menuitem", { name: "Open Folder" }));
 
     expect(onSelectProject).toHaveBeenCalledWith("project_2");
     expect(onOpenProjectLocation).toHaveBeenCalledWith("project_2");
+    expect(onReindexProject).not.toHaveBeenCalled();
     expect(screen.queryByRole("menuitem", { name: "Delete" })).toBeNull();
+  });
+
+  it("disables the project reindex context-menu item when reindex is unavailable", () => {
+    renderProjectPane({
+      capabilities: {
+        canReindexProject: false,
+      },
+    });
+
+    fireEvent.contextMenu(screen.getByRole("button", { name: /Project Two/i }));
+
+    expect(screen.getByRole("menuitem", { name: "Reindex Project…" })).toBeDisabled();
   });
 
   it("renders compact folder groups in tree mode and only toggles folders on root click", async () => {

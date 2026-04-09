@@ -49,6 +49,7 @@ import {
   PaneFocusProvider,
   useCreatePaneFocusController,
 } from "./lib/paneFocusController";
+import { canActOnSelectedProject } from "./lib/projectActionAvailability";
 import { useShortcutRegistry } from "./lib/shortcutRegistry";
 import { toErrorMessage } from "./lib/viewUtils";
 import { ViewerExternalAppsProvider } from "./lib/viewerExternalAppsContext";
@@ -155,6 +156,7 @@ export function App({
   const [focusMode, setFocusMode] = useState(false);
   const [advancedSearchEnabled, setAdvancedSearchEnabled] = useState(false);
   const [showReindexConfirm, setShowReindexConfirm] = useState(false);
+  const [pendingProjectReindexId, setPendingProjectReindexId] = useState<string | null>(null);
   const [pendingProviderDisable, setPendingProviderDisable] = useState<Provider | null>(null);
   const [pendingMissingSessionCleanupEnable, setPendingMissingSessionCleanupEnable] =
     useState(false);
@@ -495,6 +497,27 @@ export function App({
       history.treeProjectSessionsByProjectId,
     ],
   );
+  const handleOpenProjectReindex = useCallback(
+    (projectId?: string) => {
+      if (refreshing || indexingInBackground) {
+        return;
+      }
+      const uiSelectedProject =
+        history.sortedProjects.find((project) => project.id === history.uiSelectedProjectId) ??
+        null;
+      const targetProject = resolveExplicitOrSelectedItem(
+        history.sortedProjects,
+        projectId,
+        history.uiSelectedProjectId,
+        uiSelectedProject,
+      );
+      if (!targetProject) {
+        return;
+      }
+      setPendingProjectReindexId(targetProject.id);
+    },
+    [history.sortedProjects, history.uiSelectedProjectId, indexingInBackground, refreshing],
+  );
   const handleConfirmHistoryDelete = useCallback(async () => {
     if (!pendingHistoryDelete || historyDeletePending) {
       return;
@@ -751,15 +774,18 @@ export function App({
   }, [mainView, paneFocus.focusHistoryPane, scheduleFocusFrame]);
 
   const handleRefresh = useCallback(
-    async (force: boolean, source: "manual" | "auto" = "manual") => {
+    async (force: boolean, source: "manual" | "auto" = "manual", projectId?: string) => {
       setRefreshing(true);
       try {
         skipNextStatusDrivenReloadRef.current = true;
-        await codetrail.invoke("indexer:refresh", { force });
+        await codetrail.invoke("indexer:refresh", {
+          force,
+          ...(projectId ? { projectId } : {}),
+        });
         await reloadIndexedData(source);
       } catch (error) {
         skipNextStatusDrivenReloadRef.current = false;
-        logError("Refresh failed", error);
+        logError(projectId ? "Project reindex failed" : "Refresh failed", error);
       } finally {
         setRefreshing(false);
       }
@@ -777,8 +803,37 @@ export function App({
   const handleForceRefresh = useCallback(async () => {
     await handleRefresh(true);
   }, [handleRefresh]);
+  const handleProjectForceRefresh = useCallback(
+    async (projectId: string) => {
+      await handleRefresh(true, "manual", projectId);
+    },
+    [handleRefresh],
+  );
   const indexing = refreshing || indexingInBackground;
+  const canReindexAnyProject = !indexing;
+  const hasProjectReindexTarget = canActOnSelectedProject({
+    selectedProject:
+      history.sortedProjects.find((project) => project.id === history.uiSelectedProjectId) ??
+      history.selectedProject,
+    projectViewMode: history.projectViewMode,
+    treeFocusedRow: history.treeFocusedRow,
+  });
+  const canReindexSelectedProject =
+    mainView === "history" && hasProjectReindexTarget && canReindexAnyProject;
+  const pendingProjectReindex =
+    history.sortedProjects.find((project) => project.id === pendingProjectReindexId) ?? null;
   const watchStrategyActive = isWatchRefreshStrategy(refreshStrategy);
+
+  useEffect(() => {
+    void codetrail
+      .invoke("app:setCommandState", {
+        canReindexSelectedProject,
+      })
+      .catch((error: unknown) => {
+        logError("Failed updating app command state", error);
+      });
+  }, [canReindexSelectedProject, codetrail, logError]);
+
   const handleAddSystemMessageRegexRule = useCallback(
     (provider: Provider) => {
       history.setSystemMessageRegexRules((value) => ({
@@ -855,6 +910,11 @@ export function App({
         case "refresh-now":
           void handleIncrementalRefresh();
           break;
+        case "reindex-selected-project":
+          if (canReindexSelectedProject && history.uiSelectedProjectId) {
+            setPendingProjectReindexId(history.uiSelectedProjectId);
+          }
+          break;
         case "toggle-auto-refresh":
           updateRefreshStrategy((value) => (value !== "off" ? "off" : preferredRefreshStrategy));
           break;
@@ -892,6 +952,7 @@ export function App({
     codetrail,
     focusGlobalSearch,
     focusSessionSearch,
+    canReindexSelectedProject,
     handleIncrementalRefresh,
     history,
     mainView,
@@ -1256,6 +1317,8 @@ export function App({
                   applyZoomAction={appearance.applyZoomAction}
                   setZoomPercent={appearance.setZoomPercent}
                   logError={logError}
+                  canReindexProject={canReindexAnyProject}
+                  onReindexProject={handleOpenProjectReindex}
                   onDeleteProject={handleOpenProjectDelete}
                   onDeleteSession={handleOpenSessionDelete}
                   liveSessions={liveStatus?.sessions ?? []}
@@ -1422,6 +1485,31 @@ export function App({
               void handleForceRefresh();
             }}
             onCancel={() => setShowReindexConfirm(false)}
+          />
+          <ConfirmDialog
+            open={pendingProjectReindexId !== null}
+            title="Reindex Project"
+            message={`This will re-read all enabled provider session files for ${
+              pendingProjectReindex?.name || pendingProjectReindex?.path || "the selected project"
+            } only and rebuild indexed history for that project only. If some old sessions for this project exist only in the database because their raw transcript files were already cleaned up, they can disappear after this reindex. Other projects are unaffected. Continue?`}
+            confirmLabel="Reindex Project"
+            cancelLabel="Cancel"
+            onConfirm={() => {
+              const projectId = pendingProjectReindexId;
+              setPendingProjectReindexId(null);
+              if (!projectId) {
+                return;
+              }
+              if (!pendingProjectReindex) {
+                logError(
+                  "Project reindex failed",
+                  new Error("This project no longer exists in the database."),
+                );
+                return;
+              }
+              void handleProjectForceRefresh(projectId);
+            }}
+            onCancel={() => setPendingProjectReindexId(null)}
           />
           <ConfirmDialog
             open={pendingProviderDisable !== null}

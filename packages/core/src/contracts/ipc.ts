@@ -345,6 +345,9 @@ export const indexerConfigBaseSchema = z.object({
 });
 
 const indexerConfigSchema = z.object(makeAllNullable(indexerConfigBaseSchema.shape));
+const appCommandStateSchema = z.object({
+  canReindexSelectedProject: z.boolean(),
+});
 
 const uiZoomResponseSchema = z.object({
   percent: z.number().int().positive(),
@@ -398,6 +401,7 @@ const diagnosticsSourceTypeSchema = z.enum([
   "startup_incremental",
   "manual_incremental",
   "manual_force_reindex",
+  "manual_project_force_reindex",
   "watch_targeted",
   "watch_fallback_incremental",
   "watch_initial_scan",
@@ -417,6 +421,7 @@ const watcherStatsResponseSchema = z.object({
     startupIncremental: diagnosticsSourceSchema,
     manualIncremental: diagnosticsSourceSchema,
     manualForceReindex: diagnosticsSourceSchema,
+    manualProjectForceReindex: diagnosticsSourceSchema,
     watchTriggered: diagnosticsSourceSchema,
     watchTargeted: diagnosticsSourceSchema,
     watchFallbackIncremental: diagnosticsSourceSchema,
@@ -450,6 +455,12 @@ export const ipcContractSchemas = {
       ok: z.literal(true),
     }),
   },
+  "app:setCommandState": {
+    request: appCommandStateSchema,
+    response: z.object({
+      ok: z.literal(true),
+    }),
+  },
   "app:getSettingsInfo": {
     request: z.object({}),
     response: settingsInfoResponseSchema,
@@ -463,6 +474,7 @@ export const ipcContractSchemas = {
   "indexer:refresh": {
     request: z.object({
       force: z.boolean().default(false),
+      projectId: z.string().min(1).optional(),
     }),
     response: z.object({
       jobId: z.string().min(1),

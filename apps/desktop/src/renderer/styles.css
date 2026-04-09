@@ -3280,7 +3280,13 @@ button svg *,
 }
 
 .message-reveal-button {
+  gap: 4px;
   white-space: nowrap;
+}
+
+.message-reveal-button .toolbar-icon {
+  width: 12px;
+  height: 12px;
 }
 
 .message-preview {

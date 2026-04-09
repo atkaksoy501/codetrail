@@ -54,6 +54,7 @@ describe("registerIpcHandlers", () => {
       {
         "app:getHealth": () => ({ status: "ok", version: "0.1.0" }),
         "app:flushState": () => ({ ok: true }),
+        "app:setCommandState": () => ({ ok: true }),
         "app:getSettingsInfo": () => settingsInfo,
         "db:getSchemaVersion": () => ({ schemaVersion: 1 }),
         "indexer:refresh": (payload) => ({ jobId: payload.force ? "force-1" : "normal-1" }),
@@ -228,6 +229,7 @@ describe("registerIpcHandlers", () => {
             startupIncremental: makeDiagnosticsBucket(),
             manualIncremental: makeDiagnosticsBucket(),
             manualForceReindex: makeDiagnosticsBucket(),
+            manualProjectForceReindex: makeDiagnosticsBucket(),
             watchTriggered: makeDiagnosticsBucket(),
             watchTargeted: makeDiagnosticsBucket(),
             watchFallbackIncremental: makeDiagnosticsBucket(),
@@ -288,6 +290,7 @@ describe("registerIpcHandlers", () => {
       {
         "app:getHealth": () => ({ status: "ok", version: "0.1.0" }),
         "app:flushState": () => ({ ok: true }),
+        "app:setCommandState": () => ({ ok: true }),
         "app:getSettingsInfo": () => settingsInfo,
         "db:getSchemaVersion": () => ({ schemaVersion: 1 }),
         "indexer:refresh": () => ({ jobId: "refresh-1" }),
@@ -443,6 +446,7 @@ describe("registerIpcHandlers", () => {
             startupIncremental: makeDiagnosticsBucket(),
             manualIncremental: makeDiagnosticsBucket(),
             manualForceReindex: makeDiagnosticsBucket(),
+            manualProjectForceReindex: makeDiagnosticsBucket(),
             watchTriggered: makeDiagnosticsBucket(),
             watchTargeted: makeDiagnosticsBucket(),
             watchFallbackIncremental: makeDiagnosticsBucket(),

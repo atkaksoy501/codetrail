@@ -8,6 +8,7 @@ type ContextMenuItem = {
   id: string;
   label: string;
   icon: ToolbarIconName;
+  disabled?: boolean;
   tone?: "default" | "danger";
   onSelect: () => void;
 };
@@ -108,7 +109,11 @@ export function HistoryListContextMenu({
               className={`tb-dropdown-item history-list-context-item${
                 item.tone === "danger" ? " danger" : ""
               }`}
+              disabled={item.disabled}
               onClick={() => {
+                if (item.disabled) {
+                  return;
+                }
                 item.onSelect();
                 onClose();
               }}

@@ -30,6 +30,7 @@ export class WatchStatsStore {
     startup_incremental: createBucket(),
     manual_incremental: createBucket(),
     manual_force_reindex: createBucket(),
+    manual_project_force_reindex: createBucket(),
     watch_targeted: createBucket(),
     watch_fallback_incremental: createBucket(),
     watch_initial_scan: createBucket(),
@@ -95,6 +96,7 @@ export class WatchStatsStore {
         startupIncremental: this.buckets.startup_incremental,
         manualIncremental: this.buckets.manual_incremental,
         manualForceReindex: this.buckets.manual_force_reindex,
+        manualProjectForceReindex: this.buckets.manual_project_force_reindex,
         watchTriggered: combineBuckets(
           this.buckets.watch_targeted,
           this.buckets.watch_fallback_incremental,

@@ -65,6 +65,7 @@ const diagnostics = {
       maxDurationMs: 220,
     }),
     manualForceReindex: makeDiagnosticsBucket(),
+    manualProjectForceReindex: makeDiagnosticsBucket(),
     watchTriggered: makeDiagnosticsBucket({
       runs: 3,
       averageDurationMs: 80,

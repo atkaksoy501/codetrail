@@ -7,6 +7,7 @@ type BuildAppMenuTemplateOptions = {
   appName: string;
   platform: DesktopPlatform;
   isDevelopment: boolean;
+  canReindexSelectedProject: boolean;
   dispatchAppCommand: (command: AppCommand) => void;
   reloadFocusedWindow: () => void;
   forceReloadFocusedWindow: () => void;
@@ -25,14 +26,15 @@ function createRoleMenuItem(
 
 function createCommandMenuItem(
   label: string,
-  accelerator: string,
+  accelerator: string | null,
   command: AppCommand,
   dispatchAppCommand: (command: AppCommand) => void,
+  options: { enabled?: boolean } = {},
 ): MenuItemConstructorOptions {
   return {
     label,
-    accelerator,
-    registerAccelerator: false,
+    ...(accelerator ? { accelerator, registerAccelerator: false } : {}),
+    enabled: options.enabled ?? true,
     click: () => {
       dispatchAppCommand(command);
     },
@@ -43,6 +45,7 @@ export function buildAppMenuTemplate({
   appName,
   platform,
   isDevelopment,
+  canReindexSelectedProject,
   dispatchAppCommand,
   reloadFocusedWindow,
   forceReloadFocusedWindow,
@@ -119,6 +122,15 @@ export function buildAppMenuTemplate({
           "CommandOrControl+R",
           "refresh-now",
           dispatchAppCommand,
+        ),
+        createCommandMenuItem(
+          "Reindex Selected Project…",
+          null,
+          "reindex-selected-project",
+          dispatchAppCommand,
+          {
+            enabled: canReindexSelectedProject,
+          },
         ),
         createCommandMenuItem(
           "Toggle Auto-Refresh",

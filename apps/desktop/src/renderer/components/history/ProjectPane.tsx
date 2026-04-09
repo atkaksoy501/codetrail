@@ -84,7 +84,8 @@ export function ProjectPane({
     singleClickProjectsExpand = false,
     hideSessionsPaneInTreeView = false,
   } = preferences;
-  const { canCopyProjectDetails, canOpenProjectLocation, canDeleteProject } = capabilities;
+  const { canCopyProjectDetails, canOpenProjectLocation, canReindexProject, canDeleteProject } =
+    capabilities;
   const {
     onToggleCollapsed,
     onProjectQueryChange,
@@ -108,6 +109,7 @@ export function ProjectPane({
     onToggleAllFolders = () => {},
     onToggleProjectExpansion = () => {},
     onOpenProjectLocation,
+    onReindexProject,
     onOpenSessionLocation,
     onDeleteProject,
     onDeleteSession,
@@ -490,6 +492,7 @@ export function ProjectPane({
         allVisibleFoldersExpanded={allVisibleFoldersExpanded}
         canCopyProjectDetails={canCopyProjectDetails}
         canOpenProjectLocation={canOpenProjectLocation}
+        canReindexProject={canReindexProject}
         canDeleteProject={canDeleteProject}
         onToggleCollapsed={onToggleCollapsed}
         onSetSortField={onSetSortField}
@@ -500,9 +503,10 @@ export function ProjectPane({
         onToggleAllFolders={handleToggleAllFolders}
         onToggleSingleClickFoldersExpand={onToggleSingleClickFoldersExpand}
         onToggleSingleClickProjectsExpand={onToggleSingleClickProjectsExpand}
-        onCopyProjectDetails={() => onCopyProjectDetails()}
-        onOpenProjectLocation={() => onOpenProjectLocation()}
-        onDeleteProject={() => onDeleteProject()}
+        onCopyProjectDetails={() => onCopyProjectDetails(selectedProjectId || undefined)}
+        onOpenProjectLocation={() => onOpenProjectLocation(selectedProjectId || undefined)}
+        onReindexProject={() => onReindexProject(selectedProjectId || undefined)}
+        onDeleteProject={() => onDeleteProject(selectedProjectId || undefined)}
       />
       <div className="search-wrapper">
         <div className="search-box">
@@ -658,6 +662,15 @@ export function ProjectPane({
                     label: "Open Folder",
                     icon: "folderOpen",
                     onSelect: () => onOpenProjectLocation(contextMenu.projectId),
+                  },
+                ],
+                [
+                  {
+                    id: "reindex-project",
+                    label: "Reindex Project…",
+                    icon: "reindex",
+                    disabled: !canReindexProject,
+                    onSelect: () => onReindexProject(contextMenu.projectId),
                   },
                 ],
                 [

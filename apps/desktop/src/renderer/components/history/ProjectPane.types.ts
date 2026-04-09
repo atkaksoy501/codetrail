@@ -78,6 +78,7 @@ export type ProjectPaneSelectionOptions = {
 export type ProjectPaneCapabilities = {
   canCopyProjectDetails: boolean;
   canOpenProjectLocation: boolean;
+  canReindexProject: boolean;
   canDeleteProject: boolean;
 };
 
@@ -108,6 +109,7 @@ export type ProjectPaneActions = {
   onToggleAllFolders?: () => void;
   onToggleProjectExpansion?: (projectId: string) => void;
   onOpenProjectLocation: (projectId?: string) => void;
+  onReindexProject: (projectId?: string) => void;
   onOpenSessionLocation: (sessionId?: string) => void;
   onDeleteProject: (projectId?: string) => void;
   onDeleteSession: (sessionId?: string) => void;

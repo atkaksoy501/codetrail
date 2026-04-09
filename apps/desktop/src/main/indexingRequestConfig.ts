@@ -1,17 +1,20 @@
 import type {
   PrefetchedJsonlChunk,
+  ProjectIndexingScope,
   Provider,
   SystemMessageRegexRuleOverrides,
 } from "@codetrail/core";
 
 export type SharedIndexingRequestSettings = {
   enabledProviders?: Provider[];
+  projectScope?: ProjectIndexingScope;
   removeMissingSessionsDuringIncrementalIndexing?: boolean;
   systemMessageRegexRules?: SystemMessageRegexRuleOverrides;
 };
 
 type SharedIndexingRequestSettingsInput = {
   enabledProviders?: Provider[] | undefined;
+  projectScope?: ProjectIndexingScope | undefined;
   removeMissingSessionsDuringIncrementalIndexing?: boolean | undefined;
   systemMessageRegexRules?: SystemMessageRegexRuleOverrides | undefined;
 };
@@ -37,6 +40,9 @@ export function buildSharedIndexingRequestSettings(
   const next: SharedIndexingRequestSettings = {};
   if (settings.enabledProviders) {
     next.enabledProviders = settings.enabledProviders;
+  }
+  if (settings.projectScope) {
+    next.projectScope = settings.projectScope;
   }
   if (settings.removeMissingSessionsDuringIncrementalIndexing !== undefined) {
     next.removeMissingSessionsDuringIncrementalIndexing =

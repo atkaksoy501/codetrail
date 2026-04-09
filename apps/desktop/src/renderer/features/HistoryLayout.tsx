@@ -9,6 +9,7 @@ import { copyTextToClipboard } from "../lib/clipboard";
 import { findSessionSummaryById } from "../lib/historySessionLookup";
 import { usePaneFocus } from "../lib/paneFocusController";
 import { openInFileManager, openPath } from "../lib/pathActions";
+import { canActOnSelectedProject } from "../lib/projectActionAvailability";
 import { HistoryDetailPane } from "./HistoryDetailPane";
 import { formatProjectDetails, formatSessionDetails } from "./historyCopyFormat";
 import type { useHistoryController } from "./useHistoryController";
@@ -113,6 +114,8 @@ export function HistoryLayout({
   applyZoomAction,
   setZoomPercent,
   logError,
+  canReindexProject,
+  onReindexProject,
   onDeleteProject,
   onDeleteSession,
   liveSessions = [],
@@ -128,6 +131,8 @@ export function HistoryLayout({
   applyZoomAction: (action: "in" | "out" | "reset") => Promise<void>;
   setZoomPercent: (percent: number) => Promise<void>;
   logError: (context: string, error: unknown) => void;
+  canReindexProject: boolean;
+  onReindexProject: (projectId?: string) => void;
   onDeleteProject: (projectId?: string) => void;
   onDeleteSession: (sessionId?: string) => void;
   liveSessions?: WatchLiveStatusResponse["sessions"];
@@ -136,6 +141,14 @@ export function HistoryLayout({
 }) {
   const paneFocus = usePaneFocus();
   const liveTraceProps = recordLiveUiTrace ? { recordLiveUiTrace } : {};
+  const uiSelectedProject =
+    history.sortedProjects.find((project) => project.id === history.uiSelectedProjectId) ??
+    history.selectedProject;
+  const canActOnUiSelectedProject = canActOnSelectedProject({
+    selectedProject: uiSelectedProject,
+    projectViewMode: history.projectViewMode,
+    treeFocusedRow: history.treeFocusedRow,
+  });
 
   return (
     <div
@@ -211,6 +224,7 @@ export function HistoryLayout({
           onToggleFolder: history.handleToggleFolder,
           onToggleAllFolders: history.handleToggleAllFolders,
           onToggleProjectExpansion: history.handleToggleProjectExpansion,
+          onReindexProject,
           onDeleteProject,
           onOpenProjectLocation: (projectId) =>
             openProjectLocationById(history, logError, projectId),
@@ -219,11 +233,10 @@ export function HistoryLayout({
           onDeleteSession,
         }}
         capabilities={{
-          canCopyProjectDetails: Boolean(history.selectedProject),
-          canOpenProjectLocation: Boolean(history.selectedProject?.path?.trim()),
-          canDeleteProject:
-            Boolean(history.selectedProject) &&
-            !(history.projectViewMode === "tree" && history.treeFocusedRow?.kind === "folder"),
+          canCopyProjectDetails: Boolean(uiSelectedProject),
+          canOpenProjectLocation: Boolean(uiSelectedProject?.path?.trim()),
+          canReindexProject: canReindexProject && canActOnUiSelectedProject,
+          canDeleteProject: canActOnUiSelectedProject,
         }}
       />
 

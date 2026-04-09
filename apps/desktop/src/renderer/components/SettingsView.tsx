@@ -1078,6 +1078,12 @@ function DiagnosticsTab({
             maxDurationMs={diagnostics.jobs.manualForceReindex.maxDurationMs}
           />
           <DiagnosticsRow
+            label="Manual project force reindex"
+            runs={diagnostics.jobs.manualProjectForceReindex.runs}
+            averageDurationMs={diagnostics.jobs.manualProjectForceReindex.averageDurationMs}
+            maxDurationMs={diagnostics.jobs.manualProjectForceReindex.maxDurationMs}
+          />
+          <DiagnosticsRow
             label="Watch-triggered total"
             runs={diagnostics.jobs.watchTriggered.runs}
             averageDurationMs={diagnostics.jobs.watchTriggered.averageDurationMs}

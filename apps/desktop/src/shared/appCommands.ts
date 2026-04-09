@@ -6,6 +6,7 @@ export const APP_COMMAND_VALUES = [
   "search-current-view",
   "open-global-search",
   "refresh-now",
+  "reindex-selected-project",
   "toggle-auto-refresh",
   "zoom-in",
   "zoom-out",

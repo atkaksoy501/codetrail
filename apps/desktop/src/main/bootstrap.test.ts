@@ -36,6 +36,7 @@ const {
   mockBrowserWindowFromWebContents,
   mockBrowserWindowGetAllWindows,
   mockListProjects,
+  mockGetProjectById,
   mockGetProjectCombinedDetail,
   mockListSessions,
   mockGetSessionDetail,
@@ -127,6 +128,19 @@ const {
         },
       ],
     })),
+    mockGetProjectById: vi.fn((projectId: string) =>
+      projectId === "project-1"
+        ? {
+            id: "project-1",
+            provider: "claude",
+            name: "Project One",
+            path: "/workspace/project-one",
+            sessionCount: 1,
+            messageCount: 1,
+            lastActivity: "2026-03-01T12:00:00.000Z",
+          }
+        : null,
+    ),
     mockGetProjectCombinedDetail: vi.fn((payload) => ({
       projectId: payload.projectId,
       messages: [],
@@ -369,6 +383,7 @@ describe("bootstrapMainProcess", () => {
     }));
     mockCreateQueryService.mockImplementation(() => ({
       listProjects: mockListProjects,
+      getProjectById: mockGetProjectById,
       getProjectCombinedDetail: mockGetProjectCombinedDetail,
       listSessions: mockListSessions,
       listSessionsMany: vi.fn(),
@@ -558,6 +573,50 @@ describe("bootstrapMainProcess", () => {
       activeJobId: null,
       completedJobs: 0,
     });
+  });
+
+  it("resolves project-scoped force reindex requests before enqueueing", async () => {
+    await bootstrapMainProcess({ runStartupIndexing: false });
+
+    await expect(
+      getRequiredHandler(
+        handlers,
+        "indexer:refresh",
+      )({
+        force: true,
+        projectId: "project-1",
+      }),
+    ).resolves.toEqual({
+      jobId: "job-1",
+    });
+
+    expect(mockEnqueue).toHaveBeenCalledWith(
+      {
+        force: true,
+        projectScope: {
+          provider: "claude",
+          projectPath: "/workspace/project-one",
+        },
+      },
+      {
+        source: "manual_project_force_reindex",
+      },
+    );
+  });
+
+  it("rejects stale project-scoped reindex requests", async () => {
+    await bootstrapMainProcess({ runStartupIndexing: false });
+    mockGetProjectById.mockReturnValueOnce(null);
+
+    await expect(
+      getRequiredHandler(
+        handlers,
+        "indexer:refresh",
+      )({
+        force: true,
+        projectId: "missing-project",
+      }),
+    ).rejects.toThrow("This project no longer exists in the database.");
   });
 
   it("manages path actions for files, directories and fallback errors", async () => {

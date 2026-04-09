@@ -40,6 +40,7 @@ type WorkerRequest = {
   forceReindex?: boolean;
   changedFilePaths?: string[];
   enabledProviders?: Provider[] | undefined;
+  projectScope?: { provider: Provider; projectPath: string } | undefined;
   systemMessageRegexRules?: Partial<SystemMessageRegexRules> | undefined;
   removeMissingSessionsDuringIncrementalIndexing?: boolean | undefined;
 };
@@ -298,6 +299,36 @@ describe("WorkerIndexingRunner", () => {
         dbPath: "/tmp/codetrail.db",
         forceReindex: false,
         enabledProviders: ["codex"],
+      },
+      {},
+    );
+  });
+
+  it("passes an explicit project scope into indexing jobs", async () => {
+    const runIncrementalIndexing = vi.fn(() => makeIndexingResult());
+    const bookmarkHarness = createBookmarkStoreHarness();
+    const runner = new WorkerIndexingRunner("/tmp/codetrail.db", {
+      runIncrementalIndexing,
+      resolveWorkerUrl: () => null,
+      createBookmarkStore: bookmarkHarness.createBookmarkStore,
+    });
+
+    await runner.enqueue({
+      force: true,
+      projectScope: {
+        provider: "claude",
+        projectPath: "/workspace/project-one",
+      },
+    });
+
+    expect(runIncrementalIndexing).toHaveBeenCalledWith(
+      {
+        dbPath: "/tmp/codetrail.db",
+        forceReindex: true,
+        projectScope: {
+          provider: "claude",
+          projectPath: "/workspace/project-one",
+        },
       },
       {},
     );

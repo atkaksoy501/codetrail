@@ -56,6 +56,7 @@ type ProjectPaneHeaderProps = {
   allVisibleFoldersExpanded: boolean;
   canCopyProjectDetails: boolean;
   canOpenProjectLocation: boolean;
+  canReindexProject: boolean;
   canDeleteProject: boolean;
   onToggleCollapsed: () => void;
   onSetSortField: (value: ProjectSortField) => void;
@@ -68,6 +69,7 @@ type ProjectPaneHeaderProps = {
   onToggleSingleClickProjectsExpand: () => void;
   onCopyProjectDetails: () => void;
   onOpenProjectLocation: () => void;
+  onReindexProject: () => void;
   onDeleteProject: () => void;
 };
 
@@ -83,6 +85,7 @@ export function ProjectPaneHeader({
   allVisibleFoldersExpanded,
   canCopyProjectDetails,
   canOpenProjectLocation,
+  canReindexProject,
   canDeleteProject,
   onToggleCollapsed,
   onSetSortField,
@@ -95,6 +98,7 @@ export function ProjectPaneHeader({
   onToggleSingleClickProjectsExpand,
   onCopyProjectDetails,
   onOpenProjectLocation,
+  onReindexProject,
   onDeleteProject,
 }: ProjectPaneHeaderProps) {
   const paneFocus = usePaneFocus();
@@ -313,6 +317,21 @@ export function ProjectPaneHeader({
                       <ToolbarIcon name="folderOpen" />
                     </span>
                     <span>Open Folder</span>
+                  </button>
+                  <div className="tb-dropdown-separator" />
+                  <button
+                    type="button"
+                    className="tb-dropdown-item project-pane-overflow-item"
+                    onClick={() => {
+                      onReindexProject();
+                      setOverflowMenuOpen(false);
+                    }}
+                    disabled={!canReindexProject}
+                  >
+                    <span className="project-pane-overflow-icon" aria-hidden>
+                      <ToolbarIcon name="reindex" />
+                    </span>
+                    <span>Reindex Project…</span>
                   </button>
                   <div className="tb-dropdown-separator" />
                   <button

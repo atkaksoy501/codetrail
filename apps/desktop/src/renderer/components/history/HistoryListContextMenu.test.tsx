@@ -121,4 +121,35 @@ describe("HistoryListContextMenu", () => {
     expect(onSelect).toHaveBeenCalledTimes(1);
     expect(onClose).toHaveBeenCalledTimes(1);
   });
+
+  it("does not dispatch disabled items", async () => {
+    const user = userEvent.setup();
+    const onSelect = vi.fn();
+    const onClose = vi.fn();
+
+    renderWithPaneFocus(
+      <HistoryListContextMenu
+        open
+        x={24}
+        y={24}
+        onClose={onClose}
+        groups={[
+          [
+            {
+              id: "reindex",
+              label: "Reindex Project…",
+              icon: "reindex",
+              disabled: true,
+              onSelect,
+            },
+          ],
+        ]}
+      />,
+    );
+
+    await user.click(screen.getByRole("menuitem", { name: "Reindex Project…" }));
+
+    expect(onSelect).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+  });
 });

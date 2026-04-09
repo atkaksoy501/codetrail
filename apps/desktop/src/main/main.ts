@@ -275,6 +275,9 @@ if (hasSingleInstanceLock) {
     const appStateStore = createAppStateStore(join(app.getPath("userData"), "ui-state.json"), {
       platform: mainPlatform.platform,
     });
+    let commandState = {
+      canReindexSelectedProject: false,
+    };
     const updateApplicationMenu = () => {
       Menu.setApplicationMenu(
         Menu.buildFromTemplate(
@@ -282,6 +285,7 @@ if (hasSingleInstanceLock) {
             appName: APP_NAME,
             platform: mainPlatform.platform,
             isDevelopment: !app.isPackaged,
+            canReindexSelectedProject: commandState.canReindexSelectedProject,
             dispatchAppCommand,
             reloadFocusedWindow: () => {
               withFocusedWindow((window) => {
@@ -314,6 +318,10 @@ if (hasSingleInstanceLock) {
       await bootstrapMainProcess({
         instrumentationEnabled: verboseLoggingEnabled,
         appStateStore,
+        onCommandStateChanged: (nextState) => {
+          commandState = nextState;
+          updateApplicationMenu();
+        },
         onIndexingFileIssue: (issue) => {
           logAppError("indexing file failure", issue.error, {
             provider: issue.provider,

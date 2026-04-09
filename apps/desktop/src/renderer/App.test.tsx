@@ -2706,8 +2706,15 @@ describe("App shell", () => {
     });
 
     await user.click(screen.getByRole("button", { name: "Force reindex" }));
-    expect(screen.getByText("Force Reindex")).toBeInTheDocument();
-    expect(screen.getByText(/they can disappear after this reindex/i)).toBeInTheDocument();
+    const forceReindexHeading = screen.getByRole("heading", { name: "Force Reindex" });
+    const forceReindexDialog = forceReindexHeading.closest("dialog");
+    expect(forceReindexDialog).not.toBeNull();
+    if (!forceReindexDialog) {
+      throw new Error("Expected force reindex dialog");
+    }
+    expect(
+      within(forceReindexDialog).getByText(/they can disappear after this reindex/i),
+    ).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Cancel" }));
 
@@ -2717,10 +2724,222 @@ describe("App shell", () => {
     await waitFor(() => {
       const refreshCalls = client.invoke.mock.calls.filter(
         ([channel, payload]) =>
-          channel === "indexer:refresh" && (payload as { force?: boolean }).force === true,
+          channel === "indexer:refresh" &&
+          (payload as { force?: boolean; projectId?: string }).force === true &&
+          !(payload as { projectId?: string }).projectId,
       );
       expect(refreshCalls.length).toBeGreaterThan(0);
     });
+  });
+
+  it("requires confirmation before project reindex from the project context menu", async () => {
+    installScrollIntoViewMock();
+    installDialogMock();
+    const user = userEvent.setup();
+    const client = createAppClient();
+
+    renderWithClient(<App />, client);
+
+    await waitFor(() => {
+      expect(screen.getByText("Project One")).toBeInTheDocument();
+    });
+
+    fireEvent.contextMenu(screen.getByRole("button", { name: /Project One/i }));
+    await user.click(screen.getByRole("menuitem", { name: "Reindex Project…" }));
+
+    expect(screen.getByRole("heading", { name: "Reindex Project" })).toBeInTheDocument();
+    expect(screen.getByText(/rebuild indexed history for that project only/i)).toBeInTheDocument();
+    expect(screen.getByText(/other projects are unaffected/i)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Reindex Project" }));
+
+    await waitFor(() => {
+      expect(client.invoke).toHaveBeenCalledWith("indexer:refresh", {
+        force: true,
+        projectId: "project_1",
+      });
+    });
+  });
+
+  it("publishes selected-project reindex availability from the visible project selection", async () => {
+    installScrollIntoViewMock();
+    const user = userEvent.setup();
+    const client = createAppClient();
+
+    renderWithClient(
+      <App
+        initialPaneState={
+          {
+            selectedProjectId: "",
+          } as PaneStateSnapshot
+        }
+      />,
+      client,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Project One")).toBeInTheDocument();
+    });
+
+    await waitFor(() => {
+      expect(client.invoke).toHaveBeenCalledWith("app:setCommandState", {
+        canReindexSelectedProject: false,
+      });
+    });
+
+    await user.click(screen.getByRole("button", { name: /Project One/i }));
+
+    await waitFor(() => {
+      expect(client.invoke).toHaveBeenCalledWith("app:setCommandState", {
+        canReindexSelectedProject: true,
+      });
+    });
+  });
+
+  it("disables selected-project reindex when a folder row is focused in tree view", async () => {
+    installScrollIntoViewMock();
+    const user = userEvent.setup();
+    const client = createAppClient();
+
+    renderWithClient(
+      <App
+        initialPaneState={
+          {
+            projectViewMode: "tree",
+          } as PaneStateSnapshot
+        }
+      />,
+      client,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Project One")).toBeInTheDocument();
+    });
+
+    await waitFor(() => {
+      expect(client.invoke).toHaveBeenCalledWith("app:setCommandState", {
+        canReindexSelectedProject: true,
+      });
+    });
+
+    await user.click(screen.getByRole("button", { name: /project-one, 1 projects/i }));
+
+    await waitFor(() => {
+      expect(client.invoke).toHaveBeenCalledWith("app:setCommandState", {
+        canReindexSelectedProject: false,
+      });
+    });
+  });
+
+  it("keeps project reindex available while watch refresh is active", async () => {
+    installScrollIntoViewMock();
+    const client = createAppClient();
+
+    renderWithClient(
+      <App
+        initialPaneState={
+          {
+            currentAutoRefreshStrategy: "watch-1s",
+            preferredAutoRefreshStrategy: "watch-1s",
+          } as PaneStateSnapshot
+        }
+      />,
+      client,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Project One")).toBeInTheDocument();
+    });
+
+    fireEvent.contextMenu(screen.getByRole("button", { name: /Project One/i }));
+
+    expect(screen.getByRole("menuitem", { name: "Reindex Project…" })).toBeEnabled();
+  });
+
+  it("disables project reindex while background indexing is active", async () => {
+    installScrollIntoViewMock();
+    const client = createAppClient({
+      "indexer:getStatus": () => ({
+        running: true,
+        queuedJobs: 1,
+        activeJobId: "refresh-1",
+      }),
+    });
+
+    renderWithClient(<App />, client);
+
+    await waitFor(() => {
+      expect(screen.getByText("Project One")).toBeInTheDocument();
+    });
+
+    fireEvent.contextMenu(screen.getByRole("button", { name: /Project One/i }));
+
+    expect(screen.getByRole("menuitem", { name: "Reindex Project…" })).toBeDisabled();
+  });
+
+  it("opens the project reindex dialog from the app command for the selected project", async () => {
+    installScrollIntoViewMock();
+    installDialogMock();
+    const user = userEvent.setup();
+    const listeners: Array<(command: string) => void> = [];
+    const client = createAppClient();
+    client.onAppCommand.mockImplementation((listener) => {
+      listeners.push(listener as (command: string) => void);
+      return () => undefined;
+    });
+
+    renderWithClient(<App />, client);
+
+    await waitFor(() => {
+      expect(screen.getByText("Project One")).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: /Project One/i }));
+
+    await act(async () => {
+      listeners.at(-1)?.("reindex-selected-project");
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Reindex Project" })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "Reindex Project" }));
+
+    await waitFor(() => {
+      expect(client.invoke).toHaveBeenCalledWith("indexer:refresh", {
+        force: true,
+        projectId: "project_1",
+      });
+    });
+  });
+
+  it("ignores the project reindex app command outside the history view", async () => {
+    installScrollIntoViewMock();
+    installDialogMock();
+    const user = userEvent.setup();
+    const listeners: Array<(command: string) => void> = [];
+    const client = createAppClient();
+    client.onAppCommand.mockImplementation((listener) => {
+      listeners.push(listener as (command: string) => void);
+      return () => undefined;
+    });
+
+    renderWithClient(<App />, client);
+
+    await waitFor(() => {
+      expect(screen.getByText("Project One")).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: "Open settings" }));
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Database Maintenance" })).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      listeners.at(-1)?.("reindex-selected-project");
+    });
+
+    expect(screen.queryByRole("heading", { name: "Reindex Project" })).toBeNull();
   });
 
   it("restores the last selected auto-refresh mode with Cmd+Shift+R", async () => {
@@ -4036,10 +4255,15 @@ describe("App shell", () => {
     await user.click(screen.getByRole("button", { name: "Project options" }));
 
     const deleteButton = screen.getByRole("button", { name: "Delete" });
+    const reindexButton = screen.getByRole("button", { name: "Reindex Project…" });
     expect(deleteButton).toBeDisabled();
+    expect(reindexButton).toBeDisabled();
 
     await user.click(deleteButton);
     expect(screen.queryByText("Delete Project From Code Trail?")).toBeNull();
+
+    await user.click(reindexButton);
+    expect(screen.queryByRole("heading", { name: "Reindex Project" })).toBeNull();
   });
 
   it("routes tree session context menu actions through the real session handlers", async () => {

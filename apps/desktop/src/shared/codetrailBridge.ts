@@ -7,6 +7,9 @@ import type { HistoryExportProgressPayload } from "./historyExport";
 export type CodetrailBridge = {
   platform: DesktopPlatform;
   appFlushState(payload: IpcRequestInput<"app:flushState">): Promise<IpcResponse<"app:flushState">>;
+  appSetCommandState(
+    payload: IpcRequestInput<"app:setCommandState">,
+  ): Promise<IpcResponse<"app:setCommandState">>;
   appGetSettingsInfo(
     payload: IpcRequestInput<"app:getSettingsInfo">,
   ): Promise<IpcResponse<"app:getSettingsInfo">>;
@@ -100,6 +103,7 @@ export type CodetrailBridge = {
 
 export const CHANNEL_TO_BRIDGE_METHOD = {
   "app:flushState": "appFlushState",
+  "app:setCommandState": "appSetCommandState",
   "app:getSettingsInfo": "appGetSettingsInfo",
   "bookmarks:getStates": "bookmarksGetStates",
   "bookmarks:listProject": "bookmarksListProject",

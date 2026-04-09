@@ -176,6 +176,7 @@ type TurnNavigationMetadata = {
 
 export type QueryService = {
   listProjects: (request: IpcRequest<"projects:list">) => IpcResponse<"projects:list">;
+  getProjectById: (projectId: string) => IpcResponse<"projects:list">["projects"][number] | null;
   getProjectCombinedDetail: (
     request: IpcRequest<"projects:getCombinedDetail">,
   ) => IpcResponse<"projects:getCombinedDetail">;
@@ -244,6 +245,7 @@ export function createQueryServiceFromDb(
   let closed = false;
   return {
     listProjects: (request) => listProjectsWithDatabase(db, bookmarkStore, request),
+    getProjectById: (projectId) => getProjectByIdWithDatabase(db, bookmarkStore, projectId),
     getProjectCombinedDetail: (request) => getProjectCombinedDetailWithDatabase(db, request),
     deleteProject: (request) => deleteProjectWithStore(db, bookmarkStore, request),
     listSessions: (request) => listSessionsWithDatabase(db, bookmarkStore, request),
@@ -500,21 +502,66 @@ function listProjectsWithDatabase(
     bookmarkStore.countProjectBookmarksByProjectIds?.(rows.map((row) => row.id)) ?? {};
 
   return {
-    projects: rows.map((row) => ({
-      id: row.id,
-      provider: row.provider,
-      name: row.name,
-      path: row.path,
-      providerProjectKey: row.provider_project_key,
-      repositoryUrl: row.repository_url,
-      resolutionState: row.resolution_state,
-      resolutionSource: row.resolution_source,
-      metadataJson: row.metadata_json,
-      sessionCount: row.session_count,
-      messageCount: row.message_count,
-      bookmarkCount: bookmarkCounts[row.id] ?? bookmarkStore.countProjectBookmarks(row.id),
-      lastActivity: row.last_activity,
-    })),
+    projects: rows.map((row) =>
+      mapProjectSummaryRow(
+        row,
+        bookmarkCounts[row.id] ?? bookmarkStore.countProjectBookmarks(row.id),
+      ),
+    ),
+  };
+}
+
+function getProjectByIdWithDatabase(
+  db: DatabaseHandle,
+  bookmarkStore: BookmarkStore,
+  projectId: string,
+): IpcResponse<"projects:list">["projects"][number] | null {
+  const row = db
+    .prepare(
+      `SELECT
+         p.id,
+         p.provider,
+         p.name,
+         p.path,
+         p.provider_project_key,
+         p.repository_url,
+         p.resolution_state,
+         p.resolution_source,
+         p.metadata_json,
+         COALESCE(ps.session_count, 0) as session_count,
+         COALESCE(ps.message_count, 0) as message_count,
+         ps.last_activity as last_activity
+       FROM projects p
+       LEFT JOIN project_stats ps ON ps.project_id = p.id
+       WHERE p.id = ?`,
+    )
+    .get(projectId) as ProjectSummaryRow | undefined;
+
+  if (!row) {
+    return null;
+  }
+
+  return mapProjectSummaryRow(row, bookmarkStore.countProjectBookmarks(row.id));
+}
+
+function mapProjectSummaryRow(
+  row: ProjectSummaryRow,
+  bookmarkCount: number,
+): IpcResponse<"projects:list">["projects"][number] {
+  return {
+    id: row.id,
+    provider: row.provider,
+    name: row.name,
+    path: row.path,
+    providerProjectKey: row.provider_project_key,
+    repositoryUrl: row.repository_url,
+    resolutionState: row.resolution_state,
+    resolutionSource: row.resolution_source,
+    metadataJson: row.metadata_json,
+    sessionCount: row.session_count,
+    messageCount: row.message_count,
+    bookmarkCount,
+    lastActivity: row.last_activity,
   };
 }
 

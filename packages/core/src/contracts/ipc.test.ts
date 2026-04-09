@@ -42,6 +42,10 @@ const channelExamples: Record<IpcChannel, ChannelExample> = {
     request: {},
     response: { ok: true },
   },
+  "app:setCommandState": {
+    request: { canReindexSelectedProject: false },
+    response: { ok: true },
+  },
   "app:getSettingsInfo": {
     request: {},
     response: createSettingsInfoFixture({
@@ -56,7 +60,7 @@ const channelExamples: Record<IpcChannel, ChannelExample> = {
     response: { schemaVersion: 1 },
   },
   "indexer:refresh": {
-    request: { force: false },
+    request: { force: true, projectId: "project_1" },
     response: { jobId: "refresh-1" },
   },
   "indexer:getStatus": {
@@ -501,6 +505,7 @@ const channelExamples: Record<IpcChannel, ChannelExample> = {
         startupIncremental: makeDiagnosticsBucket(),
         manualIncremental: makeDiagnosticsBucket(),
         manualForceReindex: makeDiagnosticsBucket(),
+        manualProjectForceReindex: makeDiagnosticsBucket(),
         watchTriggered: makeDiagnosticsBucket(),
         watchTargeted: makeDiagnosticsBucket(),
         watchFallbackIncremental: makeDiagnosticsBucket(),
@@ -632,6 +637,15 @@ describe("ipc contracts", () => {
     expect(ipcContractSchemas["indexer:refresh"].request.safeParse({ force: "yes" }).success).toBe(
       false,
     );
+    expect(
+      ipcContractSchemas["indexer:refresh"].request.safeParse({ force: true, projectId: "" })
+        .success,
+    ).toBe(false);
+    expect(
+      ipcContractSchemas["app:setCommandState"].request.safeParse({
+        canReindexSelectedProject: "yes",
+      }).success,
+    ).toBe(false);
     expect(ipcContractSchemas["ui:setZoom"].response.safeParse({ percent: 0 }).success).toBe(false);
   });
 });

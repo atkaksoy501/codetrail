@@ -93,6 +93,9 @@ function createRendererClient(handlers: Record<string, ChannelHandler>) {
     if (channel === "app:flushState") {
       return { ok: true };
     }
+    if (channel === "app:setCommandState") {
+      return { ok: true };
+    }
     if (channel === "app:getSettingsInfo") {
       return cloneValue(SETTINGS_INFO);
     }
@@ -154,6 +157,7 @@ function createRendererClient(handlers: Record<string, ChannelHandler>) {
             maxDurationMs: 140,
           }),
           manualForceReindex: makeDiagnosticsBucket(),
+          manualProjectForceReindex: makeDiagnosticsBucket(),
           watchTriggered: makeDiagnosticsBucket({
             runs: 2,
             averageDurationMs: 90,

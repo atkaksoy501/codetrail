@@ -8,6 +8,7 @@ import {
   type IndexingFileIssue,
   type IndexingNotice,
   type PrefetchedJsonlChunk,
+  type ProjectIndexingScope,
   type Provider,
   type SystemMessageRegexRuleOverrides,
   clearProvidersData,
@@ -34,6 +35,7 @@ import { getCurrentMainPlatformConfig, shouldUseBundledIndexingWorker } from "./
 export type RefreshJobRequest = {
   force: boolean;
   providers?: Provider[];
+  projectScope?: ProjectIndexingScope;
 };
 
 export type RefreshJobResponse = {
@@ -222,6 +224,7 @@ export class WorkerIndexingRunner {
       forceReindex: request.force,
       ...buildSharedIndexingRequestSettings({
         enabledProviders,
+        projectScope: request.projectScope,
         removeMissingSessionsDuringIncrementalIndexing,
         systemMessageRegexRules,
       }),

@@ -21,6 +21,7 @@ function invoke<C extends IpcChannel>(
 const api: CodetrailBridge = {
   platform: normalizeDesktopPlatform(process.platform),
   appFlushState: (payload) => invoke("app:flushState", payload),
+  appSetCommandState: (payload) => invoke("app:setCommandState", payload),
   appGetSettingsInfo: (payload) => invoke("app:getSettingsInfo", payload),
   bookmarksGetStates: (payload) => invoke("bookmarks:getStates", payload),
   bookmarksListProject: (payload) => invoke("bookmarks:listProject", payload),

@@ -24,6 +24,7 @@ describe("buildAppMenuTemplate", () => {
       appName: "Code Trail",
       platform: "darwin",
       isDevelopment: false,
+      canReindexSelectedProject: false,
       dispatchAppCommand: vi.fn(),
       reloadFocusedWindow: vi.fn(),
       forceReloadFocusedWindow: vi.fn(),
@@ -37,6 +38,7 @@ describe("buildAppMenuTemplate", () => {
     );
 
     expect(viewItems).toContain("Refresh Now");
+    expect(viewItems).toContain("Reindex Selected Project…");
     expect(viewItems).toContain("Toggle Auto-Refresh");
     expect(viewItems).toContain("Zoom In");
     expect(viewItems).toContain("Zoom Out");
@@ -55,6 +57,7 @@ describe("buildAppMenuTemplate", () => {
       appName: "Code Trail",
       platform: "darwin",
       isDevelopment: true,
+      canReindexSelectedProject: false,
       dispatchAppCommand: vi.fn(),
       reloadFocusedWindow: vi.fn(),
       forceReloadFocusedWindow: vi.fn(),
@@ -83,6 +86,7 @@ describe("buildAppMenuTemplate", () => {
       appName: "Code Trail",
       platform: "darwin",
       isDevelopment: false,
+      canReindexSelectedProject: false,
       dispatchAppCommand: vi.fn(),
       reloadFocusedWindow: vi.fn(),
       forceReloadFocusedWindow: vi.fn(),
@@ -104,6 +108,7 @@ describe("buildAppMenuTemplate", () => {
       appName: "Code Trail",
       platform: "win32",
       isDevelopment: false,
+      canReindexSelectedProject: false,
       dispatchAppCommand: vi.fn(),
       reloadFocusedWindow: vi.fn(),
       forceReloadFocusedWindow: vi.fn(),
@@ -127,5 +132,38 @@ describe("buildAppMenuTemplate", () => {
     expect(windowItems).toContain("minimize");
     expect(windowItems).toContain("close");
     expect(windowItems).not.toContain("front");
+  });
+
+  it("enables the project reindex menu item from runtime command state", () => {
+    const enabledTemplate = buildAppMenuTemplate({
+      appName: "Code Trail",
+      platform: "darwin",
+      isDevelopment: false,
+      canReindexSelectedProject: true,
+      dispatchAppCommand: vi.fn(),
+      reloadFocusedWindow: vi.fn(),
+      forceReloadFocusedWindow: vi.fn(),
+      toggleFocusedWindowDevTools: vi.fn(),
+    });
+    const disabledTemplate = buildAppMenuTemplate({
+      appName: "Code Trail",
+      platform: "darwin",
+      isDevelopment: false,
+      canReindexSelectedProject: false,
+      dispatchAppCommand: vi.fn(),
+      reloadFocusedWindow: vi.fn(),
+      forceReloadFocusedWindow: vi.fn(),
+      toggleFocusedWindowDevTools: vi.fn(),
+    });
+
+    const enabledItem = getSubmenuItems(getTopLevelMenu(enabledTemplate, "View")).find(
+      (item) => "label" in item && item.label === "Reindex Selected Project…",
+    );
+    const disabledItem = getSubmenuItems(getTopLevelMenu(disabledTemplate, "View")).find(
+      (item) => "label" in item && item.label === "Reindex Selected Project…",
+    );
+
+    expect(enabledItem).toMatchObject({ enabled: true });
+    expect(disabledItem).toMatchObject({ enabled: false });
   });
 });
