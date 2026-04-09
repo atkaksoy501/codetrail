@@ -98,16 +98,16 @@ export function useAppearanceController({
     initialPaneState?.expandPreviewOnHiddenActions ?? true,
   );
   const [autoHideViewerHeaderActions, setAutoHideViewerHeaderActions] = useState(
-    initialPaneState?.autoHideViewerHeaderActions ?? false,
+    initialPaneState?.autoHideViewerHeaderActions ?? true,
   );
   const [defaultViewerWrapMode, setDefaultViewerWrapMode] = useState<ViewerWrapMode>(
-    initialPaneState?.defaultViewerWrapMode ?? "nowrap",
+    initialPaneState?.defaultViewerWrapMode ?? "wrap",
   );
   const [defaultDiffViewMode, setDefaultDiffViewMode] = useState<DiffViewMode>(
     initialPaneState?.defaultDiffViewMode ?? "unified",
   );
   const [collapseMultiFileToolDiffs, setCollapseMultiFileToolDiffs] = useState(
-    initialPaneState?.collapseMultiFileToolDiffs ?? false,
+    initialPaneState?.collapseMultiFileToolDiffs ?? true,
   );
   const [externalTools, setExternalTools] = useState<ExternalToolConfig[]>(
     initialPaneState?.externalTools ?? defaultExternalTools,

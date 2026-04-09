@@ -354,11 +354,11 @@ function sanitizePaneState(
   const expandPreviewOnHiddenActions = sanitizeOptionalBoolean(record.expandPreviewOnHiddenActions);
   const autoHideViewerHeaderActions = sanitizeOptionalBoolean(record.autoHideViewerHeaderActions);
   const defaultViewerWrapMode =
-    sanitizeStringValue(record.defaultViewerWrapMode, VIEWER_WRAP_MODE_VALUES) ?? "nowrap";
+    sanitizeStringValue(record.defaultViewerWrapMode, VIEWER_WRAP_MODE_VALUES) ?? "wrap";
   const defaultDiffViewMode =
     sanitizeStringValue(record.defaultDiffViewMode, DIFF_VIEW_MODE_VALUES) ?? "unified";
   const collapseMultiFileToolDiffs =
-    sanitizeOptionalBoolean(record.collapseMultiFileToolDiffs) ?? false;
+    sanitizeOptionalBoolean(record.collapseMultiFileToolDiffs) ?? true;
   const externalTools =
     sanitizeExternalToolConfigs(record.externalTools, platform) ??
     createDefaultExternalTools(platform);

@@ -210,9 +210,9 @@ describe("AppStateStore", () => {
       darkShikiTheme: "github-dark-default",
       lightShikiTheme: "github-light-default",
       messagePageSize: 50,
-      defaultViewerWrapMode: "nowrap",
+      defaultViewerWrapMode: "wrap",
       defaultDiffViewMode: "unified",
-      collapseMultiFileToolDiffs: false,
+      collapseMultiFileToolDiffs: true,
       externalTools: createDefaultExternalTools(),
     });
   });
@@ -235,9 +235,9 @@ describe("AppStateStore", () => {
       darkShikiTheme: "github-dark-default",
       lightShikiTheme: "github-light-default",
       messagePageSize: 50,
-      defaultViewerWrapMode: "nowrap",
+      defaultViewerWrapMode: "wrap",
       defaultDiffViewMode: "unified",
-      collapseMultiFileToolDiffs: false,
+      collapseMultiFileToolDiffs: true,
       externalTools: createDefaultExternalTools(),
     });
     expect(fakeTimer.timer.setTimeout).not.toHaveBeenCalled();
@@ -266,9 +266,9 @@ describe("AppStateStore", () => {
       darkShikiTheme: "github-dark-default",
       lightShikiTheme: "github-light-default",
       messagePageSize: 50,
-      defaultViewerWrapMode: "nowrap",
+      defaultViewerWrapMode: "wrap",
       defaultDiffViewMode: "unified",
-      collapseMultiFileToolDiffs: false,
+      collapseMultiFileToolDiffs: true,
       externalTools: createDefaultExternalTools(),
     });
     expect(JSON.parse(fs.files.get(filePath) ?? "{}")).toEqual({
@@ -279,9 +279,9 @@ describe("AppStateStore", () => {
         darkShikiTheme: "github-dark-default",
         lightShikiTheme: "github-light-default",
         messagePageSize: 50,
-        defaultViewerWrapMode: "nowrap",
+        defaultViewerWrapMode: "wrap",
         defaultDiffViewMode: "unified",
-        collapseMultiFileToolDiffs: false,
+        collapseMultiFileToolDiffs: true,
         externalTools: createDefaultExternalTools(),
       },
     });
@@ -346,9 +346,9 @@ describe("AppStateStore", () => {
       darkShikiTheme: "github-dark-default",
       lightShikiTheme: "github-light-default",
       messagePageSize: 50,
-      defaultViewerWrapMode: "nowrap",
+      defaultViewerWrapMode: "wrap",
       defaultDiffViewMode: "unified",
-      collapseMultiFileToolDiffs: false,
+      collapseMultiFileToolDiffs: true,
       projectProviders: ["claude"],
       historyCategories: ["assistant"],
       externalTools: createDefaultExternalTools(),
@@ -382,9 +382,9 @@ describe("AppStateStore", () => {
       darkShikiTheme: "github-dark-default",
       lightShikiTheme: "github-light-default",
       messagePageSize: 50,
-      defaultViewerWrapMode: "nowrap",
+      defaultViewerWrapMode: "wrap",
       defaultDiffViewMode: "unified",
-      collapseMultiFileToolDiffs: false,
+      collapseMultiFileToolDiffs: true,
       projectProviders: ["claude", "cursor"],
       searchProviders: ["cursor", "claude"],
       externalTools: createDefaultExternalTools(),
@@ -417,9 +417,9 @@ describe("AppStateStore", () => {
       darkShikiTheme: "github-dark-default",
       lightShikiTheme: "github-light-default",
       messagePageSize: 50,
-      defaultViewerWrapMode: "nowrap",
+      defaultViewerWrapMode: "wrap",
       defaultDiffViewMode: "unified",
-      collapseMultiFileToolDiffs: false,
+      collapseMultiFileToolDiffs: true,
       externalTools: createDefaultExternalTools(),
     });
     expect(reloaded.getWindowState()).toEqual({
@@ -452,9 +452,9 @@ describe("AppStateStore", () => {
       darkShikiTheme: "github-dark-default",
       lightShikiTheme: "github-light-default",
       messagePageSize: 50,
-      defaultViewerWrapMode: "nowrap",
+      defaultViewerWrapMode: "wrap",
       defaultDiffViewMode: "unified",
-      collapseMultiFileToolDiffs: false,
+      collapseMultiFileToolDiffs: true,
       externalTools: createDefaultExternalTools(),
     });
     expect(store.getPaneState()?.preferredExternalEditor ?? null).toBeNull();
