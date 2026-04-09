@@ -197,6 +197,7 @@ const indexStatements = [
   "CREATE INDEX IF NOT EXISTS idx_messages_session_created ON messages(session_id, created_at_ms, created_at, id)",
   "CREATE INDEX IF NOT EXISTS idx_messages_session_category_created ON messages(session_id, category, created_at_ms, created_at, id)",
   "CREATE INDEX IF NOT EXISTS idx_messages_session_source_id ON messages(session_id, source_id)",
+  "CREATE INDEX IF NOT EXISTS idx_tool_calls_message_id ON tool_calls(message_id)",
   "CREATE INDEX IF NOT EXISTS idx_message_tool_edit_files_message_id ON message_tool_edit_files(message_id, file_ordinal)",
   "CREATE INDEX IF NOT EXISTS idx_projects_provider_name ON projects(provider, name_folded, id)",
   "CREATE INDEX IF NOT EXISTS idx_project_stats_last_activity ON project_stats(last_activity_ms DESC, project_id)",

@@ -393,6 +393,7 @@ type IndexingStatements = {
     ]
   >;
   upsertIndexedFile: PreparedStatement<[string, Provider, string, string, number, number, string]>;
+  deleteIndexedFileByFilePath: PreparedStatement<[string]>;
   upsertCheckpoint: PreparedStatement<
     [
       string,
@@ -412,6 +413,13 @@ type IndexingStatements = {
       string,
     ]
   >;
+  deleteCheckpointByFilePath: PreparedStatement<[string]>;
+  listSessionIdsByFilePath: PreparedManyQuery<[string], Array<{ id: string }>>;
+  deleteToolCallsBySessionId: PreparedStatement<[string]>;
+  deleteMessageToolEditFilesBySessionId: PreparedStatement<[string]>;
+  deleteMessageFtsBySessionId: PreparedStatement<[string]>;
+  deleteMessagesBySessionId: PreparedStatement<[string]>;
+  deleteSessionById: PreparedStatement<[string]>;
 };
 
 type PreparedStatement<TArgs extends unknown[]> = {
@@ -420,6 +428,10 @@ type PreparedStatement<TArgs extends unknown[]> = {
 
 type PreparedQuery<TArgs extends unknown[], TResult> = {
   get: (...args: TArgs) => TResult;
+};
+
+type PreparedManyQuery<TArgs extends unknown[], TResult> = {
+  all: (...args: TArgs) => TResult;
 };
 
 class IndexingFileProcessingError extends Error {
@@ -490,7 +502,7 @@ export function runIncrementalIndexing(
   try {
     const schema = resolvedDependencies.ensureDatabaseSchema(db);
     const discoveredFiles = filterDiscoveredFilesByProjectScope(
-      normalizeDiscoveredProjectPaths(db, initiallyDiscoveredFiles),
+      normalizeDiscoveredProjectPaths(db, initiallyDiscoveredFiles, config.projectScope),
       config.projectScope,
     );
     const discoveredByFilePath = new Map(discoveredFiles.map((file) => [file.filePath, file]));
@@ -505,19 +517,19 @@ export function runIncrementalIndexing(
       }
     }
 
-    const existingRows = listIndexedFiles(db);
+    const existingRows = listIndexedFiles(db, config.projectScope);
     const existingByFilePath = new Map(existingRows.map((row) => [row.file_path, row]));
-    const existingCheckpointRows = listIndexCheckpoints(db);
+    const existingCheckpointRows = listIndexCheckpoints(db, config.projectScope);
     const existingCheckpointByFilePath = new Map(
       existingCheckpointRows.map((row) => [row.file_path, row]),
     );
-    const existingSessionRows = listSessionFiles(db);
+    const existingSessionRows = listSessionFiles(db, config.projectScope);
     const existingSessionByFilePath = new Map(
       existingSessionRows.map((row) => [row.file_path, row.id]),
     );
-    const deletedSessionRows = listDeletedSessions(db);
+    const deletedSessionRows = listDeletedSessions(db, config.projectScope);
     const deletedSessionByFilePath = new Map(deletedSessionRows.map((row) => [row.file_path, row]));
-    const deletedProjectRows = listDeletedProjects(db);
+    const deletedProjectRows = listDeletedProjects(db, config.projectScope);
     const deletedProjectByKey = new Map(
       deletedProjectRows.map((row) => [deletedProjectKey(row.provider, row.project_path), row]),
     );
@@ -528,6 +540,7 @@ export function runIncrementalIndexing(
     const diagnostics = { warnings: 0, errors: 0 };
     const compiledSystemMessageRules = compileSystemMessageRules(config.systemMessageRegexRules);
     diagnostics.warnings += compiledSystemMessageRules.invalidCount;
+    const statements = createIndexingStatements(db);
 
     if (!config.forceReindex) {
       const enabledProviderSet = new Set(discoveryConfig.enabledProviders);
@@ -549,9 +562,9 @@ export function runIncrementalIndexing(
           continue;
         }
 
-        deleteSessionDataForFilePath(db, existing.file_path);
-        db.prepare("DELETE FROM indexed_files WHERE file_path = ?").run(existing.file_path);
-        db.prepare("DELETE FROM index_checkpoints WHERE file_path = ?").run(existing.file_path);
+        deleteSessionDataForFilePath(statements, existing.file_path);
+        statements.deleteIndexedFileByFilePath.run(existing.file_path);
+        statements.deleteCheckpointByFilePath.run(existing.file_path);
         existingCheckpointByFilePath.delete(existing.file_path);
         existingSessionByFilePath.delete(existing.file_path);
         removedFiles += 1;
@@ -559,7 +572,6 @@ export function runIncrementalIndexing(
     }
 
     const nowIso = resolvedDependencies.now().toISOString();
-    const statements = createIndexingStatements(db);
     const lookupExisting = (filePath: string) => ({
       indexed: existingByFilePath.get(filePath),
       checkpoint: existingCheckpointByFilePath.get(filePath),
@@ -581,7 +593,6 @@ export function runIncrementalIndexing(
     });
     indexedFiles += result.indexedFiles;
     skippedFiles += result.skippedFiles;
-
     db.exec("DELETE FROM projects WHERE id NOT IN (SELECT DISTINCT project_id FROM sessions)");
 
     return {
@@ -618,7 +629,7 @@ export function indexChangedFiles(
   try {
     const schema = resolvedDependencies.ensureDatabaseSchema(db);
     const discoveredFiles = filterDiscoveredFilesByProjectScope(
-      normalizeDiscoveredProjectPaths(db, initiallyDiscoveredFiles),
+      normalizeDiscoveredProjectPaths(db, initiallyDiscoveredFiles, config.projectScope),
       config.projectScope,
     );
 
@@ -673,6 +684,7 @@ export function indexChangedFiles(
     const diagnostics = { warnings: 0, errors: 0 };
     const compiledSystemMessageRules = compileSystemMessageRules(config.systemMessageRegexRules);
     diagnostics.warnings += compiledSystemMessageRules.invalidCount;
+    const statements = createIndexingStatements(db);
 
     // Handle deleted/renamed files — clean up indexed data for paths that can no longer be discovered
     // for disabled providers immediately, or for enabled providers only when the pruning toggle is
@@ -701,15 +713,14 @@ export function indexChangedFiles(
         ) {
           continue;
         }
-        deleteSessionDataForFilePath(db, filePath);
-        db.prepare("DELETE FROM indexed_files WHERE file_path = ?").run(filePath);
-        db.prepare("DELETE FROM index_checkpoints WHERE file_path = ?").run(filePath);
+        deleteSessionDataForFilePath(statements, filePath);
+        statements.deleteIndexedFileByFilePath.run(filePath);
+        statements.deleteCheckpointByFilePath.run(filePath);
         removedFiles += 1;
       }
     }
 
     const nowIso = resolvedDependencies.now().toISOString();
-    const statements = createIndexingStatements(db);
     const lookupExisting = (filePath: string) => ({
       indexed: getIndexedFile.get(filePath) as IndexedFileRow | undefined,
       checkpoint: getCheckpoint.get(filePath) as IndexCheckpointRow | undefined,
@@ -731,7 +742,6 @@ export function indexChangedFiles(
     });
     indexedFiles += result.indexedFiles;
     skippedFiles += result.skippedFiles;
-
     return {
       discoveredFiles: discoveredFiles.length,
       indexedFiles,
@@ -775,18 +785,28 @@ function matchesProjectScope(
 function normalizeDiscoveredProjectPaths(
   db: SqliteDatabase,
   discoveredFiles: ReturnType<typeof discoverSessionFiles>,
+  projectScope?: ProjectIndexingScope,
 ): ReturnType<typeof discoverSessionFiles> {
   if (discoveredFiles.length === 0) {
     return discoveredFiles;
   }
 
-  const existingProjects = db
-    .prepare(
-      `SELECT provider, path, name
+  const existingProjects = (
+    db
+      .prepare(
+      projectScope
+        ? `SELECT provider, path, name
+      , repository_url
+       FROM projects
+       WHERE provider = ? AND path = ?`
+        : `SELECT provider, path, name
       , repository_url
        FROM projects`,
-    )
-    .all() as ExistingProjectCandidateRow[];
+      )
+      .all(
+        ...(projectScope ? ([projectScope.provider, projectScope.projectPath] as const) : []),
+      )
+  ) as ExistingProjectCandidateRow[];
   const codexCandidateProjects = buildCodexCandidateProjects(discoveredFiles, existingProjects);
 
   return discoveredFiles.map((discovered) => {
@@ -1105,6 +1125,7 @@ function createIndexingStatements(db: SqliteDatabase): IndexingStatements {
          file_mtime_ms = excluded.file_mtime_ms,
          indexed_at = excluded.indexed_at`,
     ),
+    deleteIndexedFileByFilePath: db.prepare("DELETE FROM indexed_files WHERE file_path = ?"),
     upsertCheckpoint: db.prepare(
       `INSERT INTO index_checkpoints (
          file_path,
@@ -1139,6 +1160,17 @@ function createIndexingStatements(db: SqliteDatabase): IndexingStatements {
          tail_hash = excluded.tail_hash,
          updated_at = excluded.updated_at`,
     ),
+    deleteCheckpointByFilePath: db.prepare("DELETE FROM index_checkpoints WHERE file_path = ?"),
+    listSessionIdsByFilePath: db.prepare("SELECT id FROM sessions WHERE file_path = ?"),
+    deleteToolCallsBySessionId: db.prepare(
+      "DELETE FROM tool_calls WHERE message_id IN (SELECT id FROM messages WHERE session_id = ?)",
+    ),
+    deleteMessageToolEditFilesBySessionId: db.prepare(
+      "DELETE FROM message_tool_edit_files WHERE message_id IN (SELECT id FROM messages WHERE session_id = ?)",
+    ),
+    deleteMessageFtsBySessionId: db.prepare("DELETE FROM message_fts WHERE session_id = ?"),
+    deleteMessagesBySessionId: db.prepare("DELETE FROM messages WHERE session_id = ?"),
+    deleteSessionById: db.prepare("DELETE FROM sessions WHERE id = ?"),
   };
 }
 
@@ -1217,10 +1249,10 @@ function processDiscoveredFiles(args: {
     }
     if (deletedSessionDecision.action === "ingest_new") {
       removeDeletedSessionTombstone(args.db, discovered.filePath);
-      deleteSessionDataForFilePath(args.db, discovered.filePath);
-      deleteSessionData(args.db, sessionDbId);
-      args.db.prepare("DELETE FROM indexed_files WHERE file_path = ?").run(discovered.filePath);
-      args.db.prepare("DELETE FROM index_checkpoints WHERE file_path = ?").run(discovered.filePath);
+      deleteSessionDataForFilePath(args.statements, discovered.filePath);
+      deleteSessionData(args.statements, sessionDbId);
+      args.statements.deleteIndexedFileByFilePath.run(discovered.filePath);
+      args.statements.deleteCheckpointByFilePath.run(discovered.filePath);
       resumeCheckpoint = null;
     }
     if (deletedSessionDecision.action === "resume_from_deleted") {
@@ -1377,7 +1409,11 @@ function resolveIndexingDiscoveryConfig(config: IndexingConfig): DiscoveryConfig
   return {
     ...DEFAULT_DISCOVERY_CONFIG,
     ...config.discoveryConfig,
-    ...(config.enabledProviders ? { enabledProviders: config.enabledProviders } : {}),
+    ...(config.projectScope
+        ? { enabledProviders: [config.projectScope.provider] }
+        : config.enabledProviders
+          ? { enabledProviders: config.enabledProviders }
+          : {}),
   };
 }
 
@@ -1692,11 +1728,9 @@ function persistMaterializedMessages(args: {
 }): void {
   try {
     const persist = args.db.transaction(() => {
-      deleteSessionDataForFilePath(args.db, args.discovered.filePath);
-      deleteSessionData(args.db, args.sessionDbId);
-      args.db
-        .prepare("DELETE FROM index_checkpoints WHERE file_path = ?")
-        .run(args.discovered.filePath);
+      deleteSessionDataForFilePath(args.statements, args.discovered.filePath);
+      deleteSessionData(args.statements, args.sessionDbId);
+      args.statements.deleteCheckpointByFilePath.run(args.discovered.filePath);
       args.statements.upsertProject.run(
         args.projectId,
         args.discovered.provider,
@@ -1783,12 +1817,10 @@ function prepareStreamedSessionPersistence(
   processingState: MessageProcessingState,
 ): void {
   if (!shouldResume) {
-    deleteSessionDataForFilePath(args.db, args.discovered.filePath);
-    deleteSessionData(args.db, args.sessionDbId);
+    deleteSessionDataForFilePath(args.statements, args.discovered.filePath);
+    deleteSessionData(args.statements, args.sessionDbId);
   }
-  args.db
-    .prepare("DELETE FROM index_checkpoints WHERE file_path = ?")
-    .run(args.discovered.filePath);
+  args.statements.deleteCheckpointByFilePath.run(args.discovered.filePath);
   args.statements.upsertProject.run(
     projectId,
     args.discovered.provider,
@@ -4085,10 +4117,33 @@ function parseAggregateState(value: unknown): SessionAggregateState {
   return parsed.success ? parsed.data : { ...DEFAULT_SESSION_AGGREGATE_STATE };
 }
 
-function listIndexCheckpoints(db: SqliteDatabase): IndexCheckpointRow[] {
-  return db
-    .prepare(
-      `SELECT
+function listIndexCheckpoints(
+  db: SqliteDatabase,
+  projectScope?: ProjectIndexingScope,
+): IndexCheckpointRow[] {
+  return (
+    db
+      .prepare(
+      projectScope
+        ? `SELECT
+         c.file_path,
+         c.provider,
+         c.session_id,
+         c.session_identity,
+         c.file_size,
+         c.file_mtime_ms,
+         c.last_offset_bytes,
+         c.last_line_number,
+         c.last_event_index,
+         c.next_message_sequence,
+         c.processing_state_json,
+         c.source_metadata_json,
+         c.head_hash,
+         c.tail_hash
+       FROM index_checkpoints c
+       JOIN indexed_files f ON f.file_path = c.file_path
+       WHERE f.provider = ? AND f.project_path = ?`
+        : `SELECT
          file_path,
          provider,
          session_id,
@@ -4104,14 +4159,39 @@ function listIndexCheckpoints(db: SqliteDatabase): IndexCheckpointRow[] {
          head_hash,
          tail_hash
        FROM index_checkpoints`,
-    )
-    .all() as IndexCheckpointRow[];
+      )
+      .all(...(projectScope ? ([projectScope.provider, projectScope.projectPath] as const) : []))
+  ) as IndexCheckpointRow[];
 }
 
-function listDeletedSessions(db: SqliteDatabase): DeletedSessionRow[] {
-  return db
-    .prepare(
-      `SELECT
+function listDeletedSessions(
+  db: SqliteDatabase,
+  projectScope?: ProjectIndexingScope,
+): DeletedSessionRow[] {
+  return (
+    db
+      .prepare(
+      projectScope
+        ? `SELECT
+         file_path,
+         provider,
+         project_path,
+         session_identity,
+         session_id,
+         deleted_at_ms,
+         file_size,
+         file_mtime_ms,
+         last_offset_bytes,
+         last_line_number,
+         last_event_index,
+         next_message_sequence,
+         processing_state_json,
+         source_metadata_json,
+         head_hash,
+         tail_hash
+       FROM deleted_sessions
+       WHERE provider = ? AND project_path = ?`
+        : `SELECT
          file_path,
          provider,
          project_path,
@@ -4129,20 +4209,33 @@ function listDeletedSessions(db: SqliteDatabase): DeletedSessionRow[] {
          head_hash,
          tail_hash
        FROM deleted_sessions`,
-    )
-    .all() as DeletedSessionRow[];
+      )
+      .all(...(projectScope ? ([projectScope.provider, projectScope.projectPath] as const) : []))
+  ) as DeletedSessionRow[];
 }
 
-function listDeletedProjects(db: SqliteDatabase): DeletedProjectRow[] {
-  return db
-    .prepare(
-      `SELECT
+function listDeletedProjects(
+  db: SqliteDatabase,
+  projectScope?: ProjectIndexingScope,
+): DeletedProjectRow[] {
+  return (
+    db
+      .prepare(
+      projectScope
+        ? `SELECT
+         provider,
+         project_path,
+         deleted_at_ms
+       FROM deleted_projects
+       WHERE provider = ? AND project_path = ?`
+        : `SELECT
          provider,
          project_path,
          deleted_at_ms
        FROM deleted_projects`,
-    )
-    .all() as DeletedProjectRow[];
+      )
+      .all(...(projectScope ? ([projectScope.provider, projectScope.projectPath] as const) : []))
+  ) as DeletedProjectRow[];
 }
 
 function computeFileHashes(
@@ -4214,91 +4307,154 @@ function hashFileSlice(filePath: string, start: number, length: number): string 
   return hash.digest("hex");
 }
 
-function listIndexedFiles(db: SqliteDatabase): IndexedFileRow[] {
-  return db
-    .prepare(
-      `SELECT file_path, provider, project_path, session_identity, file_size, file_mtime_ms
+function listIndexedFiles(db: SqliteDatabase, projectScope?: ProjectIndexingScope): IndexedFileRow[] {
+  return (
+    db
+      .prepare(
+      projectScope
+        ? `SELECT file_path, provider, project_path, session_identity, file_size, file_mtime_ms
+       FROM indexed_files
+       WHERE provider = ? AND project_path = ?`
+        : `SELECT file_path, provider, project_path, session_identity, file_size, file_mtime_ms
        FROM indexed_files`,
-    )
-    .all() as IndexedFileRow[];
+      )
+      .all(...(projectScope ? ([projectScope.provider, projectScope.projectPath] as const) : []))
+  ) as IndexedFileRow[];
 }
 
-function listSessionFiles(db: SqliteDatabase): SessionFileRow[] {
-  return db.prepare("SELECT id, file_path FROM sessions").all() as SessionFileRow[];
+function listSessionFiles(db: SqliteDatabase, projectScope?: ProjectIndexingScope): SessionFileRow[] {
+  return (
+    db
+      .prepare(
+      projectScope
+        ? `SELECT sessions.id, sessions.file_path
+           FROM sessions
+           JOIN projects ON projects.id = sessions.project_id
+           WHERE projects.provider = ? AND projects.path = ?`
+        : "SELECT id, file_path FROM sessions",
+      )
+      .all(...(projectScope ? ([projectScope.provider, projectScope.projectPath] as const) : []))
+  ) as SessionFileRow[];
 }
 
-function deleteSessionData(db: SqliteDatabase, sessionId: string): void {
-  db.prepare(
-    "DELETE FROM tool_calls WHERE message_id IN (SELECT id FROM messages WHERE session_id = ?)",
-  ).run(sessionId);
-  db.prepare(
-    "DELETE FROM message_tool_edit_files WHERE message_id IN (SELECT id FROM messages WHERE session_id = ?)",
-  ).run(sessionId);
-  db.prepare("DELETE FROM message_fts WHERE session_id = ?").run(sessionId);
-  db.prepare("DELETE FROM messages WHERE session_id = ?").run(sessionId);
-  db.prepare("DELETE FROM sessions WHERE id = ?").run(sessionId);
+function deleteSessionData(statements: IndexingStatements, sessionId: string): void {
+  statements.deleteToolCallsBySessionId.run(sessionId);
+  statements.deleteMessageToolEditFilesBySessionId.run(sessionId);
+  statements.deleteMessageFtsBySessionId.run(sessionId);
+  statements.deleteMessagesBySessionId.run(sessionId);
+  statements.deleteSessionById.run(sessionId);
 }
 
-function deleteSessionDataForFilePath(db: SqliteDatabase, filePath: string): void {
-  const rows = db.prepare("SELECT id FROM sessions WHERE file_path = ?").all(filePath) as Array<{
-    id: string;
-  }>;
+function deleteSessionDataForFilePath(statements: IndexingStatements, filePath: string): void {
+  const rows = statements.listSessionIdsByFilePath.all(filePath);
   for (const row of rows) {
-    deleteSessionData(db, row.id);
+    deleteSessionData(statements, row.id);
   }
 }
 
 function clearProjectIndexedData(db: SqliteDatabase, projectScope: ProjectIndexingScope): void {
+  const listFilePathsForProject = db.prepare(
+    `SELECT file_path
+     FROM indexed_files
+     WHERE provider = ? AND project_path = ?
+     UNION
+     SELECT sessions.file_path
+     FROM sessions
+     JOIN projects ON projects.id = sessions.project_id
+     WHERE projects.provider = ? AND projects.path = ?`,
+  );
+  const deleteToolCallsForProject = db.prepare(
+    `DELETE FROM tool_calls
+     WHERE message_id IN (
+       SELECT messages.id
+       FROM messages
+       JOIN sessions ON sessions.id = messages.session_id
+       JOIN projects ON projects.id = sessions.project_id
+       WHERE projects.provider = ? AND projects.path = ?
+     )`,
+  );
+  const deleteMessageToolEditFilesForProject = db.prepare(
+    `DELETE FROM message_tool_edit_files
+     WHERE message_id IN (
+       SELECT messages.id
+       FROM messages
+       JOIN sessions ON sessions.id = messages.session_id
+       JOIN projects ON projects.id = sessions.project_id
+       WHERE projects.provider = ? AND projects.path = ?
+     )`,
+  );
+  const deleteMessageFtsForProject = db.prepare(
+    `DELETE FROM message_fts
+     WHERE session_id IN (
+       SELECT sessions.id
+       FROM sessions
+       JOIN projects ON projects.id = sessions.project_id
+       WHERE projects.provider = ? AND projects.path = ?
+     )`,
+  );
+  const deleteMessagesForProject = db.prepare(
+    `DELETE FROM messages
+     WHERE session_id IN (
+       SELECT sessions.id
+       FROM sessions
+       JOIN projects ON projects.id = sessions.project_id
+       WHERE projects.provider = ? AND projects.path = ?
+     )`,
+  );
+  const deleteSessionsForProject = db.prepare(
+    `DELETE FROM sessions
+     WHERE project_id IN (
+       SELECT id
+       FROM projects
+       WHERE provider = ? AND path = ?
+     )`,
+  );
+  const deleteProjectStatsForProject = db.prepare(
+    `DELETE FROM project_stats
+     WHERE project_id IN (
+       SELECT id
+       FROM projects
+       WHERE provider = ? AND path = ?
+     )`,
+  );
+  const deleteDeletedSessionsForProject = db.prepare(
+    "DELETE FROM deleted_sessions WHERE provider = ? AND project_path = ?",
+  );
+  const deleteDeletedProjectsForProject = db.prepare(
+    "DELETE FROM deleted_projects WHERE provider = ? AND project_path = ?",
+  );
+  const deleteProjectsForProject = db.prepare("DELETE FROM projects WHERE provider = ? AND path = ?");
+  const deleteIndexedFile = db.prepare("DELETE FROM indexed_files WHERE file_path = ?");
+  const deleteIndexCheckpoint = db.prepare("DELETE FROM index_checkpoints WHERE file_path = ?");
   const clear = db.transaction(() => {
-    const listProjectIds = db.prepare("SELECT id FROM projects WHERE provider = ? AND path = ?");
-    const listSessionsForProject = db.prepare(
-      "SELECT id, file_path FROM sessions WHERE project_id = ?",
-    );
-    const listIndexedFilesForProject = db.prepare(
-      "SELECT file_path FROM indexed_files WHERE provider = ? AND project_path = ?",
-    );
-    const deleteIndexedFile = db.prepare("DELETE FROM indexed_files WHERE file_path = ?");
-    const deleteIndexCheckpoint = db.prepare("DELETE FROM index_checkpoints WHERE file_path = ?");
-    const deleteProjectStats = db.prepare("DELETE FROM project_stats WHERE project_id = ?");
-    const deleteProject = db.prepare("DELETE FROM projects WHERE id = ?");
-    const projectIds = listProjectIds.all(
+    const fileRows = listFilePathsForProject.all(
       projectScope.provider,
       projectScope.projectPath,
-    ) as Array<{ id: string }>;
-    const sessionRows = projectIds.flatMap(
-      (project) =>
-        listSessionsForProject.all(project.id) as Array<{ id: string; file_path: string }>,
-    );
-    const indexedFileRows = listIndexedFilesForProject.all(
       projectScope.provider,
       projectScope.projectPath,
     ) as Array<{ file_path: string }>;
 
-    for (const row of sessionRows) {
-      deleteSessionData(db, row.id);
-    }
+    deleteToolCallsForProject.run(projectScope.provider, projectScope.projectPath);
+    deleteMessageToolEditFilesForProject.run(projectScope.provider, projectScope.projectPath);
+    deleteMessageFtsForProject.run(projectScope.provider, projectScope.projectPath);
+    deleteMessagesForProject.run(projectScope.provider, projectScope.projectPath);
+    deleteSessionsForProject.run(projectScope.provider, projectScope.projectPath);
 
-    const filePaths = [
-      ...new Set([...sessionRows, ...indexedFileRows].map((row) => row.file_path)),
-    ];
-    for (const filePath of filePaths) {
+    for (const { file_path: filePath } of fileRows) {
       deleteIndexedFile.run(filePath);
       deleteIndexCheckpoint.run(filePath);
     }
 
-    db.prepare("DELETE FROM deleted_sessions WHERE provider = ? AND project_path = ?").run(
+    deleteDeletedSessionsForProject.run(
       projectScope.provider,
       projectScope.projectPath,
     );
-    db.prepare("DELETE FROM deleted_projects WHERE provider = ? AND project_path = ?").run(
+    deleteDeletedProjectsForProject.run(
       projectScope.provider,
       projectScope.projectPath,
     );
-
-    for (const project of projectIds) {
-      deleteProjectStats.run(project.id);
-      deleteProject.run(project.id);
-    }
+    deleteProjectStatsForProject.run(projectScope.provider, projectScope.projectPath);
+    deleteProjectsForProject.run(projectScope.provider, projectScope.projectPath);
   });
 
   clear();

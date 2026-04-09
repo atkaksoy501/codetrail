@@ -23,6 +23,11 @@ describe("initializeDatabase", () => {
     const messageColumns = (
       db.prepare("PRAGMA table_info(messages)").all() as Array<{ name: string }>
     ).map((column) => column.name);
+    const toolCallIndexes = (
+      db
+        .prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'tool_calls'")
+        .all() as Array<{ name: string }>
+    ).map((row) => row.name);
     const ftsSql = db
       .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'message_fts'")
       .get() as { sql: string } | undefined;
@@ -50,6 +55,7 @@ describe("initializeDatabase", () => {
         "operation_duration_confidence",
       ]),
     );
+    expect(toolCallIndexes).toContain("idx_tool_calls_message_id");
     expect(ftsSql?.sql).toContain("prefix='2 3 4'");
 
     rmSync(dir, { recursive: true, force: true });

@@ -2698,6 +2698,46 @@ describe("runIncrementalIndexing", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
+  it("matches scoped existing sessions by project membership even when canonical_project_path is null", () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-project-scope-session-membership-"));
+    const dbPath = join(dir, "index.db");
+    const claudeRoot = join(dir, ".claude", "projects");
+    const projectRoot = join(claudeRoot, "project-a");
+    const projectFile = join(projectRoot, "session-a.jsonl");
+
+    mkdirSync(projectRoot, { recursive: true });
+    writeFileSync(
+      projectFile,
+      `${JSON.stringify({
+        sessionId: "session-a",
+        type: "user",
+        cwd: "/workspace/project-a",
+        timestamp: "2026-02-27T10:00:00Z",
+        message: { role: "user", content: [{ type: "text", text: "Project A" }] },
+      })}\n`,
+    );
+
+    runIncrementalIndexing({ dbPath, discoveryConfig: createDiscoveryConfig(dir) });
+
+    const db = openDatabase(dbPath);
+    db.prepare("UPDATE sessions SET canonical_project_path = NULL WHERE file_path = ?").run(projectFile);
+    db.close();
+
+    const result = runIncrementalIndexing({
+      dbPath,
+      discoveryConfig: createDiscoveryConfig(dir),
+      projectScope: {
+        provider: "claude",
+        projectPath: "/workspace/project-a",
+      },
+    });
+
+    expect(result.indexedFiles).toBe(0);
+    expect(result.skippedFiles).toBe(1);
+
+    rmSync(dir, { recursive: true, force: true });
+  });
+
   it("groups Codex worktree sessions under the canonical project path", () => {
     const dir = mkdtempSync(join(tmpdir(), "codetrail-index-worktree-grouping-"));
     const dbPath = join(dir, "index.db");
