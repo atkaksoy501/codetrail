@@ -91,7 +91,7 @@ describe("SessionPane", () => {
 
     expect(screen.getByRole("button", { name: "Collapse Sessions pane" })).toHaveAttribute(
       "title",
-      "Collapse Sessions  ⌘⌥B",
+      "Toggle Sessions pane  ⌘⌥B",
     );
     await user.click(screen.getByRole("button", { name: "Collapse Sessions pane" }));
     await user.click(
@@ -151,7 +151,7 @@ describe("SessionPane", () => {
     expect(screen.getByRole("button", { name: "Expand Sessions pane" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Expand Sessions pane" })).toHaveAttribute(
       "title",
-      "Expand Sessions  ⌘⌥B",
+      "Toggle Sessions pane  ⌘⌥B",
     );
   });
 

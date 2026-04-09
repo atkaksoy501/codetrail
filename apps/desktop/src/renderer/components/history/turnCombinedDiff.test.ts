@@ -344,4 +344,103 @@ describe("aggregateTurnCombinedFiles", () => {
 
     expect(aggregateTurnCombinedFiles(messages)).toEqual([]);
   });
+
+  it("collects Gemini write-like tool edits from raw payloads", () => {
+    const messages: TurnCombinedMessage[] = [
+      {
+        id: "message_1",
+        provider: "gemini",
+        category: "tool_edit",
+        content: JSON.stringify({
+          name: "edit_file",
+          args: {
+            path: "src/app.ts",
+            oldText: "export const beforeValue = 1;",
+            newText: "export const afterValue = 2;",
+          },
+        }),
+        createdAt: "2026-04-08T08:00:00.000Z",
+      },
+    ];
+
+    const [file] = aggregateTurnCombinedFiles(messages);
+
+    expect(file?.filePath).toBe("src/app.ts");
+    expect(file?.renderMode).toBe("diff");
+    expect(file?.displayUnifiedDiff).toContain("+export const afterValue = 2;");
+  });
+
+  it("collects Cursor write-like tool edits from raw payloads", () => {
+    const messages: TurnCombinedMessage[] = [
+      {
+        id: "message_1",
+        provider: "cursor",
+        category: "tool_use",
+        content: JSON.stringify({
+          name: "str_replace",
+          input: {
+            path: "src/controller.ts",
+            old_string: 'return "before";',
+            new_string: 'return "after";',
+          },
+        }),
+        createdAt: "2026-04-08T08:00:00.000Z",
+      },
+    ];
+
+    const [file] = aggregateTurnCombinedFiles(messages);
+
+    expect(file?.filePath).toBe("src/controller.ts");
+    expect(file?.renderMode).toBe("diff");
+    expect(file?.displayUnifiedDiff).toContain('+return "after";');
+  });
+
+  it("keeps Copilot path-only edits as best-effort sequence entries", () => {
+    const messages: TurnCombinedMessage[] = [
+      {
+        id: "message_1",
+        provider: "copilot",
+        category: "tool_edit",
+        content: JSON.stringify({
+          type: "tool_use",
+          name: "editFile",
+          input: {
+            path: "src/parser.ts",
+            operation: "write",
+          },
+        }),
+        createdAt: "2026-04-08T08:00:00.000Z",
+      },
+    ];
+
+    const [file] = aggregateTurnCombinedFiles(messages);
+
+    expect(file?.filePath).toBe("src/parser.ts");
+    expect(file?.renderMode).toBe("sequence");
+    expect(file?.displayUnifiedDiff).toBeNull();
+    expect(file?.sequenceEdits).toHaveLength(1);
+    expect(file?.sequenceEdits[0]?.unifiedDiff).toContain("Exact diff unavailable");
+    expect(file?.sequenceEdits[0]?.unifiedDiff).toContain("Copilot");
+  });
+
+  it("filters Copilot artifact-path fallback entries", () => {
+    const messages: TurnCombinedMessage[] = [
+      {
+        id: "message_1",
+        provider: "copilot",
+        category: "tool_edit",
+        content: JSON.stringify({
+          type: "tool_use",
+          name: "editFile",
+          input: {
+            path: "/Users/test/.claude/projects/foo/tool-results/bar.txt",
+            operation: "write",
+          },
+        }),
+        createdAt: "2026-04-08T08:00:00.000Z",
+      },
+    ];
+
+    expect(aggregateTurnCombinedFiles(messages)).toEqual([]);
+  });
 });

@@ -1,10 +1,11 @@
+import type { Provider } from "@codetrail/core/browser";
 import { countUnifiedDiffLines } from "@codetrail/core/tooling/unifiedDiff";
 
 export type TurnCombinedRenderMode = "diff" | "sequence";
 
 export type TurnCombinedSourceMessage = {
   id: string;
-  provider: string;
+  provider: Provider;
   category: string;
   content: string;
   createdAt: string;
@@ -26,7 +27,7 @@ export type TurnSequenceEdit = {
   key: string;
   messageId: string;
   createdAt: string;
-  provider: string;
+  provider: Provider;
   filePath: string;
   previousFilePath: string | null;
   changeType: "add" | "update" | "delete" | "move";

@@ -4,7 +4,11 @@ import type { useHistoryController } from "../../features/useHistoryController";
 import { copyTextToClipboard } from "../../lib/clipboard";
 import { usePaneFocus } from "../../lib/paneFocusController";
 import { MessageCard } from "../messages/MessageCard";
-import { DiffBlock, useDocumentCollapseMultiFileToolDiffs } from "../messages/textRendering";
+import {
+  CodeBlock,
+  DiffBlock,
+  useDocumentCollapseMultiFileToolDiffs,
+} from "../messages/textRendering";
 import { formatToolEditFileSummary } from "../messages/toolEditUtils";
 import { trimProjectPrefixFromPath } from "../messages/viewerDiffModel";
 import { aggregateTurnCombinedFiles } from "./turnCombinedDiff";
@@ -352,8 +356,10 @@ function TurnCombinedFileView({
   }
 
   return (
-    <DiffBlock
+    <CodeBlock
+      language="diff"
       codeValue={buildSequenceDisplayDiff(file.sequenceEdits)}
+      metaLabel={trimProjectPrefixFromPath(file.filePath, pathRoots)}
       filePath={file.filePath}
       pathRoots={pathRoots}
       query={query}

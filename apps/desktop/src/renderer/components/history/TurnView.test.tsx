@@ -736,6 +736,47 @@ describe("TurnView", () => {
     expect(history.turnVisibleMessages.map((message) => message.id)).toEqual(["message_1"]);
   });
 
+  it("renders Copilot path-only edits as best-effort combined file entries", () => {
+    const history = createHistoryStub();
+    history.sessionTurnDetail.messages = [
+      {
+        id: "message_2",
+        sourceId: "source_2",
+        sessionId: "session_1",
+        provider: "copilot" as never,
+        category: "tool_edit",
+        content: JSON.stringify({
+          type: "tool_use",
+          name: "editFile",
+          input: {
+            path: "src/parser.ts",
+            operation: "write",
+          },
+        }),
+        createdAt: "2026-04-07T10:00:01.000Z",
+        tokenInput: null,
+        tokenOutput: null,
+        operationDurationMs: null,
+        operationDurationSource: null,
+        operationDurationConfidence: null,
+      },
+      history.sessionTurnDetail.anchorMessage,
+    ];
+    history.sessionTurnDetail.totalCount = history.sessionTurnDetail.messages.length;
+    history.messageExpansionOverrides = { message_1: true, message_2: false };
+    syncTurnDerived(history);
+
+    const { container } = renderTurnView(history);
+
+    fireEvent.click(screen.getByRole("button", { name: /expand combined changes/i }));
+
+    expect(screen.getByText("1 file changed")).toBeInTheDocument();
+    expect(container.textContent).toContain(
+      "Updated file via Copilot. Exact diff unavailable in session payload.",
+    );
+    expect(container.querySelector(".turn-combined-card.is-empty")).toBeNull();
+  });
+
   it("reduces combined changes chronologically even when turn messages are newest-first", () => {
     const history = createHistoryStub();
     history.sessionTurnDetail.messages = [

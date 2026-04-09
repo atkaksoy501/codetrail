@@ -1,7 +1,7 @@
 import type { MessageCategory } from "@codetrail/core/browser";
 
 import { collectClaudeTurnEdits } from "./claudeTurnEdits";
-import { collectCodexTurnEdits } from "./codexTurnEdits";
+import { collectRawTurnEdits } from "./rawTurnEdits";
 import {
   type TurnCombinedFile,
   type TurnCombinedSourceMessage,
@@ -15,7 +15,14 @@ export type TurnCombinedMessage = TurnCombinedSourceMessage & {
 
 export function aggregateTurnCombinedFiles(messages: TurnCombinedMessage[]): TurnCombinedFile[] {
   const grouped = groupEditsByFile(
-    [...collectClaudeTurnEdits(messages), ...collectCodexTurnEdits(messages)].sort(
+    [
+      ...collectClaudeTurnEdits(messages),
+      ...collectRawTurnEdits(messages, { providers: ["codex", "gemini", "cursor"] }),
+      ...collectRawTurnEdits(messages, {
+        providers: ["copilot"],
+        allowTouchedFileFallback: true,
+      }),
+    ].sort(
       (left, right) =>
         left.createdAt.localeCompare(right.createdAt) ||
         left.messageId.localeCompare(right.messageId) ||
