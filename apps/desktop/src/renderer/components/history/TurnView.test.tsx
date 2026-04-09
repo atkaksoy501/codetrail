@@ -313,7 +313,7 @@ describe("TurnView", () => {
     fireEvent.click(screen.getByRole("button", { name: /expand combined changes/i }));
 
     expect(screen.getByText("1 file changed")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Collapse diff for query.ts" })).toBeInTheDocument();
+    expect(document.querySelectorAll(".turn-combined-file .content-viewer")).toHaveLength(1);
     expect(screen.queryByText("Best Effort")).toBeNull();
   });
 
@@ -374,12 +374,12 @@ describe("TurnView", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /expand combined changes/i }));
 
-    expect(screen.getByRole("button", { name: "Expand diff for query.ts" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Expand diff for other.ts" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Combined" })).toHaveAttribute(
-      "title",
-      expect.stringContaining("Combined merges multiple edits into one diff."),
-    );
+    expect(screen.getByRole("button", { name: "Expand Diffs" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Expand Diffs" }));
+    expect(container.querySelectorAll(".diff-sequence-marker")).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "Collapse diff for other.ts" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Combined" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Sequence" })).toBeNull();
   });
 
   it("uses the same collapse preference for a single combined diff file", () => {
@@ -414,7 +414,7 @@ describe("TurnView", () => {
     expect(screen.queryByRole("button", { name: "Collapse diff for query.ts" })).toBeNull();
   });
 
-  it("toggles weak best-effort files between sequence and combined representations", () => {
+  it("renders multi-edit files in one diff viewer with sequence separators", () => {
     const history = createHistoryStub();
     history.messagePathRoots = ["/workspace/project-one"];
     history.sessionTurnDetail.messages = [
@@ -480,14 +480,18 @@ describe("TurnView", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /expand combined changes/i }));
 
-    expect(screen.getByRole("button", { name: "Sequence" })).toBeInTheDocument();
-    expect(container.textContent).toContain("========= Edit 1 · +1 -1 ·");
+    expect(container.querySelectorAll(".diff-sequence-marker")).toHaveLength(2);
+    expect(container.textContent).toContain("Edit 1");
+    expect(container.textContent).toContain("Edit 2");
     expect(screen.getAllByText("src/controller.ts").length).toBeGreaterThan(0);
     expect(screen.queryByText("/workspace/project-one/src/controller.ts")).toBeNull();
-    expect(screen.getByText("No Wrap")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Sequence" }));
-    expect(screen.getByRole("button", { name: "Combined" })).toBeInTheDocument();
-    expect(container.textContent).not.toContain("Edit 1 · +1 -1 ·");
+    expect(screen.queryByText("PLAIN")).toBeNull();
+    expect(screen.getAllByRole("button", { name: "Unified" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "Collapse diff for controller.ts" })).toHaveLength(1);
+    expect(screen.getAllByText("No Wrap")).toHaveLength(1);
+    expect(container.textContent).not.toContain("========= Edit 1");
+    expect(screen.queryByRole("button", { name: "Combined" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Sequence" })).toBeNull();
   });
 
   it("preserves expanded combined file diffs when new turn messages arrive", () => {
@@ -550,7 +554,7 @@ describe("TurnView", () => {
     expect(screen.getByRole("button", { name: "Expand diff for other.ts" })).toBeInTheDocument();
   });
 
-  it("resets per-file representation state when navigating between turns", () => {
+  it("does not render representation controls when navigating between turns", () => {
     const firstTurn = createHistoryStub();
     firstTurn.turnViewCombinedChangesExpanded = true;
     firstTurn.effectiveTurnCombinedChangesExpanded = true;
@@ -577,7 +581,8 @@ describe("TurnView", () => {
 
     const { rerenderHistory } = renderTurnView(firstTurn);
 
-    expect(screen.getByRole("button", { name: "Combined" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Combined" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Sequence" })).toBeNull();
 
     const secondTurn = cloneHistoryStub(firstTurn);
     secondTurn.sessionTurnDetail.anchorMessageId = "message_turn_2";
@@ -652,10 +657,13 @@ describe("TurnView", () => {
     syncTurnDerived(secondTurn);
 
     rerenderHistory(secondTurn);
-    expect(screen.getByRole("button", { name: "Sequence" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Combined" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Sequence" })).toBeNull();
+    expect(document.querySelectorAll(".diff-sequence-marker")).toHaveLength(2);
 
     rerenderHistory(firstTurn);
-    expect(screen.getByRole("button", { name: "Combined" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Combined" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Sequence" })).toBeNull();
   });
 
   it("keeps combined changes sourced from the full turn when the timeline is filtered", () => {

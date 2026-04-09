@@ -1,7 +1,6 @@
 import { countUnifiedDiffLines } from "@codetrail/core/tooling/unifiedDiff";
 
-export type TurnCombinedRepresentation = "combined" | "sequence";
-export type TurnCombinedExactness = "exact" | "best_effort_combined" | "best_effort_sequence";
+export type TurnCombinedDisplayMode = "diff" | "sequence";
 
 export type TurnCombinedSourceMessage = {
   id: string;
@@ -41,9 +40,8 @@ export type TurnCombinedFile = {
   filePath: string;
   previousFilePath: string | null;
   changeType: "add" | "update" | "delete" | "move";
-  exactness: TurnCombinedExactness;
-  defaultRepresentation: TurnCombinedRepresentation;
-  combinedUnifiedDiff: string | null;
+  displayMode: TurnCombinedDisplayMode;
+  displayUnifiedDiff: string | null;
   addedLineCount: number;
   removedLineCount: number;
   sequenceEdits: TurnSequenceEdit[];
@@ -107,20 +105,4 @@ export function isInternalAssistantArtifactPath(filePath: string | null | undefi
     filePath.includes("/.claude/projects/") ||
     filePath.includes("/tool-results/")
   );
-}
-
-export function bestEffortRepresentationLabel(representation: TurnCombinedRepresentation): string {
-  return representation === "combined" ? "Combined" : "Sequence";
-}
-
-export function bestEffortRepresentationTitle(representation: TurnCombinedRepresentation): string {
-  return representation === "combined"
-    ? "Best effort merged diff across multiple edits. Click to switch to the chronological sequence."
-    : "Best effort chronological edit sequence for this file. Click to switch to the merged diff.";
-}
-
-export function representationFromExactness(
-  exactness: TurnCombinedExactness,
-): TurnCombinedRepresentation {
-  return exactness === "best_effort_sequence" ? "sequence" : "combined";
 }

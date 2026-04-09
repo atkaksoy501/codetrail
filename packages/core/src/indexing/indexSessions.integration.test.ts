@@ -3132,4 +3132,125 @@ describe("runIncrementalIndexing", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it("uses the latest provisional Claude file text for subsequent edits on the same file", () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-claude-tool-edit-sequence-"));
+    const dbPath = join(dir, "index.db");
+    const claudeRoot = join(dir, ".claude", "projects");
+    const claudeProject = join(claudeRoot, "project-a");
+    const sessionId = "claude-session-edit-sequence";
+    const sessionFile = join(claudeProject, `${sessionId}.jsonl`);
+    const fileHistoryDir = join(dir, ".claude", "file-history", sessionId);
+    mkdirSync(claudeProject, { recursive: true });
+    mkdirSync(fileHistoryDir, { recursive: true });
+
+    const originalLines = Array.from({ length: 260 }, (_, index) => {
+      const lineNumber = index + 1;
+      if (lineNumber === 245) {
+        return 'export const targetValue = "before";';
+      }
+      return `export const line${String(lineNumber).padStart(3, "0")} = ${lineNumber};`;
+    });
+    writeFileSync(join(fileHistoryDir, "sequence-file@v1"), originalLines.join("\n"));
+
+    writeFileSync(
+      sessionFile,
+      `${[
+        JSON.stringify({
+          type: "file-history-snapshot",
+          messageId: "snapshot-sequence-initial",
+          snapshot: {
+            trackedFileBackups: {
+              "src/liveSessionStore.ts": {
+                backupFileName: "sequence-file@v1",
+                version: 1,
+                backupTime: "2026-04-02T18:13:26.731Z",
+              },
+            },
+          },
+        }),
+        JSON.stringify({
+          type: "assistant",
+          uuid: "assistant-edit-sequence-1",
+          cwd: "/workspace/repo",
+          sessionId,
+          timestamp: "2026-04-02T18:13:26.900Z",
+          message: {
+            id: "msg-edit-sequence-1",
+            role: "assistant",
+            type: "message",
+            content: [
+              {
+                type: "tool_use",
+                id: "tool-edit-sequence-1",
+                name: "Edit",
+                input: {
+                  replace_all: false,
+                  file_path: "/workspace/repo/src/liveSessionStore.ts",
+                  old_string: 'export const targetValue = "before";',
+                  new_string: 'export const targetValue = "mid";',
+                },
+              },
+            ],
+          },
+        }),
+        JSON.stringify({
+          type: "assistant",
+          uuid: "assistant-edit-sequence-2",
+          cwd: "/workspace/repo",
+          sessionId,
+          timestamp: "2026-04-02T18:13:27.000Z",
+          message: {
+            id: "msg-edit-sequence-2",
+            role: "assistant",
+            type: "message",
+            content: [
+              {
+                type: "tool_use",
+                id: "tool-edit-sequence-2",
+                name: "Edit",
+                input: {
+                  replace_all: false,
+                  file_path: "/workspace/repo/src/liveSessionStore.ts",
+                  old_string: 'export const targetValue = "mid";',
+                  new_string: 'export const targetValue = "after";',
+                },
+              },
+            ],
+          },
+        }),
+      ].join("\n")}\n`,
+    );
+
+    runIncrementalIndexing({ dbPath, discoveryConfig: createDiscoveryConfig(dir) });
+
+    const db = openDatabase(dbPath);
+    try {
+      const rows = db
+        .prepare(
+          `SELECT f.unified_diff, f.exactness
+           FROM message_tool_edit_files f
+           JOIN messages m ON m.id = f.message_id
+           ORDER BY m.created_at ASC, m.id ASC`,
+        )
+        .all() as Array<{
+        unified_diff: string | null;
+        exactness: string;
+      }>;
+
+      expect(rows).toHaveLength(2);
+      expect(rows[0]?.unified_diff).toContain('@@ -243,5 +243,5 @@');
+      expect(rows[0]?.unified_diff).toContain('-export const targetValue = "before";');
+      expect(rows[0]?.unified_diff).toContain('+export const targetValue = "mid";');
+      expect(rows[1]?.unified_diff).toContain('@@ -243,5 +243,5 @@');
+      expect(rows[1]?.unified_diff).toContain('-export const targetValue = "mid";');
+      expect(rows[1]?.unified_diff).toContain('+export const targetValue = "after";');
+      expect(rows[1]?.unified_diff).not.toContain('@@ -1,1 +1,1 @@');
+      expect(rows[0]?.exactness).toBe("best_effort");
+      expect(rows[1]?.exactness).toBe("best_effort");
+    } finally {
+      db.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

@@ -470,7 +470,7 @@ function useDocumentShikiTheme(): string {
   );
 }
 
-function useDocumentDefaultViewerWrapMode(): "nowrap" | "wrap" {
+export function useDocumentDefaultViewerWrapMode(): "nowrap" | "wrap" {
   return useSyncExternalStore(
     subscribeToViewerPreferences,
     getCurrentDefaultViewerWrapMode,
@@ -1023,6 +1023,7 @@ function ContentViewer({
   const [uncontrolledExpanded, setUncontrolledExpanded] = useState(defaultExpanded);
   const isExpanded = expanded ?? uncontrolledExpanded;
   const diffViewIdentity = kind === "diff" ? `${filePath ?? ""}\u0000${codeValue}` : null;
+  const hasSequenceMarkers = diffModel?.rows.some((row) => row.kind === "marker") ?? false;
 
   const setExpandedState = (nextExpanded: boolean | ((current: boolean) => boolean)) => {
     const resolvedExpanded =
@@ -1131,7 +1132,9 @@ function ContentViewer({
     const leftContent = diffModel.rows
       .filter((row) => row.kind !== "add")
       .map((row) =>
-        row.kind === "context"
+        row.kind === "marker"
+          ? formatExternalDiffSequenceMarker(row.text)
+          : row.kind === "context"
           ? row.text
           : row.kind === "remove"
             ? row.text
@@ -1143,7 +1146,9 @@ function ContentViewer({
     const rightContent = diffModel.rows
       .filter((row) => row.kind !== "remove")
       .map((row) =>
-        row.kind === "context"
+        row.kind === "marker"
+          ? formatExternalDiffSequenceMarker(row.text)
+          : row.kind === "context"
           ? row.text
           : row.kind === "add"
             ? row.text
@@ -1189,6 +1194,17 @@ function ContentViewer({
   };
 
   const handleOpenFileOrContent = async (editorId?: EditorInfo["id"]) => {
+    if (kind === "diff" && hasSequenceMarkers) {
+      await openContentInEditor({
+        ...(editorId ? { editorId } : {}),
+        title: metaPath ?? "Diff",
+        content: buildExternalDiffContent(codeValue),
+        ...(filePath ? { filePath } : {}),
+        language: "diff",
+        ...(startLine ? { line: startLine } : {}),
+      });
+      return;
+    }
     if (absoluteFilePath) {
       await openFileInEditor(absoluteFilePath, {
         ...(editorId ? { editorId } : {}),
@@ -1812,6 +1828,18 @@ function DiffViewerBody({
         const key = `${row.kind}:${rowIndex}`;
         const leftTokenLine = splitLeftTokenLines?.[rowIndex];
         const rightTokenLine = splitRightTokenLines?.[rowIndex];
+        if (row.kind === "marker") {
+          return (
+            <div key={key} className="diff-split-row diff-sequence-marker">
+              <span className="diff-ln diff-sequence-marker-ln" aria-hidden="true">
+                {" "}
+              </span>
+              <span className="diff-code diff-sequence-marker-code">
+                {renderDiffSequenceMarkerContent(row.text)}
+              </span>
+            </div>
+          );
+        }
         if (row.kind === "context") {
           return (
             <div key={key} className="diff-split-row diff-context">
@@ -1920,6 +1948,18 @@ function DiffViewerBody({
     <div className={`diff-table${wrap ? " wrap" : ""}`}>
       {rows.map((row, rowIndex) => {
         const key = `${row.kind}:${rowIndex}`;
+        if (row.kind === "marker") {
+          return (
+            <div key={key} className="diff-row diff-sequence-marker">
+              <span className="diff-ln diff-sequence-marker-ln" aria-hidden="true">
+                {" "}
+              </span>
+              <span className="diff-code diff-sequence-marker-code">
+                {renderDiffSequenceMarkerContent(row.text)}
+              </span>
+            </div>
+          );
+        }
         if (row.kind === "context") {
           const tokenRow = unifiedTokenRows?.[rowIndex];
           const tokenLine = tokenRow?.kind === "single" ? tokenRow.tokenLine : undefined;
@@ -2030,6 +2070,49 @@ function DiffViewerBody({
       })}
     </div>
   );
+}
+
+function renderDiffSequenceMarkerContent(line: string): ReactNode {
+  const match = /^Edit (\d+) \| \+(\d+) -(\d+) \| (.+)$/.exec(line.trim());
+  if (!match) {
+    return line;
+  }
+  const [, editNumber, addedLineCount, removedLineCount, timeLabel] = match;
+  return (
+    <>
+      <span className="diff-sequence-marker-title">Edit {editNumber}</span>
+      <span className="diff-sequence-marker-separator" aria-hidden="true">
+        |
+      </span>
+      <span className="diff-sequence-marker-meta">
+        <span className="diff-meta-added">+{addedLineCount}</span>
+        <span className="diff-meta-removed">-{removedLineCount}</span>
+      </span>
+      <span className="diff-sequence-marker-separator" aria-hidden="true">
+        |
+      </span>
+      <span className="diff-sequence-marker-time">{timeLabel}</span>
+    </>
+  );
+}
+
+function buildExternalDiffContent(codeValue: string): string {
+  return codeValue
+    .split(/\r?\n/)
+    .map((line) =>
+      /^Edit \d+ \| \+\d+ -\d+ \| .+$/.test(line.trim())
+        ? formatExternalDiffSequenceMarker(line)
+        : line,
+    )
+    .join("\n");
+}
+
+function formatExternalDiffSequenceMarker(line: string): string {
+  const normalized = line.trim();
+  if (!normalized) {
+    return line;
+  }
+  return `=========== ${normalized.replace(/\s+\|\s+/g, " · ")} ===========`;
 }
 
 export function renderRichText(

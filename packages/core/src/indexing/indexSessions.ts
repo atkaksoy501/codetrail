@@ -280,6 +280,7 @@ type ClaudeTurnNormalizationState = {
   previousSnapshotByPath: Map<string, ClaudeSnapshotFileEntry>;
   pendingBySourceId: Map<string, ClaudePendingToolEdit[]>;
   backupTextByName: Map<string, string | null>;
+  currentTextByPath: Map<string, string>;
 };
 
 type IndexingStatements = {
@@ -2041,6 +2042,7 @@ function createClaudeTurnNormalizationState(
     previousSnapshotByPath: new Map(),
     pendingBySourceId: new Map(),
     backupTextByName: new Map(),
+    currentTextByPath: new Map(),
   };
 }
 
@@ -2101,10 +2103,16 @@ function registerClaudeToolEditCandidate(args: {
     fileHistoryDirectory: args.claudeNormalizationState.fileHistoryDirectory,
     previousSnapshotByPath: args.claudeNormalizationState.previousSnapshotByPath,
     backupTextByName: args.claudeNormalizationState.backupTextByName,
+    currentTextByPath: args.claudeNormalizationState.currentTextByPath,
   });
   if (!provisional) {
     return;
   }
+  rememberClaudeCurrentText(
+    args.claudeNormalizationState.currentTextByPath,
+    candidate,
+    provisional.currentText,
+  );
   upsertMessageToolEditFile(args.statements, {
     id: makeToolCallId(args.persistedMessageId, 1000 + fileOrdinal),
     messageId: args.persistedMessageId,
@@ -2202,6 +2210,11 @@ function processClaudeSnapshotEvent(args: {
       backupTextByName: args.claudeNormalizationState.backupTextByName,
     });
     if (normalized) {
+      rememberClaudeCurrentText(
+        args.claudeNormalizationState.currentTextByPath,
+        candidate,
+        normalized.currentText,
+      );
       upsertMessageToolEditFile(args.statements, {
         id: makeToolCallId(candidate.messageDbId, 1000 + candidate.fileOrdinal),
         messageId: candidate.messageDbId,
@@ -2248,6 +2261,7 @@ function buildBestEffortClaudeToolEditFile(args: {
   fileHistoryDirectory: string | null;
   previousSnapshotByPath: Map<string, ClaudeSnapshotFileEntry>;
   backupTextByName: Map<string, string | null>;
+  currentTextByPath: Map<string, string>;
 }): {
   filePath: string;
   previousFilePath: string | null;
@@ -2258,12 +2272,14 @@ function buildBestEffortClaudeToolEditFile(args: {
   exactness: ToolEditExactness;
   beforeHash: string | null;
   afterHash: string | null;
+  currentText: string | null;
 } | null {
   const beforeText = readClaudeKnownBeforeText({
     candidate: args.candidate,
     fileHistoryDirectory: args.fileHistoryDirectory,
     previousSnapshotByPath: args.previousSnapshotByPath,
     backupTextByName: args.backupTextByName,
+    currentTextByPath: args.currentTextByPath,
   });
 
   if (args.candidate.toolName === "Write") {
@@ -2282,6 +2298,7 @@ function buildBestEffortClaudeToolEditFile(args: {
         exactness: "best_effort",
         beforeHash: null,
         afterHash: hashText(afterText),
+        currentText: afterText,
       };
     }
     const diff = buildUnifiedDiffFromTextPair({
@@ -2300,6 +2317,7 @@ function buildBestEffortClaudeToolEditFile(args: {
       exactness: "best_effort",
       beforeHash: hashText(beforeText),
       afterHash: hashText(afterText),
+      currentText: afterText,
     };
   }
 
@@ -2332,6 +2350,7 @@ function buildBestEffortClaudeToolEditFile(args: {
         exactness: "best_effort",
         beforeHash: hashText(beforeText),
         afterHash: hashText(afterText),
+        currentText: afterText,
       };
     }
   }
@@ -2351,6 +2370,7 @@ function buildBestEffortClaudeToolEditFile(args: {
     exactness: "best_effort",
     beforeHash: null,
     afterHash: null,
+    currentText: null,
   };
 }
 
@@ -2359,7 +2379,15 @@ function readClaudeKnownBeforeText(args: {
   fileHistoryDirectory: string | null;
   previousSnapshotByPath: Map<string, ClaudeSnapshotFileEntry>;
   backupTextByName: Map<string, string | null>;
+  currentTextByPath: Map<string, string>;
 }): string | null {
+  const currentText =
+    args.currentTextByPath.get(args.candidate.comparisonPath) ??
+    args.currentTextByPath.get(args.candidate.filePath) ??
+    null;
+  if (currentText !== null) {
+    return currentText;
+  }
   const snapshotEntry =
     args.previousSnapshotByPath.get(args.candidate.comparisonPath) ??
     args.previousSnapshotByPath.get(args.candidate.filePath);
@@ -2432,6 +2460,7 @@ function buildExactClaudeToolEditFile(args: {
   exactness: ToolEditExactness;
   beforeHash: string | null;
   afterHash: string | null;
+  currentText: string | null;
 } | null {
   const beforeText = readClaudeBackupText(
     args.fileHistoryDirectory,
@@ -2460,6 +2489,7 @@ function buildExactClaudeToolEditFile(args: {
       exactness: "exact",
       beforeHash: beforeText === null ? null : hashText(beforeText),
       afterHash: hashText(afterText),
+      currentText: afterText,
     };
   }
 
@@ -2492,7 +2522,20 @@ function buildExactClaudeToolEditFile(args: {
     exactness: "exact",
     beforeHash: hashText(beforeText),
     afterHash: hashText(afterText),
+    currentText: afterText,
   };
+}
+
+function rememberClaudeCurrentText(
+  currentTextByPath: Map<string, string>,
+  candidate: ClaudePendingToolEdit,
+  currentText: string | null,
+): void {
+  if (currentText === null) {
+    return;
+  }
+  currentTextByPath.set(candidate.filePath, currentText);
+  currentTextByPath.set(candidate.comparisonPath, currentText);
 }
 
 function readClaudeBackupText(

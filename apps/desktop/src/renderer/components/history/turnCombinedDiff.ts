@@ -3,14 +3,11 @@ import type { MessageCategory } from "@codetrail/core/browser";
 import { collectClaudeTurnEdits } from "./claudeTurnEdits";
 import { collectCodexTurnEdits } from "./codexTurnEdits";
 import {
-  type TurnCombinedExactness,
   type TurnCombinedFile,
   type TurnCombinedSourceMessage,
   type TurnSequenceEdit,
   countDiffLines,
-  representationFromExactness,
 } from "./turnCombinedModel";
-import { mergeUnifiedDiffs } from "./turnCombinedUtils";
 
 export type TurnCombinedMessage = TurnCombinedSourceMessage & {
   category: MessageCategory;
@@ -54,96 +51,56 @@ function groupEditsByFile(edits: TurnSequenceEdit[]): Map<string, TurnSequenceEd
 }
 
 function aggregateFileSteps(steps: TurnSequenceEdit[]): TurnCombinedFile {
-  if (steps.some((step) => step.provider === "claude")) {
-    return aggregateClaudeFileSteps(steps);
+  const first = steps[0];
+  if (!first) {
+    throw new Error("aggregateFileSteps requires at least one edit step");
   }
-  return aggregateCodexFileSteps(steps);
-}
-
-function aggregateClaudeFileSteps(steps: TurnSequenceEdit[]): TurnCombinedFile {
-  const last = steps.at(-1);
-  if (!last) {
-    throw new Error("aggregateClaudeFileSteps requires at least one edit step");
-  }
-  const merged = mergeStepDiffs(steps);
-  const hasBestEffortStep = steps.some((step) => step.exactness === "best_effort");
-  const hasDeleteChain = steps.length > 1 && steps.some((step) => step.changeType === "delete");
-  const exactness: TurnCombinedExactness =
-    steps.length === 1
-      ? steps[0]?.exactness === "exact"
-        ? "exact"
-        : "best_effort_combined"
-      : !hasBestEffortStep && merged.exact && !merged.overlapping && !hasDeleteChain
-        ? "exact"
-        : merged.diff && !hasDeleteChain
-          ? merged.overlapping
-            ? "best_effort_sequence"
-            : "best_effort_combined"
-          : "best_effort_sequence";
-  const counts =
-    exactness === "best_effort_sequence"
-      ? sumSequenceCounts(steps)
-      : countDiffLines(merged.diff ?? steps.at(-1)?.unifiedDiff ?? null);
+  const identity = deriveCombinedFileIdentity(steps);
+  const isExactSingleEdit = steps.length === 1 && first.exactness === "exact";
+  const displayUnifiedDiff = isExactSingleEdit ? first.unifiedDiff : null;
+  const counts = isExactSingleEdit
+    ? countDiffLines(displayUnifiedDiff)
+    : sumSequenceCounts(steps);
   return {
-    filePath: last.filePath,
-    previousFilePath: steps.find((step) => step.previousFilePath)?.previousFilePath ?? null,
-    changeType: last.changeType,
-    exactness,
-    defaultRepresentation: representationFromExactness(exactness),
-    combinedUnifiedDiff: merged.diff ?? steps.at(-1)?.unifiedDiff ?? null,
+    filePath: identity.filePath,
+    previousFilePath: identity.previousFilePath,
+    changeType: identity.changeType,
+    displayMode: isExactSingleEdit ? "diff" : "sequence",
+    displayUnifiedDiff,
     addedLineCount: counts.added,
     removedLineCount: counts.removed,
     sequenceEdits: steps,
   };
 }
 
-function aggregateCodexFileSteps(steps: TurnSequenceEdit[]): TurnCombinedFile {
-  const last = steps.at(-1);
-  if (!last) {
-    throw new Error("aggregateCodexFileSteps requires at least one edit step");
-  }
-  const merged = mergeStepDiffs(steps);
-  const hasBestEffortStep = steps.some((step) => step.exactness === "best_effort");
-  const hasOverlappingRewrite = merged.overlapping;
-  const hasDeleteChain = steps.length > 1 && steps.some((step) => step.changeType === "delete");
-  const exactness: TurnCombinedExactness =
-    steps.length === 1 && steps[0]?.exactness === "exact"
-      ? "exact"
-      : !hasBestEffortStep && !hasOverlappingRewrite && !hasDeleteChain && merged.diff
-        ? "best_effort_combined"
-        : "best_effort_sequence";
-  const counts =
-    exactness === "best_effort_sequence"
-      ? sumSequenceCounts(steps)
-      : countDiffLines(merged.diff ?? steps.at(-1)?.unifiedDiff ?? null);
-  return {
-    filePath: last.filePath,
-    previousFilePath: steps.find((step) => step.previousFilePath)?.previousFilePath ?? null,
-    changeType: last.changeType,
-    exactness,
-    defaultRepresentation: representationFromExactness(exactness),
-    combinedUnifiedDiff: merged.diff ?? steps.at(-1)?.unifiedDiff ?? null,
-    addedLineCount: counts.added,
-    removedLineCount: counts.removed,
-    sequenceEdits: steps,
-  };
-}
-
-function mergeStepDiffs(steps: TurnSequenceEdit[]): {
-  diff: string | null;
-  exact: boolean;
-  overlapping: boolean;
+function deriveCombinedFileIdentity(steps: TurnSequenceEdit[]): {
+  filePath: string;
+  previousFilePath: string | null;
+  changeType: "add" | "update" | "delete" | "move";
 } {
-  let currentDiff: string | null = null;
-  let exact = true;
-  let overlapping = false;
-  for (const step of steps) {
-    const merged = mergeUnifiedDiffs(currentDiff, step.unifiedDiff, step.filePath);
-    currentDiff = merged.diff;
-    exact = exact && merged.exact;
-    overlapping = overlapping || merged.overlapping;
+  const first = steps[0];
+  const last = steps.at(-1);
+  if (!first || !last) {
+    throw new Error("deriveCombinedFileIdentity requires at least one edit step");
   }
-  return { diff: currentDiff, exact, overlapping };
+
+  const initialPath =
+    first.changeType === "add" ? null : (first.previousFilePath ?? first.filePath);
+  const hasRename = initialPath !== null && initialPath !== last.filePath;
+  const changeType =
+    last.changeType === "delete"
+      ? "delete"
+      : initialPath === null
+        ? "add"
+        : hasRename || steps.some((step) => step.changeType === "move")
+          ? "move"
+          : "update";
+
+  return {
+    filePath: last.filePath,
+    previousFilePath: initialPath,
+    changeType,
+  };
 }
 
 function sumSequenceCounts(steps: TurnSequenceEdit[]): { added: number; removed: number } {

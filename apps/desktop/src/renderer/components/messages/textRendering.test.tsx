@@ -1289,6 +1289,89 @@ describe("CodeBlock", () => {
     });
   });
 
+  it("adds explicit edit separators when opening sequenced diffs externally", async () => {
+    resetContentViewerCachesForTests();
+    openContentInEditorMock.mockClear();
+    openDiffInEditorMock.mockClear();
+    openFileInEditorMock.mockClear();
+    paneStateMock.externalTools = [{ id: "editor:vscode" }, { id: "diff:vscode" }];
+    listAvailableEditorsMock.mockResolvedValue({
+      editors: [
+        {
+          id: "editor:vscode",
+          kind: "known",
+          label: "VS Code",
+          appId: "vscode",
+          detected: true,
+          command: "/usr/local/bin/code",
+          args: [],
+          capabilities: {
+            openFile: true,
+            openAtLineColumn: true,
+            openContent: true,
+            openDiff: true,
+          },
+        },
+      ],
+      diffTools: [
+        {
+          id: "diff:vscode",
+          kind: "known",
+          label: "VS Code",
+          appId: "vscode",
+          detected: true,
+          command: "/usr/local/bin/code",
+          args: [],
+          capabilities: {
+            openFile: true,
+            openAtLineColumn: true,
+            openContent: true,
+            openDiff: true,
+          },
+        },
+      ],
+    } as never);
+
+    render(
+      <DiffBlock
+        codeValue={[
+          "Edit 1 | +1 -1 | 12:50 PM",
+          "diff --git a/a.ts b/a.ts",
+          "--- a/a.ts",
+          "+++ b/a.ts",
+          "@@ -1,1 +1,1 @@",
+          "-const beforeValue = 1;",
+          "+const afterValue = 2;",
+        ].join("\n")}
+        filePath="/Users/acme/repo/a.ts"
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Open" }));
+    fireEvent.click(screen.getByRole("button", { name: "Diff" }));
+
+    await waitFor(() => {
+      expect(openContentInEditorMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: "/Users/acme/repo/a.ts",
+          language: "diff",
+          content: expect.stringContaining("=========== Edit 1 · +1 -1 · 12:50 PM ==========="),
+        }),
+      );
+      expect(openFileInEditorMock).not.toHaveBeenCalled();
+      expect(openDiffInEditorMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          leftContent: expect.stringContaining(
+            "=========== Edit 1 · +1 -1 · 12:50 PM ===========",
+          ),
+          rightContent: expect.stringContaining(
+            "=========== Edit 1 · +1 -1 · 12:50 PM ===========",
+          ),
+        }),
+      );
+    });
+  });
+
   it("resolves relative diff header paths into actionable viewer controls", async () => {
     resetContentViewerCachesForTests();
     openFileInEditorMock.mockClear();

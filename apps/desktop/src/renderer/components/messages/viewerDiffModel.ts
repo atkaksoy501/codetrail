@@ -8,6 +8,10 @@ import { detectLanguageFromFilePath, isAddedDiffLine, isRemovedDiffLine } from "
 
 export type DiffDisplayRow =
   | {
+      kind: "marker";
+      text: string;
+    }
+  | {
       kind: "context";
       oldLine: number;
       newLine: number;
@@ -44,6 +48,7 @@ export type DiffViewModel = {
 
 const INLINE_DIFF_MAX_LINE_LENGTH = 240;
 const INLINE_DIFF_MAX_TOKEN_COUNT = 80;
+const DIFF_SEQUENCE_MARKER_PATTERN = /^Edit \d+ \| \+\d+ -\d+ \| .+$/;
 
 export function buildDiffRenderSource(
   diffModel: DiffViewModel | null,
@@ -58,7 +63,9 @@ export function buildDiffRenderSource(
   if (mode === "unified") {
     return {
       unified: rows
-        .flatMap((row) => (row.kind === "paired" ? [row.leftText, row.rightText] : [row.text]))
+        .flatMap((row) =>
+          row.kind === "paired" ? [row.leftText, row.rightText] : [row.text],
+        )
         .join("\n"),
       splitLeft: "",
       splitRight: "",
@@ -68,7 +75,9 @@ export function buildDiffRenderSource(
     unified: "",
     splitLeft: rows
       .map((row) =>
-        row.kind === "context"
+        row.kind === "marker"
+          ? row.text
+          : row.kind === "context"
           ? row.text
           : row.kind === "paired"
             ? row.leftText
@@ -79,7 +88,9 @@ export function buildDiffRenderSource(
       .join("\n"),
     splitRight: rows
       .map((row) =>
-        row.kind === "context"
+        row.kind === "marker"
+          ? row.text
+          : row.kind === "context"
           ? row.text
           : row.kind === "paired"
             ? row.rightText
@@ -106,6 +117,16 @@ export function buildDiffViewModel(
 
   while (index < lines.length) {
     const line = lines[index] ?? "";
+    if (isDiffSequenceMarkerLine(line)) {
+      rows.push({
+        kind: "marker",
+        text: line,
+      });
+      oldLineNumber = 1;
+      newLineNumber = 1;
+      index += 1;
+      continue;
+    }
     if (line.startsWith("@@")) {
       const hunkStart = parseDiffHunkStart(line);
       if (hunkStart) {
@@ -189,6 +210,10 @@ export function buildDiffViewModel(
     addedLineCount,
     removedLineCount,
   };
+}
+
+function isDiffSequenceMarkerLine(line: string): boolean {
+  return DIFF_SEQUENCE_MARKER_PATTERN.test(line.trim());
 }
 
 function resolveAbsoluteDiffFilePath(filePath: string | null, pathRoots: string[]): string | null {

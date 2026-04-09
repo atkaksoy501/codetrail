@@ -265,4 +265,80 @@ describe("viewerDiffModel", () => {
     expect(model.displayFilePath).toBe("src/a.ts");
     expect(model.absoluteFilePath).toBe("/Users/acme/repo/src/a.ts");
   });
+
+  it("preserves sequence marker rows inside a unified diff stream", () => {
+    const diff = [
+      "Edit 1 | +1 -1 | 12:34 PM",
+      "diff --git a/a.ts b/a.ts",
+      "--- a/a.ts",
+      "+++ b/a.ts",
+      "@@ -1,1 +1,1 @@",
+      "-before",
+      "+after",
+      "Edit 2 | +1 -1 | 12:35 PM",
+      "diff --git a/a.ts b/a.ts",
+      "--- a/a.ts",
+      "+++ b/a.ts",
+      "@@ -2,1 +2,1 @@",
+      "-again",
+      "+done",
+    ].join("\n");
+
+    const model = buildDiffViewModel(diff, "/Users/acme/repo/a.ts", ["/Users/acme/repo"]);
+
+    expect(model.rows[0]).toEqual({
+      kind: "marker",
+      text: "Edit 1 | +1 -1 | 12:34 PM",
+    });
+    expect(model.rows[3]).toEqual({
+      kind: "marker",
+      text: "Edit 2 | +1 -1 | 12:35 PM",
+    });
+    expect(model.addedLineCount).toBe(2);
+    expect(model.removedLineCount).toBe(2);
+  });
+
+  it("resets synthetic line numbering at each sequence marker when a later edit has bare hunks", () => {
+    const diff = [
+      "Edit 1 | +1 -1 | 12:34 PM",
+      "diff --git a/a.ts b/a.ts",
+      "--- a/a.ts",
+      "+++ b/a.ts",
+      "@@ -42,1 +42,1 @@",
+      "-before",
+      "+after",
+      "Edit 2 | +1 -1 | 12:35 PM",
+      "diff --git a/a.ts b/a.ts",
+      "--- a/a.ts",
+      "+++ b/a.ts",
+      "@@",
+      "-again",
+      "+done",
+    ].join("\n");
+
+    const model = buildDiffViewModel(diff, "/Users/acme/repo/a.ts", ["/Users/acme/repo"]);
+    const removeRows = model.rows.filter((row) => row.kind === "remove");
+    const addRows = model.rows.filter((row) => row.kind === "add");
+
+    expect(removeRows[0]).toEqual(
+      expect.objectContaining({
+        oldLine: 42,
+      }),
+    );
+    expect(addRows[0]).toEqual(
+      expect.objectContaining({
+        newLine: 42,
+      }),
+    );
+    expect(removeRows[1]).toEqual(
+      expect.objectContaining({
+        oldLine: 1,
+      }),
+    );
+    expect(addRows[1]).toEqual(
+      expect.objectContaining({
+        newLine: 1,
+      }),
+    );
+  });
 });

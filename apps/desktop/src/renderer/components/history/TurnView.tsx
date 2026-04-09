@@ -1,29 +1,20 @@
-import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import type { useHistoryController } from "../../features/useHistoryController";
 import { copyTextToClipboard } from "../../lib/clipboard";
 import { usePaneFocus } from "../../lib/paneFocusController";
 import { MessageCard } from "../messages/MessageCard";
 import {
-  CodeBlock,
   DiffBlock,
   useDocumentCollapseMultiFileToolDiffs,
 } from "../messages/textRendering";
 import { formatToolEditFileSummary } from "../messages/toolEditUtils";
 import { trimProjectPrefixFromPath } from "../messages/viewerDiffModel";
 import { aggregateTurnCombinedFiles } from "./turnCombinedDiff";
-import {
-  type TurnCombinedFile,
-  type TurnCombinedRepresentation,
-  type TurnSequenceEdit,
-  bestEffortRepresentationLabel,
-  buildDeleteOnlyDiff,
-} from "./turnCombinedModel";
+import { type TurnCombinedFile, type TurnSequenceEdit } from "./turnCombinedModel";
 
 type HistoryController = ReturnType<typeof useHistoryController>;
 type TurnMessage = NonNullable<HistoryController["sessionTurnDetail"]>["messages"][number];
-const BEST_EFFORT_REPRESENTATION_TOOLTIP =
-  "Combined merges multiple edits into one diff.\nSequence shows the edits in chronological order.\nWhen a single merged diff is unreliable, Sequence is the safer view.";
 
 export function TurnView({ history }: { history: HistoryController }) {
   const detail = history.sessionTurnDetail;
@@ -149,9 +140,6 @@ function CombinedChangesCard({
   const [expandedFiles, setExpandedFiles] = useState<Record<string, boolean>>(() =>
     buildCombinedDiffExpansionState(files, defaultDiffExpanded),
   );
-  const [fileRepresentations, setFileRepresentations] = useState<
-    Record<string, TurnCombinedRepresentation>
-  >(() => buildCombinedDiffRepresentationState(files));
   const preview =
     files.length === 0
       ? "No file changes in this turn"
@@ -161,7 +149,7 @@ function CombinedChangesCard({
             changeType: file.changeType === "move" ? "update" : file.changeType,
             oldText: null,
             newText: null,
-            diff: file.combinedUnifiedDiff,
+            diff: file.displayUnifiedDiff,
           })),
         );
   const isEmpty = files.length === 0;
@@ -175,21 +163,11 @@ function CombinedChangesCard({
     );
   }, [defaultDiffExpanded, files]);
 
-  useEffect(() => {
-    setFileRepresentations((current) => reconcileCombinedDiffRepresentationState(current, files));
-  }, [files]);
-
   const handleCopy = () => {
     const text =
       files.length === 0
         ? "No file changes in this turn."
-        : files
-            .map((file) =>
-              file.combinedUnifiedDiff
-                ? file.combinedUnifiedDiff
-                : `${file.previousFilePath && file.previousFilePath !== file.filePath ? `${file.previousFilePath} -> ` : ""}${file.filePath} (${file.changeType})`,
-            )
-            .join("\n\n");
+        : buildCombinedCopyValue(files, pathRoots);
     void copyTextToClipboard(text);
     paneFocus.focusHistoryPane("message");
   };
@@ -259,25 +237,16 @@ function CombinedChangesCard({
                 {files.map((file) => {
                   const fileExpanded =
                     expandedFiles[buildCombinedFileKey(file)] ?? defaultDiffExpanded;
-                  const representation =
-                    fileRepresentations[buildCombinedFileKey(file)] ?? file.defaultRepresentation;
                   return (
                     <div key={buildCombinedFileKey(file)} className="turn-combined-file">
                       <TurnCombinedFileView
                         file={file}
-                        representation={representation}
                         expanded={fileExpanded}
                         defaultExpanded={defaultDiffExpanded}
                         onExpandedChange={(nextExpanded) => {
                           setExpandedFiles((current) => ({
                             ...current,
                             [buildCombinedFileKey(file)]: nextExpanded,
-                          }));
-                        }}
-                        onRepresentationChange={(nextRepresentation) => {
-                          setFileRepresentations((current) => ({
-                            ...current,
-                            [buildCombinedFileKey(file)]: nextRepresentation,
                           }));
                         }}
                         pathRoots={pathRoots}
@@ -315,14 +284,6 @@ function buildCombinedDiffExpansionState(
   return Object.fromEntries(files.map((file) => [buildCombinedFileKey(file), expanded]));
 }
 
-function buildCombinedDiffRepresentationState(
-  files: TurnCombinedFile[],
-): Record<string, TurnCombinedRepresentation> {
-  return Object.fromEntries(
-    files.map((file) => [buildCombinedFileKey(file), file.defaultRepresentation]),
-  );
-}
-
 function reconcileCombinedDiffExpansionState(
   current: Record<string, boolean>,
   files: TurnCombinedFile[],
@@ -333,18 +294,6 @@ function reconcileCombinedDiffExpansionState(
     return [key, current[key] ?? defaultExpanded] as const;
   });
   return Object.fromEntries(nextEntries);
-}
-
-function reconcileCombinedDiffRepresentationState(
-  current: Record<string, TurnCombinedRepresentation>,
-  files: TurnCombinedFile[],
-): Record<string, TurnCombinedRepresentation> {
-  return Object.fromEntries(
-    files.map((file) => [
-      buildCombinedFileKey(file),
-      current[buildCombinedFileKey(file)] ?? file.defaultRepresentation,
-    ]),
-  );
 }
 
 function buildCombinedFileBadges(
@@ -371,64 +320,32 @@ function buildCombinedFileBadges(
   return badges;
 }
 
-function buildCombinedRepresentationActions(
-  file: TurnCombinedFile,
-  representation: TurnCombinedRepresentation,
-  onRepresentationChange: (nextRepresentation: TurnCombinedRepresentation) => void,
-): ReactNode {
-  if (file.exactness === "exact") {
-    return null;
-  }
-  const nextRepresentation = representation === "combined" ? "sequence" : "combined";
-  return (
-    <button
-      type="button"
-      className="content-viewer-action message-action-button turn-representation-toggle"
-      title={BEST_EFFORT_REPRESENTATION_TOOLTIP}
-      onClick={() => onRepresentationChange(nextRepresentation)}
-    >
-      {bestEffortRepresentationLabel(representation)}
-    </button>
-  );
-}
-
 function TurnCombinedFileView({
   file,
-  representation,
   expanded,
   defaultExpanded,
   onExpandedChange,
-  onRepresentationChange,
   pathRoots,
   query,
   highlightPatterns,
 }: {
   file: TurnCombinedFile;
-  representation: TurnCombinedRepresentation;
   expanded: boolean;
   defaultExpanded: boolean;
   onExpandedChange: (expanded: boolean) => void;
-  onRepresentationChange: (representation: TurnCombinedRepresentation) => void;
   pathRoots: string[];
   query: string;
   highlightPatterns: string[];
 }) {
-  if (representation === "sequence" && file.sequenceEdits.length > 1) {
+  if (file.displayMode === "diff" && file.displayUnifiedDiff) {
     return (
-      <CodeBlock
-        language="text"
-        codeValue={buildCombinedSequenceCodeValue(file.sequenceEdits)}
-        metaLabel={buildCombinedFileLabel(file, pathRoots)}
+      <DiffBlock
+        codeValue={file.displayUnifiedDiff}
         filePath={file.filePath}
         pathRoots={pathRoots}
         query={query}
         highlightPatterns={highlightPatterns}
         metaBadges={buildCombinedFileBadges(file)}
-        headerActions={buildCombinedRepresentationActions(
-          file,
-          representation,
-          onRepresentationChange,
-        )}
         collapsible
         defaultExpanded={defaultExpanded}
         expanded={expanded}
@@ -439,19 +356,12 @@ function TurnCombinedFileView({
 
   return (
     <DiffBlock
-      codeValue={
-        file.combinedUnifiedDiff ?? buildDeleteOnlyDiff(file.previousFilePath ?? file.filePath)
-      }
+      codeValue={buildSequenceDisplayDiff(file.sequenceEdits)}
       filePath={file.filePath}
       pathRoots={pathRoots}
       query={query}
       highlightPatterns={highlightPatterns}
       metaBadges={buildCombinedFileBadges(file)}
-      headerActions={buildCombinedRepresentationActions(
-        file,
-        representation,
-        onRepresentationChange,
-      )}
       collapsible
       defaultExpanded={defaultExpanded}
       expanded={expanded}
@@ -460,15 +370,44 @@ function TurnCombinedFileView({
   );
 }
 
-function buildCombinedSequenceCodeValue(sequenceEdits: TurnSequenceEdit[]): string {
-  return sequenceEdits
-    .map((edit, index) => {
-      const timeLabel = new Date(edit.createdAt).toLocaleTimeString([], {
-        hour: "numeric",
-        minute: "2-digit",
-      });
-      const summary = `========= Edit ${index + 1} · +${edit.addedLineCount} -${edit.removedLineCount} · ${timeLabel} =========`;
-      return [summary, edit.unifiedDiff.trimEnd()].join("\n");
+function buildCombinedCopyValue(files: TurnCombinedFile[], pathRoots: string[]): string {
+  return files
+    .map((file) => {
+      if (file.displayMode === "diff" && file.displayUnifiedDiff) {
+        return file.displayUnifiedDiff;
+      }
+      return [`${buildCombinedFileLabel(file, pathRoots)}`, buildSequenceCopyValue(file.sequenceEdits)]
+        .join("\n");
     })
     .join("\n\n");
+}
+
+function buildSequenceCopyValue(sequenceEdits: TurnSequenceEdit[]): string {
+  return sequenceEdits
+    .map((edit, index) =>
+      [
+        formatSequenceMarkerLabel(index + 1, edit),
+        edit.unifiedDiff.trimEnd(),
+      ].join("\n"),
+    )
+    .join("\n\n");
+}
+
+function buildSequenceDisplayDiff(sequenceEdits: TurnSequenceEdit[]): string {
+  return sequenceEdits
+    .map((edit, index) =>
+      [formatSequenceMarkerLabel(index + 1, edit), edit.unifiedDiff.trimEnd()].join("\n"),
+    )
+    .join("\n");
+}
+
+function formatSequenceMarkerLabel(editNumber: number, edit: TurnSequenceEdit): string {
+  return `Edit ${editNumber} | +${edit.addedLineCount} -${edit.removedLineCount} | ${formatSequenceTimeLabel(edit.createdAt)}`;
+}
+
+function formatSequenceTimeLabel(createdAt: string): string {
+  return new Date(createdAt).toLocaleTimeString([], {
+    hour: "numeric",
+    minute: "2-digit",
+  });
 }

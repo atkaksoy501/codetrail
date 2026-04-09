@@ -3729,18 +3729,6 @@ button svg *,
   padding: 0 6px;
 }
 
-.content-viewer-action.turn-representation-toggle {
-  border: 1px solid color-mix(in srgb, var(--accent-teal) 24%, var(--border));
-  background: color-mix(in srgb, var(--accent-teal) 10%, var(--bg-elevated));
-  color: var(--accent-teal);
-  font-weight: 600;
-}
-
-.content-viewer-action.turn-representation-toggle:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--accent-teal) 16%, var(--bg-elevated));
-  color: var(--accent-teal);
-}
-
 .diff-meta-added {
   color: var(--diff-add-text);
 }
@@ -3792,6 +3780,51 @@ button svg *,
 
 .content-viewer-line.kind-shell {
   background: color-mix(in srgb, var(--code-bg) 92%, var(--accent-blue-dim));
+}
+
+.diff-sequence-marker {
+  border-top: 1px solid color-mix(in srgb, var(--border) 78%, var(--accent-blue-dim));
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 78%, var(--accent-blue-dim));
+  background: color-mix(in srgb, var(--code-bg) 90%, var(--accent-blue-dim));
+}
+
+.diff-sequence-marker-ln {
+  color: transparent;
+}
+
+.diff-sequence-marker-code {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+}
+
+.diff-split-row.diff-sequence-marker .diff-sequence-marker-code {
+  grid-column: 2 / 5;
+}
+
+.diff-sequence-marker-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-strong);
+}
+
+.diff-sequence-marker-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.diff-sequence-marker-separator {
+  color: var(--text-dim);
+}
+
+.diff-sequence-marker-time {
+  color: var(--text-muted);
 }
 
 .content-viewer-ln,
