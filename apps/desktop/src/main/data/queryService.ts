@@ -7,6 +7,8 @@ import {
   type Provider,
   type SearchMode,
   type SearchQueryPlan,
+  type TurnAnchorKind,
+  type TurnGroupingMode,
   buildSearchQueryPlan,
   buildWildcardFilterPatterns,
   createProviderRecord,
@@ -116,6 +118,10 @@ type MessageRow = {
   operation_duration_ms: number | null;
   operation_duration_source: "native" | "derived" | null;
   operation_duration_confidence: "high" | "low" | null;
+  turn_group_id: string | null;
+  turn_grouping_mode: TurnGroupingMode;
+  turn_anchor_kind: TurnAnchorKind | null;
+  native_turn_id: string | null;
 };
 
 type ToolEditFileRow = {
@@ -157,6 +163,9 @@ type TurnAnchorRow = {
   session_id: string;
   created_at: string;
   created_at_ms: number;
+  source_id: string;
+  turn_group_id: string | null;
+  turn_anchor_kind: TurnAnchorKind | null;
 };
 
 type TurnAnchorScopeSql = {
@@ -164,6 +173,15 @@ type TurnAnchorScopeSql = {
   whereClause: string;
   params: Array<string | number>;
 };
+
+const TURN_ANCHOR_WHERE_SQL = `(
+  (
+    m.turn_group_id IS NOT NULL
+    AND m.source_id = m.turn_group_id
+    AND m.turn_anchor_kind = 'user_prompt'
+  )
+  OR (m.turn_group_id IS NULL AND m.category = 'user')
+)`;
 
 type TurnNavigationMetadata = {
   turnNumber: number;
@@ -822,6 +840,10 @@ function getProjectCombinedDetailWithDatabase(
          m.operation_duration_ms,
          m.operation_duration_source,
          m.operation_duration_confidence,
+         m.turn_group_id,
+         m.turn_grouping_mode,
+         m.turn_anchor_kind,
+         m.native_turn_id,
          s.title as session_title,
          s.started_at as session_started_at,
          s.ended_at as session_ended_at,
@@ -1001,7 +1023,11 @@ function getSessionDetailWithDatabase(
          m.token_output,
          m.operation_duration_ms,
          m.operation_duration_source,
-         m.operation_duration_confidence
+         m.operation_duration_confidence,
+         m.turn_group_id,
+         m.turn_grouping_mode,
+         m.turn_anchor_kind,
+         m.native_turn_id
        FROM messages m
        WHERE ${whereClause}
        ORDER BY ${messageOrder}
@@ -1029,10 +1055,11 @@ function getSessionTurnWithDatabase(
 ): IpcResponse<"sessions:getTurn"> {
   const queryPlan = buildSearchQueryPlan(request.query, request.searchMode ?? "simple");
   const normalizedQuery = request.query.trim();
-  const { anchor, navigation } = queryPlan.error
+  const { anchor, navigation, nextAnchor } = queryPlan.error
     ? {
         anchor: undefined,
         navigation: makeEmptyTurnNavigationMetadata(),
+        nextAnchor: undefined,
       }
     : resolveScopedTurnNavigation(db, bookmarkStore, request);
 
@@ -1091,35 +1118,25 @@ function getSessionTurnWithDatabase(
     )
     .get(anchor.session_id) as SessionSummaryRow | undefined;
 
-  const nextUser = db
-    .prepare(
-      `SELECT id, created_at, created_at_ms
-       FROM messages
-       WHERE session_id = ?
-         AND category = 'user'
-         AND (
-           created_at_ms > ?
-           OR (
-             created_at_ms = ?
-             AND (
-               created_at > ?
-               OR (created_at = ? AND id > ?)
-             )
-           )
-         )
-       ORDER BY created_at_ms ASC, created_at ASC, id ASC
-       LIMIT 1`,
-    )
-    .get(
-      anchor.session_id,
-      anchor.created_at_ms,
-      anchor.created_at_ms,
-      anchor.created_at,
-      anchor.created_at,
-      anchor.id,
-    ) as FocusTargetRow | undefined;
+  const fallbackScope =
+    request.scopeMode === "bookmarks"
+      ? null
+      : buildTurnAnchorScopeSql({
+          ...(request.scopeMode ? { scopeMode: request.scopeMode } : {}),
+          ...(request.projectId ? { projectId: request.projectId } : {}),
+          ...(request.sessionId ? { sessionId: request.sessionId } : {}),
+        });
+  const resolvedNextAnchor =
+    nextAnchor ??
+    (fallbackScope ? loadAdjacentTurnAnchor(db, fallbackScope, anchor, "next") : undefined);
 
-  const rows = loadTurnMessages(db, anchor.session_id, anchor, nextUser, request.sortDirection);
+  const rows = loadTurnMessages(
+    db,
+    anchor.session_id,
+    anchor,
+    resolvedNextAnchor,
+    request.sortDirection,
+  );
   const messages = mapSessionMessageRows(db, rows);
   const anchorMessage = messages.find((message) => message.id === anchor.id) ?? null;
   const totalCount = rows.length;
@@ -1158,7 +1175,7 @@ function getSessionTurnWithDatabase(
     ? loadTurnMatchedMessageMetadata(db, {
         sessionId: anchor.session_id,
         anchor,
-        ...(nextUser ? { nextUser } : {}),
+        ...(resolvedNextAnchor ? { nextAnchor: resolvedNextAnchor } : {}),
         queryPlan,
       })
     : {
@@ -1198,15 +1215,18 @@ function resolveScopedTurnNavigation(
 ): {
   anchor: TurnAnchorRow | undefined;
   navigation: TurnNavigationMetadata;
+  nextAnchor: TurnAnchorRow | undefined;
 } {
   if (request.scopeMode === "bookmarks") {
-    const anchors = loadBookmarkTurnAnchors(bookmarkStore, {
+    const anchors = loadBookmarkTurnAnchors(db, bookmarkStore, {
       ...(request.projectId ? { projectId: request.projectId } : {}),
     });
     const anchor = resolveScopedTurnAnchorFromList(anchors, request);
+    const navigation = buildTurnNavigationMetadataFromAnchors(anchors, anchor?.id ?? null);
     return {
       anchor,
-      navigation: buildTurnNavigationMetadataFromAnchors(anchors, anchor?.id ?? null),
+      navigation,
+      nextAnchor: anchors.find((candidate) => candidate.id === navigation.nextTurnAnchorMessageId),
     };
   }
 
@@ -1219,6 +1239,7 @@ function resolveScopedTurnNavigation(
     return {
       anchor: undefined,
       navigation: makeEmptyTurnNavigationMetadata(),
+      nextAnchor: undefined,
     };
   }
 
@@ -1238,9 +1259,11 @@ function resolveScopedTurnNavigation(
         firstTurnAnchorMessageId: first?.id ?? null,
         latestTurnAnchorMessageId: latest?.id ?? null,
       },
+      nextAnchor: undefined,
     };
   }
 
+  const nextAnchor = loadAdjacentTurnAnchor(db, scope, anchor, "next");
   return {
     anchor,
     navigation: {
@@ -1248,10 +1271,11 @@ function resolveScopedTurnNavigation(
       totalTurns,
       previousTurnAnchorMessageId:
         loadAdjacentTurnAnchor(db, scope, anchor, "previous")?.id ?? null,
-      nextTurnAnchorMessageId: loadAdjacentTurnAnchor(db, scope, anchor, "next")?.id ?? null,
+      nextTurnAnchorMessageId: nextAnchor?.id ?? null,
       firstTurnAnchorMessageId: first?.id ?? null,
       latestTurnAnchorMessageId: latest?.id ?? null,
     },
+    nextAnchor,
   };
 }
 
@@ -1264,7 +1288,7 @@ function buildTurnAnchorScopeSql(args: {
   if (scopeMode === "bookmarks") {
     return null;
   }
-  const conditions = ["m.category = 'user'"];
+  const conditions = [TURN_ANCHOR_WHERE_SQL];
   const params: Array<string | number> = [];
   if (scopeMode === "project_all") {
     if (!args.projectId) {
@@ -1308,7 +1332,10 @@ function loadBoundaryTurnAnchor(
          m.id,
          m.session_id,
          m.created_at,
-         m.created_at_ms
+         m.created_at_ms,
+         m.source_id,
+         m.turn_group_id,
+         m.turn_anchor_kind
        ${scope.fromSql}
        WHERE ${scope.whereClause}
        ORDER BY ${
@@ -1332,7 +1359,10 @@ function loadTurnAnchorByNumber(
          m.id,
          m.session_id,
          m.created_at,
-         m.created_at_ms
+         m.created_at_ms,
+         m.source_id,
+         m.turn_group_id,
+         m.turn_anchor_kind
        ${scope.fromSql}
        WHERE ${scope.whereClause}
        ORDER BY m.created_at_ms ASC, m.created_at ASC, m.id ASC
@@ -1352,7 +1382,10 @@ function loadTurnAnchorByMessageId(
          m.id,
          m.session_id,
          m.created_at,
-         m.created_at_ms
+         m.created_at_ms,
+         m.source_id,
+         m.turn_group_id,
+         m.turn_anchor_kind
        ${scope.fromSql}
        WHERE ${scope.whereClause} AND m.id = ?`,
     )
@@ -1381,7 +1414,10 @@ function loadScopedTurnTargetMessage(
            m.id,
            m.session_id,
            m.created_at,
-           m.created_at_ms
+           m.created_at_ms,
+           m.source_id,
+           m.turn_group_id,
+           m.turn_anchor_kind
          FROM messages m
          JOIN sessions s ON s.id = m.session_id
          WHERE s.project_id = ?
@@ -1398,7 +1434,10 @@ function loadScopedTurnTargetMessage(
          m.id,
          m.session_id,
          m.created_at,
-         m.created_at_ms
+         m.created_at_ms,
+         m.source_id,
+         m.turn_group_id,
+         m.turn_anchor_kind
        FROM messages m
        WHERE m.session_id = ?
          AND m.id = ?`,
@@ -1411,13 +1450,37 @@ function loadContainingTurnAnchorByTargetMessage(
   scope: TurnAnchorScopeSql,
   targetMessage: TurnAnchorRow,
 ): TurnAnchorRow | undefined {
+  if (targetMessage.turn_group_id) {
+    return db
+      .prepare(
+        `SELECT
+           m.id,
+           m.session_id,
+           m.created_at,
+           m.created_at_ms,
+           m.source_id,
+           m.turn_group_id,
+           m.turn_anchor_kind
+         FROM messages m
+         WHERE m.session_id = ?
+           AND m.source_id = ?
+           AND m.turn_anchor_kind = 'user_prompt'
+         ORDER BY m.created_at_ms ASC, m.created_at ASC, m.id ASC
+         LIMIT 1`,
+      )
+      .get(targetMessage.session_id, targetMessage.turn_group_id) as TurnAnchorRow | undefined;
+  }
+
   return db
     .prepare(
       `SELECT
          m.id,
          m.session_id,
          m.created_at,
-         m.created_at_ms
+         m.created_at_ms,
+         m.source_id,
+         m.turn_group_id,
+         m.turn_anchor_kind
        ${scope.fromSql}
        WHERE ${scope.whereClause}
          AND m.session_id = ?
@@ -1521,7 +1584,10 @@ function loadAdjacentTurnAnchor(
          m.id,
          m.session_id,
          m.created_at,
-         m.created_at_ms
+         m.created_at_ms,
+         m.source_id,
+         m.turn_group_id,
+         m.turn_anchor_kind
        ${scope.fromSql}
        WHERE ${scope.whereClause}
          AND (
@@ -1552,6 +1618,7 @@ function loadAdjacentTurnAnchor(
 }
 
 function loadBookmarkTurnAnchors(
+  db: DatabaseHandle,
   bookmarkStore: BookmarkStore,
   args: {
     projectId?: string;
@@ -1560,17 +1627,45 @@ function loadBookmarkTurnAnchors(
   if (!args.projectId) {
     return [];
   }
-  return bookmarkStore
-    .listProjectBookmarks(args.projectId, {
-      categories: ["user"],
-      sortDirection: "asc",
-    })
-    .map((row) => ({
-      id: row.message_id,
-      session_id: row.session_id,
-      created_at: row.message_created_at,
-      created_at_ms: Date.parse(row.message_created_at) || 0,
-    }));
+  const bookmarkRows = bookmarkStore.listProjectBookmarks(args.projectId, {
+    categories: ["user"],
+    sortDirection: "asc",
+  });
+  if (bookmarkRows.length === 0) {
+    return [];
+  }
+
+  const placeholders = bookmarkRows.map(() => "?").join(", ");
+  const messageRows = db
+    .prepare(
+      `SELECT
+         m.id,
+         m.session_id,
+         m.created_at,
+         m.created_at_ms,
+         m.source_id,
+         m.turn_group_id,
+         m.turn_anchor_kind
+       FROM messages m
+       WHERE m.id IN (${placeholders})`,
+    )
+    .all(...bookmarkRows.map((row) => row.message_id)) as TurnAnchorRow[];
+  const turnMetadataByMessageId = new Map(messageRows.map((row) => [row.id, row]));
+
+  return bookmarkRows.map((row) => {
+    const messageRow = turnMetadataByMessageId.get(row.message_id);
+    return (
+      messageRow ?? {
+        id: row.message_id,
+        session_id: row.session_id,
+        created_at: row.message_created_at,
+        created_at_ms: Date.parse(row.message_created_at) || 0,
+        source_id: row.message_source_id,
+        turn_group_id: null,
+        turn_anchor_kind: "user_prompt" as const,
+      }
+    );
+  });
 }
 
 function resolveScopedTurnAnchorFromList(
@@ -1606,14 +1701,14 @@ function buildTurnNavigationMetadataFromAnchors(
 function loadTurnMessages(
   db: DatabaseHandle,
   sessionId: string,
-  anchor: FocusTargetRow,
-  nextUser: FocusTargetRow | undefined,
+  anchor: TurnAnchorRow,
+  nextAnchor: TurnAnchorRow | undefined,
   sortDirection: "asc" | "desc",
 ): MessageRow[] {
   const turnScope = buildTurnMessageFilters({
     sessionId,
     anchor,
-    ...(nextUser ? { nextUser } : {}),
+    ...(nextAnchor ? { nextAnchor } : {}),
     queryPlan: EMPTY_SEARCH_QUERY_PLAN,
   });
   return db
@@ -1631,7 +1726,11 @@ function loadTurnMessages(
          m.token_output,
          m.operation_duration_ms,
          m.operation_duration_source,
-         m.operation_duration_confidence
+         m.operation_duration_confidence,
+         m.turn_group_id,
+         m.turn_grouping_mode,
+         m.turn_anchor_kind,
+         m.native_turn_id
        FROM messages m
        WHERE ${turnScope.whereClause}
        ORDER BY ${
@@ -2008,8 +2107,8 @@ function loadTurnMatchedMessageMetadata(
   db: DatabaseHandle,
   args: {
     sessionId: string;
-    anchor: FocusTargetRow;
-    nextUser?: FocusTargetRow;
+    anchor: TurnAnchorRow;
+    nextAnchor?: TurnAnchorRow;
     queryPlan: SearchQueryPlan;
   },
 ): {
@@ -2085,7 +2184,11 @@ function listLiveBookmarkMessagesById(
          m.token_output,
          m.operation_duration_ms,
          m.operation_duration_source,
-         m.operation_duration_confidence
+         m.operation_duration_confidence,
+         m.turn_group_id,
+         m.turn_grouping_mode,
+         m.turn_anchor_kind,
+         m.native_turn_id
        FROM messages m
        JOIN sessions s ON s.id = m.session_id
        WHERE s.project_id = ?
@@ -2236,11 +2339,19 @@ function buildProjectMessageFilters(args: {
 
 function buildTurnMessageFilters(args: {
   sessionId: string;
-  anchor: FocusTargetRow;
-  nextUser?: FocusTargetRow;
+  anchor: TurnAnchorRow;
+  nextAnchor?: TurnAnchorRow;
   categories?: string[];
   queryPlan: SearchQueryPlan;
 }): { whereClause: string; params: Array<string | number> } {
+  if (args.anchor.turn_group_id) {
+    const conditions = ["m.session_id = ?", "m.turn_group_id = ?"];
+    const params: Array<string | number> = [args.sessionId, args.anchor.turn_group_id];
+    appendNormalizedCategoryFilter(conditions, params, args.categories);
+    appendMessageQueryConditions(conditions, params, args.queryPlan, "m");
+    return { whereClause: conditions.join(" AND "), params };
+  }
+
   const conditions = [
     "m.session_id = ?",
     `(
@@ -2257,7 +2368,7 @@ function buildTurnMessageFilters(args: {
     args.anchor.id,
   ];
 
-  if (args.nextUser) {
+  if (args.nextAnchor) {
     conditions.push(
       `(
         m.created_at_ms < ?
@@ -2265,11 +2376,11 @@ function buildTurnMessageFilters(args: {
       )`,
     );
     params.push(
-      args.nextUser.created_at_ms,
-      args.nextUser.created_at_ms,
-      args.nextUser.created_at,
-      args.nextUser.created_at,
-      args.nextUser.id,
+      args.nextAnchor.created_at_ms,
+      args.nextAnchor.created_at_ms,
+      args.nextAnchor.created_at,
+      args.nextAnchor.created_at,
+      args.nextAnchor.id,
     );
   }
 
@@ -2409,6 +2520,10 @@ function mapSessionMessageRow(
     operationDurationMs: row.operation_duration_ms,
     operationDurationSource: row.operation_duration_source,
     operationDurationConfidence: row.operation_duration_confidence,
+    turnGroupId: row.turn_group_id,
+    turnGroupingMode: row.turn_grouping_mode,
+    turnAnchorKind: row.turn_anchor_kind,
+    nativeTurnId: row.native_turn_id,
     ...(toolEditFiles && toolEditFiles.length > 0 ? { toolEditFiles } : {}),
   };
 }
@@ -2468,6 +2583,10 @@ function mapStoredBookmarkMessageRow(
     operationDurationMs: null,
     operationDurationSource: null,
     operationDurationConfidence: null,
+    turnGroupId: null,
+    turnGroupingMode: "heuristic",
+    turnAnchorKind: null,
+    nativeTurnId: null,
   };
 }
 

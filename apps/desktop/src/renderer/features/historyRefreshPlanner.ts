@@ -15,7 +15,8 @@ import type {
 } from "./historyRefreshTypes";
 
 function getVisibleMessageAnchor(container: HTMLElement): {
-  referenceMessageId: string;
+  referenceElementId: string;
+  referenceElementKind: "message" | "scroll-anchor";
   referenceOffsetTop: number;
 } | null {
   const rect = container.getBoundingClientRect();
@@ -27,22 +28,60 @@ function getVisibleMessageAnchor(container: HTMLElement): {
       : null;
   const anchor =
     elementAtPoint instanceof HTMLElement
-      ? elementAtPoint.closest<HTMLElement>("[data-history-message-id]")
+      ? (elementAtPoint.closest<HTMLElement>("[data-history-scroll-anchor-id]") ??
+        elementAtPoint.closest<HTMLElement>("[data-history-message-id]"))
       : null;
   if (anchor && container.contains(anchor)) {
+    const scrollAnchorId = anchor.getAttribute("data-history-scroll-anchor-id");
     return {
-      referenceMessageId: anchor.getAttribute("data-history-message-id") ?? "",
+      referenceElementId: scrollAnchorId ?? anchor.getAttribute("data-history-message-id") ?? "",
+      referenceElementKind: scrollAnchorId ? "scroll-anchor" : "message",
       referenceOffsetTop: anchor.offsetTop,
     };
   }
 
-  const firstMessage = container.querySelector<HTMLElement>("[data-history-message-id]");
-  if (!firstMessage) {
+  const visibleAnchors = Array.from(
+    container.querySelectorAll<HTMLElement>(
+      "[data-history-scroll-anchor-id], [data-history-message-id]",
+    ),
+  )
+    .map((candidate) => ({
+      anchor: candidate,
+      rect: candidate.getBoundingClientRect(),
+    }))
+    .filter(
+      ({ rect: candidateRect }) =>
+        candidateRect.bottom > rect.top && candidateRect.top < rect.bottom,
+    )
+    .sort((left, right) => {
+      const leftDistance = Math.max(left.rect.top, rect.top) - rect.top;
+      const rightDistance = Math.max(right.rect.top, rect.top) - rect.top;
+      if (leftDistance !== rightDistance) {
+        return leftDistance - rightDistance;
+      }
+      if (left.anchor.offsetTop !== right.anchor.offsetTop) {
+        return right.anchor.offsetTop - left.anchor.offsetTop;
+      }
+      const leftId =
+        left.anchor.getAttribute("data-history-scroll-anchor-id") ??
+        left.anchor.getAttribute("data-history-message-id") ??
+        "";
+      const rightId =
+        right.anchor.getAttribute("data-history-scroll-anchor-id") ??
+        right.anchor.getAttribute("data-history-message-id") ??
+        "";
+      return leftId.localeCompare(rightId);
+    });
+  const firstVisibleAnchor = visibleAnchors[0]?.anchor;
+  if (!firstVisibleAnchor) {
     return null;
   }
+  const scrollAnchorId = firstVisibleAnchor.getAttribute("data-history-scroll-anchor-id");
   return {
-    referenceMessageId: firstMessage.getAttribute("data-history-message-id") ?? "",
-    referenceOffsetTop: firstMessage.offsetTop,
+    referenceElementId:
+      scrollAnchorId ?? firstVisibleAnchor.getAttribute("data-history-message-id") ?? "",
+    referenceElementKind: scrollAnchorId ? "scroll-anchor" : "message",
+    referenceOffsetTop: firstVisibleAnchor.offsetTop,
   };
 }
 
@@ -117,7 +156,7 @@ export function buildRefreshContext({
         );
   const baselineTotalCount =
     selection.historyDetailMode === "turn"
-      ? (detailState.sessionTurnDetail?.totalCount ?? detailState.detailMessages.length)
+      ? (detailState.sessionTurnDetail?.totalTurns ?? 0)
       : getRefreshBaselineTotalCount({
           historyMode: selection.historyMode,
           selectedProject: detailState.selectedProject,
@@ -140,7 +179,7 @@ export function buildRefreshContext({
       sortDirection,
       page: selection.effectiveHistoryPage,
       totalCount: baselineTotalCount,
-      pageSize: sortState.messagePageSize,
+      pageSize: selection.historyDetailMode === "turn" ? 1 : sortState.messagePageSize,
     });
   const followEligible = isAtVisualEdge && isOnLiveEdgePage;
 
@@ -150,13 +189,12 @@ export function buildRefreshContext({
     prevMessageIds = getMessageListFingerprint(detailState.detailMessages);
   } else if (container) {
     const anchor = getVisibleMessageAnchor(container);
-    scrollPreservation = anchor
-      ? {
-          scrollTop: container.scrollTop,
-          referenceMessageId: anchor.referenceMessageId,
-          referenceOffsetTop: anchor.referenceOffsetTop,
-        }
-      : null;
+    scrollPreservation = {
+      scrollTop: container.scrollTop,
+      referenceElementId: anchor?.referenceElementId ?? "",
+      referenceElementKind: anchor?.referenceElementKind ?? "message",
+      referenceOffsetTop: anchor?.referenceOffsetTop ?? 0,
+    };
   }
 
   return {

@@ -88,6 +88,10 @@ const tableStatements = [
     operation_duration_ms INTEGER,
     operation_duration_source TEXT,
     operation_duration_confidence TEXT,
+    turn_group_id TEXT,
+    turn_grouping_mode TEXT NOT NULL DEFAULT 'heuristic',
+    turn_anchor_kind TEXT,
+    native_turn_id TEXT,
     created_at_ms INTEGER GENERATED ALWAYS AS (
       CASE
         WHEN unixepoch(created_at) IS NOT NULL THEN CAST(unixepoch(created_at) AS INTEGER) * 1000
@@ -197,6 +201,8 @@ const indexStatements = [
   "CREATE INDEX IF NOT EXISTS idx_messages_session_created ON messages(session_id, created_at_ms, created_at, id)",
   "CREATE INDEX IF NOT EXISTS idx_messages_session_category_created ON messages(session_id, category, created_at_ms, created_at, id)",
   "CREATE INDEX IF NOT EXISTS idx_messages_session_source_id ON messages(session_id, source_id)",
+  "CREATE INDEX IF NOT EXISTS idx_messages_session_turn_group ON messages(session_id, turn_group_id, created_at_ms, created_at, id)",
+  "CREATE INDEX IF NOT EXISTS idx_messages_session_turn_anchor ON messages(session_id, turn_anchor_kind, source_id, turn_group_id, created_at_ms, created_at, id)",
   "CREATE INDEX IF NOT EXISTS idx_tool_calls_message_id ON tool_calls(message_id)",
   "CREATE INDEX IF NOT EXISTS idx_message_tool_edit_files_message_id ON message_tool_edit_files(message_id, file_ordinal)",
   "CREATE INDEX IF NOT EXISTS idx_projects_provider_name ON projects(provider, name_folded, id)",
@@ -230,7 +236,7 @@ export function ensureDatabaseSchema(db: SqliteDatabase): DatabaseBootstrapResul
   const existingSchemaVersion = readSchemaVersion(db);
   const schemaNeedsRebuild =
     existingSchemaVersion !== null &&
-    (existingSchemaVersion !== DATABASE_SCHEMA_VERSION || !hasRequiredDerivedSchema(db));
+    (existingSchemaVersion !== DATABASE_SCHEMA_VERSION || !hasRequiredSchemaColumns(db));
   let schemaRebuilt = false;
 
   if (schemaNeedsRebuild) {
@@ -503,11 +509,17 @@ function readSchemaVersion(db: SqliteDatabase): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function hasRequiredDerivedSchema(db: SqliteDatabase): boolean {
+function hasRequiredSchemaColumns(db: SqliteDatabase): boolean {
   return (
     tableHasColumnsIfPresent(db, "projects", ["name_folded", "path_folded"]) &&
     tableHasColumnsIfPresent(db, "sessions", ["activity_at", "activity_at_ms"]) &&
-    tableHasColumnsIfPresent(db, "messages", ["created_at_ms"])
+    tableHasColumnsIfPresent(db, "messages", [
+      "created_at_ms",
+      "turn_group_id",
+      "turn_grouping_mode",
+      "turn_anchor_kind",
+      "native_turn_id",
+    ])
   );
 }
 

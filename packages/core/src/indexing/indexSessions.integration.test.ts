@@ -1344,6 +1344,364 @@ describe("runIncrementalIndexing", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
+  it("stores hybrid Codex turn metadata for steering prompts inside the same native run", () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-index-codex-turn-groups-"));
+    const dbPath = join(dir, "index.db");
+    const codexFile = join(
+      dir,
+      ".codex",
+      "sessions",
+      "2026",
+      "04",
+      "11",
+      "hybrid-turn-groups.jsonl",
+    );
+    mkdirSync(dirname(codexFile), { recursive: true });
+    writeFileSync(
+      codexFile,
+      `${[
+        JSON.stringify({
+          timestamp: "2026-04-11T09:52:39.000Z",
+          type: "session_meta",
+          payload: {
+            id: "codex-session-turn-groups",
+            cwd: "/workspace/codex",
+            git: { branch: "main" },
+          },
+        }),
+        JSON.stringify({
+          timestamp: "2026-04-11T09:52:40.000Z",
+          type: "turn_context",
+          payload: { turn_id: "native-turn-1" },
+        }),
+        JSON.stringify({
+          timestamp: "2026-04-11T09:52:41.000Z",
+          type: "response_item",
+          payload: {
+            type: "message",
+            role: "user",
+            content: [{ type: "input_text", text: "Initial request" }],
+          },
+        }),
+        JSON.stringify({
+          timestamp: "2026-04-11T09:52:41.001Z",
+          type: "event_msg",
+          payload: { type: "user_message", message: "Initial request" },
+        }),
+        JSON.stringify({
+          timestamp: "2026-04-11T09:52:42.000Z",
+          type: "response_item",
+          payload: {
+            type: "message",
+            role: "assistant",
+            content: [{ type: "output_text", text: "Working on it" }],
+          },
+        }),
+        JSON.stringify({
+          timestamp: "2026-04-11T09:52:43.000Z",
+          type: "response_item",
+          payload: {
+            type: "message",
+            role: "user",
+            content: [{ type: "input_text", text: "Steer the implementation" }],
+          },
+        }),
+        JSON.stringify({
+          timestamp: "2026-04-11T09:52:43.001Z",
+          type: "event_msg",
+          payload: { type: "user_message", message: "Steer the implementation" },
+        }),
+        JSON.stringify({
+          timestamp: "2026-04-11T09:52:44.000Z",
+          type: "response_item",
+          payload: {
+            type: "message",
+            role: "assistant",
+            content: [{ type: "output_text", text: "Adjusted" }],
+          },
+        }),
+        JSON.stringify({
+          timestamp: "2026-04-11T09:52:45.000Z",
+          type: "event_msg",
+          payload: { type: "task_complete", turn_id: "native-turn-1" },
+        }),
+        JSON.stringify({
+          timestamp: "2026-04-11T09:52:46.000Z",
+          type: "turn_context",
+          payload: { turn_id: "native-turn-2" },
+        }),
+        JSON.stringify({
+          timestamp: "2026-04-11T09:52:47.000Z",
+          type: "response_item",
+          payload: {
+            type: "message",
+            role: "user",
+            content: [{ type: "input_text", text: "nice thanks" }],
+          },
+        }),
+        JSON.stringify({
+          timestamp: "2026-04-11T09:52:47.001Z",
+          type: "event_msg",
+          payload: { type: "user_message", message: "nice thanks" },
+        }),
+        JSON.stringify({
+          timestamp: "2026-04-11T09:52:48.000Z",
+          type: "response_item",
+          payload: {
+            type: "message",
+            role: "assistant",
+            content: [{ type: "output_text", text: "Any time." }],
+          },
+        }),
+        JSON.stringify({
+          timestamp: "2026-04-11T09:52:49.000Z",
+          type: "event_msg",
+          payload: { type: "task_complete", turn_id: "native-turn-2" },
+        }),
+      ].join("\n")}\n`,
+    );
+
+    const result = runIncrementalIndexing({
+      dbPath,
+      discoveryConfig: {
+        ...createDiscoveryConfig(dir),
+        enabledProviders: ["codex"],
+      },
+    });
+
+    expect(result.indexedFiles).toBe(1);
+
+    const db = openDatabase(dbPath);
+    const rows = db
+      .prepare(
+        `SELECT
+           source_id,
+           category,
+           turn_group_id,
+           turn_grouping_mode,
+           turn_anchor_kind,
+           native_turn_id
+         FROM messages
+         ORDER BY created_at, id`,
+      )
+      .all() as Array<{
+      source_id: string;
+      category: string;
+      turn_group_id: string | null;
+      turn_grouping_mode: string;
+      turn_anchor_kind: string | null;
+      native_turn_id: string | null;
+    }>;
+    db.close();
+
+    expect(rows).toEqual([
+      {
+        source_id: "codex-session-turn-groups:msg:0",
+        category: "user",
+        turn_group_id: "codex-session-turn-groups:msg:0",
+        turn_grouping_mode: "hybrid",
+        turn_anchor_kind: "user_prompt",
+        native_turn_id: "native-turn-1",
+      },
+      {
+        source_id: "codex-session-turn-groups:msg:1",
+        category: "assistant",
+        turn_group_id: "codex-session-turn-groups:msg:0",
+        turn_grouping_mode: "hybrid",
+        turn_anchor_kind: null,
+        native_turn_id: "native-turn-1",
+      },
+      {
+        source_id: "codex-session-turn-groups:msg:2",
+        category: "user",
+        turn_group_id: "codex-session-turn-groups:msg:0",
+        turn_grouping_mode: "hybrid",
+        turn_anchor_kind: "user_prompt",
+        native_turn_id: "native-turn-1",
+      },
+      {
+        source_id: "codex-session-turn-groups:msg:3",
+        category: "assistant",
+        turn_group_id: "codex-session-turn-groups:msg:0",
+        turn_grouping_mode: "hybrid",
+        turn_anchor_kind: null,
+        native_turn_id: "native-turn-1",
+      },
+      {
+        source_id: "codex-session-turn-groups:msg:4",
+        category: "user",
+        turn_group_id: "codex-session-turn-groups:msg:4",
+        turn_grouping_mode: "hybrid",
+        turn_anchor_kind: "user_prompt",
+        native_turn_id: "native-turn-2",
+      },
+      {
+        source_id: "codex-session-turn-groups:msg:5",
+        category: "assistant",
+        turn_group_id: "codex-session-turn-groups:msg:4",
+        turn_grouping_mode: "hybrid",
+        turn_anchor_kind: null,
+        native_turn_id: "native-turn-2",
+      },
+    ]);
+
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("stores native Claude turn metadata across parent-linked child events", () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-index-claude-turn-groups-"));
+    const dbPath = join(dir, "index.db");
+    const claudeProject = join(dir, ".claude", "projects", "native-turn-groups");
+    const claudeFile = join(claudeProject, "session.jsonl");
+    mkdirSync(claudeProject, { recursive: true });
+    writeFileSync(
+      claudeFile,
+      `${[
+        JSON.stringify({
+          sessionId: "claude-native-turn-groups",
+          uuid: "u1",
+          type: "user",
+          cwd: "/workspace/claude",
+          gitBranch: "main",
+          timestamp: "2026-04-11T09:52:39.000Z",
+          message: {
+            role: "user",
+            content: [{ type: "text", text: "Initial Claude request" }],
+          },
+        }),
+        JSON.stringify({
+          sessionId: "claude-native-turn-groups",
+          uuid: "a1",
+          parentUuid: "u1",
+          type: "assistant",
+          cwd: "/workspace/claude",
+          gitBranch: "main",
+          timestamp: "2026-04-11T09:52:40.000Z",
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: "Working on it" }],
+          },
+        }),
+        JSON.stringify({
+          sessionId: "claude-native-turn-groups",
+          uuid: "a2",
+          parentUuid: "a1",
+          type: "assistant",
+          cwd: "/workspace/claude",
+          gitBranch: "main",
+          timestamp: "2026-04-11T09:52:41.000Z",
+          message: {
+            role: "assistant",
+            content: [{ type: "tool_use", name: "Read", input: { file_path: "a.ts" } }],
+          },
+        }),
+        JSON.stringify({
+          sessionId: "claude-native-turn-groups",
+          uuid: "u2",
+          type: "user",
+          cwd: "/workspace/claude",
+          gitBranch: "main",
+          timestamp: "2026-04-11T09:52:42.000Z",
+          message: {
+            role: "user",
+            content: [{ type: "text", text: "Second Claude request" }],
+          },
+        }),
+        JSON.stringify({
+          sessionId: "claude-native-turn-groups",
+          uuid: "a3",
+          parentUuid: "u2",
+          type: "assistant",
+          cwd: "/workspace/claude",
+          gitBranch: "main",
+          timestamp: "2026-04-11T09:52:43.000Z",
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: "Done" }],
+          },
+        }),
+      ].join("\n")}\n`,
+    );
+
+    const result = runIncrementalIndexing({
+      dbPath,
+      discoveryConfig: {
+        ...createDiscoveryConfig(dir),
+        enabledProviders: ["claude"],
+      },
+    });
+
+    expect(result.indexedFiles).toBe(1);
+
+    const db = openDatabase(dbPath);
+    const rows = db
+      .prepare(
+        `SELECT
+           source_id,
+           category,
+           turn_group_id,
+           turn_grouping_mode,
+           turn_anchor_kind,
+           native_turn_id
+         FROM messages
+         ORDER BY created_at, id`,
+      )
+      .all() as Array<{
+      source_id: string;
+      category: string;
+      turn_group_id: string | null;
+      turn_grouping_mode: string;
+      turn_anchor_kind: string | null;
+      native_turn_id: string | null;
+    }>;
+    db.close();
+
+    expect(rows).toEqual([
+      {
+        source_id: "u1",
+        category: "user",
+        turn_group_id: "u1",
+        turn_grouping_mode: "native",
+        turn_anchor_kind: "user_prompt",
+        native_turn_id: "u1",
+      },
+      {
+        source_id: "a1",
+        category: "assistant",
+        turn_group_id: "u1",
+        turn_grouping_mode: "native",
+        turn_anchor_kind: null,
+        native_turn_id: "u1",
+      },
+      {
+        source_id: "a2",
+        category: "tool_use",
+        turn_group_id: "u1",
+        turn_grouping_mode: "native",
+        turn_anchor_kind: null,
+        native_turn_id: "u1",
+      },
+      {
+        source_id: "u2",
+        category: "user",
+        turn_group_id: "u2",
+        turn_grouping_mode: "native",
+        turn_anchor_kind: "user_prompt",
+        native_turn_id: "u2",
+      },
+      {
+        source_id: "a3",
+        category: "assistant",
+        turn_group_id: "u2",
+        turn_grouping_mode: "native",
+        turn_anchor_kind: null,
+        native_turn_id: "u2",
+      },
+    ]);
+
+    rmSync(dir, { recursive: true, force: true });
+  });
+
   it("inserts tombstone sessions for oversized materialized JSON files", () => {
     const dir = mkdtempSync(join(tmpdir(), "codetrail-index-materialized-hard-omit-"));
     const dbPath = join(dir, "index.db");

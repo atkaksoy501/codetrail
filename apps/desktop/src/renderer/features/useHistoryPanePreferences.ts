@@ -4,6 +4,7 @@ import type { MessageCategory, Provider, SystemMessageRegexRules } from "@codetr
 
 import { DEFAULT_PREFERRED_REFRESH_STRATEGY, type NonOffRefreshStrategy } from "../app/autoRefresh";
 import {
+  DEFAULT_EXPANDED_MESSAGE_CATEGORIES,
   DEFAULT_MESSAGE_CATEGORIES,
   DEFAULT_TURN_VIEW_EXPANDED_CATEGORIES,
   DEFAULT_TURN_VIEW_MESSAGE_CATEGORIES,
@@ -19,7 +20,7 @@ import { useReconcileProviderSelection } from "../hooks/useReconcileProviderSele
 import { useResizablePanes } from "../hooks/useResizablePanes";
 import { clamp } from "../lib/viewUtils";
 import {
-  deriveHistoryVisualization,
+  deriveInitialHistoryVisualization,
   getHistoryDetailModeForVisualization,
 } from "./historyVisualization";
 
@@ -88,7 +89,7 @@ export function useHistoryPanePreferences({
     categories: MessageCategory[];
   } | null>(null);
   const [expandedByDefaultCategories, setExpandedByDefaultCategories] = useState<MessageCategory[]>(
-    initialPaneState?.expandedByDefaultCategories ?? [...DEFAULT_MESSAGE_CATEGORIES],
+    initialPaneState?.expandedByDefaultCategories ?? [...DEFAULT_EXPANDED_MESSAGE_CATEGORIES],
   );
   const [turnViewCategories, setTurnViewCategories] = useState<MessageCategory[]>(
     initialPaneState?.turnViewCategories ?? [...DEFAULT_TURN_VIEW_MESSAGE_CATEGORIES],
@@ -101,7 +102,7 @@ export function useHistoryPanePreferences({
     ],
   );
   const [turnViewCombinedChangesExpanded, setTurnViewCombinedChangesExpanded] = useState(
-    initialPaneState?.turnViewCombinedChangesExpanded ?? false,
+    initialPaneState?.turnViewCombinedChangesExpanded ?? true,
   );
   const turnViewCategoriesRef = useRef<MessageCategory[]>(turnViewCategories);
   const turnViewCategorySoloRestoreRef = useRef<{
@@ -109,10 +110,7 @@ export function useHistoryPanePreferences({
     categories: MessageCategory[];
   } | null>(null);
   const [historyVisualization, setHistoryVisualization] = useState(
-    deriveHistoryVisualization(
-      initialPaneState?.historyMode ?? "project_all",
-      initialPaneState?.historyDetailMode ?? "flat",
-    ),
+    deriveInitialHistoryVisualization(initialPaneState),
   );
   const [liveWatchEnabled, setLiveWatchEnabled] = useState(
     initialPaneState?.liveWatchEnabled ?? true,

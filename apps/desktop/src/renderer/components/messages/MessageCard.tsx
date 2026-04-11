@@ -16,7 +16,12 @@ import { useShortcutRegistry } from "../../lib/shortcutRegistry";
 import { compactPath, formatDate, prettyCategory } from "../../lib/viewUtils";
 import { ToolbarIcon } from "../ToolbarIcon";
 
-import { MessageContent } from "./MessageContent";
+import {
+  MessageContent,
+  buildToolEditCollapsibleDiffKeys,
+  buildToolEditDiffExpansionState,
+  reconcileToolEditDiffExpansionState,
+} from "./MessageContent";
 import { type ParsedMessageToolPayload, parseMessageToolPayload } from "./messageToolPayload";
 import { useDocumentCollapseMultiFileToolDiffs } from "./textRendering";
 import { formatToolEditFileSummary, toolEditFileHasCollapsibleDiff } from "./toolEditUtils";
@@ -94,26 +99,37 @@ function MessageCardComponent({
     () => countCollapsibleWriteDiffs(parsedToolPayload),
     [parsedToolPayload],
   );
+  const collapsibleWriteDiffKeysSignature = useMemo(
+    () => buildWriteDiffKeySignature(parsedToolPayload),
+    [parsedToolPayload],
+  );
+  const collapsibleWriteDiffKeys = useMemo(
+    () =>
+      collapsibleWriteDiffKeysSignature.length > 0
+        ? collapsibleWriteDiffKeysSignature.split("\n")
+        : [],
+    [collapsibleWriteDiffKeysSignature],
+  );
   const defaultWriteDiffsExpanded =
     writeDiffCount > 0 && (writeDiffCount === 1 || !collapseMultiFileToolDiffs);
-  const [allWriteDiffsExpanded, setAllWriteDiffsExpanded] = useState(defaultWriteDiffsExpanded);
-  const [writeDiffExpansionRequest, setWriteDiffExpansionRequest] = useState({
-    expanded: defaultWriteDiffsExpanded,
-    version: 0,
-  });
+  const [expandedWriteDiffs, setExpandedWriteDiffs] = useState<Record<string, boolean>>(() =>
+    buildToolEditDiffExpansionState(collapsibleWriteDiffKeys, defaultWriteDiffsExpanded),
+  );
+  const allWriteDiffsExpanded =
+    writeDiffCount > 0 &&
+    collapsibleWriteDiffKeys.every((key) => expandedWriteDiffs[key] ?? defaultWriteDiffsExpanded);
   const toggleExpanded = () => onToggleExpanded(message.id, message.category);
   const toggleCategoryExpanded = () => onToggleCategoryExpanded?.(message.category);
-  const handleWriteDiffStateChange = useCallback(({ allExpanded }: { allExpanded: boolean }) => {
-    setAllWriteDiffsExpanded(allExpanded);
-  }, []);
 
   useEffect(() => {
-    setAllWriteDiffsExpanded(defaultWriteDiffsExpanded);
-    setWriteDiffExpansionRequest((current) => ({
-      expanded: defaultWriteDiffsExpanded,
-      version: current.version + 1,
-    }));
-  }, [defaultWriteDiffsExpanded]);
+    setExpandedWriteDiffs((current) =>
+      reconcileToolEditDiffExpansionState(
+        current,
+        collapsibleWriteDiffKeys,
+        defaultWriteDiffsExpanded,
+      ),
+    );
+  }, [collapsibleWriteDiffKeys, defaultWriteDiffsExpanded]);
 
   const handleExpansionToggleClick = (event: MouseEvent<HTMLElement>) => {
     if (shortcuts.matches.isCategoryExpansionClick(event) && onToggleCategoryExpanded) {
@@ -145,11 +161,7 @@ function MessageCardComponent({
   const handleToggleDiffsButtonClick = (event: MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation();
     const nextExpanded = !allWriteDiffsExpanded;
-    setAllWriteDiffsExpanded(nextExpanded);
-    setWriteDiffExpansionRequest((current) => ({
-      expanded: nextExpanded,
-      version: current.version + 1,
-    }));
+    setExpandedWriteDiffs(buildToolEditDiffExpansionState(collapsibleWriteDiffKeys, nextExpanded));
     paneFocus.focusHistoryPane("message");
   };
 
@@ -345,9 +357,11 @@ function MessageCardComponent({
               highlightPatterns={highlightPatterns}
               pathRoots={pathRoots}
               parsedToolPayload={parsedToolPayload}
-              {...(writeDiffCount > 0 ? { writeDiffExpansionRequest } : {})}
               {...(writeDiffCount > 0
-                ? { onWriteDiffStateChange: handleWriteDiffStateChange }
+                ? {
+                    writeDiffExpansionState: expandedWriteDiffs,
+                    setWriteDiffExpansionState: setExpandedWriteDiffs,
+                  }
                 : {})}
             />
           </div>
@@ -359,6 +373,10 @@ function MessageCardComponent({
 
 function countCollapsibleWriteDiffs(parsedToolPayload: ParsedMessageToolPayload): number {
   return parsedToolPayload.toolEdit?.files.filter(toolEditFileHasCollapsibleDiff).length ?? 0;
+}
+
+function buildWriteDiffKeySignature(parsedToolPayload: ParsedMessageToolPayload): string {
+  return buildToolEditCollapsibleDiffKeys(parsedToolPayload.toolEdit?.files ?? []).join("\n");
 }
 
 export const MessageCard = memo(MessageCardComponent);

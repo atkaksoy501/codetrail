@@ -22,6 +22,12 @@ export type OperationDurationSource = z.infer<typeof operationDurationSourceSche
 export const operationDurationConfidenceSchema = z.enum(["high", "low"]);
 export type OperationDurationConfidence = z.infer<typeof operationDurationConfidenceSchema>;
 
+export const turnGroupingModeSchema = z.enum(["native", "hybrid", "heuristic"]);
+export type TurnGroupingMode = z.infer<typeof turnGroupingModeSchema>;
+
+export const turnAnchorKindSchema = z.enum(["user_prompt", "synthetic_control"]);
+export type TurnAnchorKind = z.infer<typeof turnAnchorKindSchema>;
+
 export const canonicalMessageSchema = z.object({
   id: z.string().min(1),
   sessionId: z.string().min(1),
@@ -34,6 +40,10 @@ export const canonicalMessageSchema = z.object({
   operationDurationMs: z.number().int().nonnegative().nullable(),
   operationDurationSource: operationDurationSourceSchema.nullable(),
   operationDurationConfidence: operationDurationConfidenceSchema.nullable(),
+  turnGroupId: z.string().min(1).nullable(),
+  turnGroupingMode: turnGroupingModeSchema,
+  turnAnchorKind: turnAnchorKindSchema.nullable(),
+  nativeTurnId: z.string().min(1).nullable(),
 });
 
 export type CanonicalMessage = z.infer<typeof canonicalMessageSchema>;

@@ -58,6 +58,7 @@ export function useKeyboardShortcuts(args: {
   focusSessionSearch: () => void;
   toggleFocusMode: () => void;
   toggleAllMessagesExpanded: () => void;
+  toggleCombinedChangesDiffsExpanded: () => void;
   toggleHistoryCategory: (category: MessageCategory) => void;
   soloHistoryCategory: (category: MessageCategory) => void;
   toggleHistoryCategoryDefaultExpansion: (category: MessageCategory) => void;
@@ -700,6 +701,16 @@ function handleHistoryCommandShortcut(context: ShortcutContext): boolean {
   if (context.mainView === "history" && context.key === "e") {
     context.event.preventDefault();
     context.toggleAllMessagesExpanded();
+    return true;
+  }
+  if (
+    context.mainView === "history" &&
+    !context.event.altKey &&
+    (context.shift || (context.shortcuts.platform === "darwin" && !context.shift)) &&
+    context.key === "d"
+  ) {
+    context.event.preventDefault();
+    context.toggleCombinedChangesDiffsExpanded();
     return true;
   }
   if (

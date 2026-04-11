@@ -485,6 +485,484 @@ describe("queryService in-memory", () => {
     expect(turn.messages.map((message) => message.id)).toEqual(["message_1", "message_2"]);
   });
 
+  it("prefers persisted turn_group_id anchors over later user messages in the same turn", () => {
+    const db = createInMemoryDatabase();
+    const now = "2026-03-01T10:00:00.000Z";
+
+    db.prepare(
+      `INSERT INTO projects (id, provider, name, path, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run("project_1", "codex", "Project One", "/workspace/project-one", now, now);
+
+    db.prepare(
+      `INSERT INTO sessions (
+        id,
+        project_id,
+        provider,
+        file_path,
+        model_names,
+        started_at,
+        ended_at,
+        duration_ms,
+        git_branch,
+        cwd,
+        message_count,
+        token_input_total,
+        token_output_total
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      "session_1",
+      "project_1",
+      "codex",
+      "/workspace/project-one/session-1.jsonl",
+      "gpt-5.4",
+      "2026-03-01T10:00:00.000Z",
+      "2026-03-01T10:00:05.000Z",
+      5000,
+      "main",
+      "/workspace/project-one",
+      5,
+      0,
+      0,
+    );
+
+    const insertMessage = db.prepare(
+      `INSERT INTO messages (
+        id,
+        source_id,
+        session_id,
+        provider,
+        category,
+        content,
+        created_at,
+        token_input,
+        token_output,
+        operation_duration_ms,
+        operation_duration_source,
+        operation_duration_confidence,
+        turn_group_id,
+        turn_grouping_mode,
+        turn_anchor_kind,
+        native_turn_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+
+    insertMessage.run(
+      "message_1",
+      "source_1",
+      "session_1",
+      "codex",
+      "user",
+      "Initial request",
+      "2026-03-01T10:00:00.000Z",
+      null,
+      null,
+      null,
+      null,
+      null,
+      "source_1",
+      "hybrid",
+      "user_prompt",
+      "native-turn-1",
+    );
+    insertMessage.run(
+      "message_2",
+      "source_2",
+      "session_1",
+      "codex",
+      "assistant",
+      "Working on it",
+      "2026-03-01T10:00:01.000Z",
+      null,
+      null,
+      null,
+      null,
+      null,
+      "source_1",
+      "hybrid",
+      null,
+      "native-turn-1",
+    );
+    insertMessage.run(
+      "message_3",
+      "source_3",
+      "session_1",
+      "codex",
+      "user",
+      "Steer the implementation",
+      "2026-03-01T10:00:02.000Z",
+      null,
+      null,
+      null,
+      null,
+      null,
+      "source_1",
+      "hybrid",
+      "user_prompt",
+      "native-turn-1",
+    );
+    insertMessage.run(
+      "message_4",
+      "source_4",
+      "session_1",
+      "codex",
+      "assistant",
+      "Adjusted",
+      "2026-03-01T10:00:03.000Z",
+      null,
+      null,
+      null,
+      null,
+      null,
+      "source_1",
+      "hybrid",
+      null,
+      "native-turn-1",
+    );
+    insertMessage.run(
+      "message_5",
+      "source_5",
+      "session_1",
+      "codex",
+      "user",
+      "nice thanks",
+      "2026-03-01T10:00:04.000Z",
+      null,
+      null,
+      null,
+      null,
+      null,
+      "source_5",
+      "hybrid",
+      "user_prompt",
+      "native-turn-2",
+    );
+
+    const service = createQueryServiceFromDb(db);
+    const turn = service.getSessionTurn({
+      scopeMode: "session",
+      sessionId: "session_1",
+      anchorMessageId: "message_3",
+      query: "",
+      sortDirection: "asc",
+    });
+
+    expect(turn.anchorMessageId).toBe("message_1");
+    expect(turn.anchorMessage?.id).toBe("message_1");
+    expect(turn.turnNumber).toBe(1);
+    expect(turn.totalTurns).toBe(2);
+    expect(turn.nextTurnAnchorMessageId).toBe("message_5");
+    expect(turn.messages.map((message) => message.id)).toEqual([
+      "message_1",
+      "message_2",
+      "message_3",
+      "message_4",
+    ]);
+  });
+
+  it("uses persisted turn_group_id for bookmark-scoped turns", () => {
+    const db = createInMemoryDatabase();
+    const now = "2026-03-01T10:00:00.000Z";
+
+    db.prepare(
+      `INSERT INTO projects (id, provider, name, path, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run("project_1", "codex", "Project One", "/workspace/project-one", now, now);
+
+    db.prepare(
+      `INSERT INTO sessions (
+        id,
+        project_id,
+        provider,
+        file_path,
+        model_names,
+        started_at,
+        ended_at,
+        duration_ms,
+        git_branch,
+        cwd,
+        message_count,
+        token_input_total,
+        token_output_total
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      "session_1",
+      "project_1",
+      "codex",
+      "/workspace/project-one/session-1.jsonl",
+      "gpt-5.4",
+      "2026-03-01T10:00:00.000Z",
+      "2026-03-01T10:00:05.000Z",
+      5000,
+      "main",
+      "/workspace/project-one",
+      4,
+      0,
+      0,
+    );
+
+    const insertMessage = db.prepare(
+      `INSERT INTO messages (
+        id,
+        source_id,
+        session_id,
+        provider,
+        category,
+        content,
+        created_at,
+        token_input,
+        token_output,
+        operation_duration_ms,
+        operation_duration_source,
+        operation_duration_confidence,
+        turn_group_id,
+        turn_grouping_mode,
+        turn_anchor_kind,
+        native_turn_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+
+    insertMessage.run(
+      "message_1",
+      "source_1",
+      "session_1",
+      "codex",
+      "user",
+      "Initial request",
+      "2026-03-01T10:00:00.000Z",
+      null,
+      null,
+      null,
+      null,
+      null,
+      "source_1",
+      "hybrid",
+      "user_prompt",
+      "native-turn-1",
+    );
+    insertMessage.run(
+      "message_2",
+      "source_2",
+      "session_1",
+      "codex",
+      "assistant",
+      "Working on it",
+      "2026-03-01T10:00:01.000Z",
+      null,
+      null,
+      null,
+      null,
+      null,
+      "source_1",
+      "hybrid",
+      null,
+      "native-turn-1",
+    );
+    insertMessage.run(
+      "message_3",
+      "source_3",
+      "session_1",
+      "codex",
+      "user",
+      "Steer the implementation",
+      "2026-03-01T10:00:02.000Z",
+      null,
+      null,
+      null,
+      null,
+      null,
+      "source_1",
+      "hybrid",
+      "user_prompt",
+      "native-turn-1",
+    );
+    insertMessage.run(
+      "message_4",
+      "source_4",
+      "session_1",
+      "codex",
+      "assistant",
+      "Adjusted",
+      "2026-03-01T10:00:03.000Z",
+      null,
+      null,
+      null,
+      null,
+      null,
+      "source_1",
+      "hybrid",
+      null,
+      "native-turn-1",
+    );
+
+    const bookmarkStore = createBookmarkStoreMock({
+      listProjectBookmarks: vi.fn(() => [
+        {
+          project_id: "project_1",
+          session_id: "session_1",
+          message_id: "message_3",
+          message_source_id: "source_3",
+          provider: "codex",
+          session_title: "Project One",
+          message_category: "user",
+          message_content: "Steer the implementation",
+          message_created_at: "2026-03-01T10:00:02.000Z",
+          bookmarked_at: "2026-03-01T10:10:00.000Z",
+          is_orphaned: 0,
+          orphaned_at: null,
+          snapshot_version: 1,
+          snapshot_json: "{}",
+        },
+      ]),
+    });
+    const service = createQueryServiceFromDb(db, { bookmarkStore, ownsBookmarkStore: false });
+
+    const turn = service.getSessionTurn({
+      scopeMode: "bookmarks",
+      projectId: "project_1",
+      anchorMessageId: "message_3",
+      query: "",
+      sortDirection: "asc",
+    });
+
+    expect(turn.anchorMessageId).toBe("message_3");
+    expect(turn.messages.map((message) => message.id)).toEqual([
+      "message_1",
+      "message_2",
+      "message_3",
+      "message_4",
+    ]);
+    expect(bookmarkStore.listProjectBookmarks).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls back to heuristic turn boundaries when turn_group_id is absent", () => {
+    const db = createInMemoryDatabase();
+    const now = "2026-03-01T10:00:00.000Z";
+
+    db.prepare(
+      `INSERT INTO projects (id, provider, name, path, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run("project_1", "cursor", "Project One", "/workspace/project-one", now, now);
+
+    db.prepare(
+      `INSERT INTO sessions (
+        id,
+        project_id,
+        provider,
+        file_path,
+        model_names,
+        started_at,
+        ended_at,
+        duration_ms,
+        git_branch,
+        cwd,
+        message_count,
+        token_input_total,
+        token_output_total
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      "session_1",
+      "project_1",
+      "cursor",
+      "/workspace/project-one/session-1.jsonl",
+      "cursor",
+      "2026-03-01T10:00:00.000Z",
+      "2026-03-01T10:00:05.000Z",
+      5000,
+      "main",
+      "/workspace/project-one",
+      4,
+      0,
+      0,
+    );
+
+    const insertMessage = db.prepare(
+      `INSERT INTO messages (
+        id,
+        source_id,
+        session_id,
+        provider,
+        category,
+        content,
+        created_at,
+        token_input,
+        token_output,
+        operation_duration_ms,
+        operation_duration_source,
+        operation_duration_confidence
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+
+    insertMessage.run(
+      "message_1",
+      "source_1",
+      "session_1",
+      "cursor",
+      "user",
+      "First turn",
+      "2026-03-01T10:00:00.000Z",
+      null,
+      null,
+      null,
+      null,
+      null,
+    );
+    insertMessage.run(
+      "message_2",
+      "source_2",
+      "session_1",
+      "cursor",
+      "assistant",
+      "First reply",
+      "2026-03-01T10:00:01.000Z",
+      null,
+      null,
+      null,
+      null,
+      null,
+    );
+    insertMessage.run(
+      "message_3",
+      "source_3",
+      "session_1",
+      "cursor",
+      "user",
+      "Second turn",
+      "2026-03-01T10:00:02.000Z",
+      null,
+      null,
+      null,
+      null,
+      null,
+    );
+    insertMessage.run(
+      "message_4",
+      "source_4",
+      "session_1",
+      "cursor",
+      "assistant",
+      "Second reply",
+      "2026-03-01T10:00:03.000Z",
+      null,
+      null,
+      null,
+      null,
+      null,
+    );
+
+    const service = createQueryServiceFromDb(db);
+    const turn = service.getSessionTurn({
+      scopeMode: "session",
+      sessionId: "session_1",
+      anchorMessageId: "message_3",
+      query: "",
+      sortDirection: "asc",
+    });
+
+    expect(turn.anchorMessageId).toBe("message_3");
+    expect(turn.messages.map((message) => message.id)).toEqual(["message_3", "message_4"]);
+  });
+
   it("returns the full turn and separate match ids for turn search", () => {
     const db = seedQueryDb();
     db.prepare(

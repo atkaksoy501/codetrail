@@ -3,6 +3,8 @@ import { useEffect, useMemo, useState } from "react";
 import type { useHistoryController } from "../../features/useHistoryController";
 import { copyTextToClipboard } from "../../lib/clipboard";
 import { usePaneFocus } from "../../lib/paneFocusController";
+import { useShortcutRegistry } from "../../lib/shortcutRegistry";
+import { useTooltipFormatter } from "../../lib/tooltipText";
 import { ToolbarIcon } from "../ToolbarIcon";
 import { MessageCard } from "../messages/MessageCard";
 import {
@@ -19,8 +21,21 @@ type HistoryController = ReturnType<typeof useHistoryController>;
 type TurnMessage = NonNullable<HistoryController["sessionTurnDetail"]>["messages"][number];
 
 export function TurnView({ history }: { history: HistoryController }) {
+  const paneFocus = usePaneFocus();
+  const preserveMessagePaneFocusProps = paneFocus.getPreservePaneFocusProps("message");
   const detail = history.sessionTurnDetail;
   const orderedMessages = history.turnVisibleMessages;
+  const hasFlatMessages = history.activeHistoryMessages.length > 0;
+  const displayAnchorMessage = useMemo(
+    () =>
+      [...orderedMessages]
+        .filter((message) => message.category === "user")
+        .sort(
+          (left, right) =>
+            left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id),
+        )[0] ?? null,
+    [orderedMessages],
+  );
   const combinedSourceMessages = useMemo(
     () =>
       [...(detail?.messages ?? [])]
@@ -40,26 +55,54 @@ export function TurnView({ history }: { history: HistoryController }) {
     return <p className="empty-state">No turn messages found.</p>;
   }
 
-  const firstMessage = orderedMessages[0] ?? null;
+  if (detail.totalTurns === 0) {
+    return (
+      <div className="empty-state empty-state-with-action">
+        <p>
+          {hasFlatMessages
+            ? "No user messages in this scope, so there are no turns yet."
+            : "No messages in this scope yet."}
+        </p>
+        {hasFlatMessages ? (
+          <button
+            type="button"
+            className="toolbar-btn"
+            {...preserveMessagePaneFocusProps}
+            onClick={() => {
+              history.handleSelectMessagesView();
+              paneFocus.focusHistoryPane("message");
+            }}
+          >
+            Go to Flat view
+          </button>
+        ) : null}
+      </div>
+    );
+  }
+
   const renderAnchorFirst =
-    firstMessage !== null &&
-    firstMessage.id === detail.anchorMessageId &&
-    firstMessage.category === "user";
-  const remainingMessages = renderAnchorFirst ? orderedMessages.slice(1) : orderedMessages;
+    displayAnchorMessage !== null &&
+    orderedMessages.some((message) => message.id === displayAnchorMessage.id);
+  const remainingMessages = renderAnchorFirst
+    ? orderedMessages.filter((message) => message.id !== displayAnchorMessage?.id)
+    : orderedMessages;
 
   return (
     <>
-      {renderAnchorFirst && firstMessage ? (
+      {renderAnchorFirst && displayAnchorMessage ? (
         <TurnMessageCard
           history={history}
-          message={firstMessage}
+          message={displayAnchorMessage}
           cardRef={
-            history.focusMessageId === firstMessage.id ? history.refs.focusedMessageRef : null
+            history.focusMessageId === displayAnchorMessage.id
+              ? history.refs.focusedMessageRef
+              : null
           }
         />
       ) : null}
       <CombinedChangesCard
         key={detail.anchorMessageId}
+        scrollAnchorId={`turn-combined:${detail.anchorMessageId}`}
         expanded={history.effectiveTurnCombinedChangesExpanded}
         onExpandedChange={(value) => {
           const nextExpanded =
@@ -73,6 +116,10 @@ export function TurnView({ history }: { history: HistoryController }) {
         query={history.effectiveTurnQuery}
         highlightPatterns={detail.highlightPatterns ?? []}
         pathRoots={history.messagePathRoots}
+        combinedChangesDiffExpansionRequest={history.combinedChangesDiffExpansionRequest}
+        onCombinedChangesDiffStateChange={(state) =>
+          history.handleCombinedChangesDiffStateChange(state)
+        }
       />
       {remainingMessages.map((message) => (
         <TurnMessageCard
@@ -122,25 +169,43 @@ function TurnMessageCard({
 
 function CombinedChangesCard({
   expanded,
+  scrollAnchorId,
   onExpandedChange,
   files,
   query,
   highlightPatterns,
   pathRoots,
+  combinedChangesDiffExpansionRequest,
+  onCombinedChangesDiffStateChange,
 }: {
   expanded: boolean;
+  scrollAnchorId: string;
   onExpandedChange: (value: boolean | ((current: boolean) => boolean)) => void;
   files: TurnCombinedFile[];
   query: string;
   highlightPatterns: string[];
   pathRoots: string[];
+  combinedChangesDiffExpansionRequest?: {
+    expanded: boolean;
+    version: number;
+  } | null;
+  onCombinedChangesDiffStateChange?: (state: {
+    hasVisibleDiffs: boolean;
+    allExpanded: boolean;
+  }) => void;
 }) {
   const paneFocus = usePaneFocus();
   const preserveMessagePaneFocusProps = paneFocus.getPreservePaneFocusProps("message");
+  const shortcuts = useShortcutRegistry();
+  const formatTooltipLabel = useTooltipFormatter();
   const collapseMultiFileToolDiffs = useDocumentCollapseMultiFileToolDiffs();
   const defaultDiffExpanded = !collapseMultiFileToolDiffs;
   const [expandedFiles, setExpandedFiles] = useState<Record<string, boolean>>(() =>
     buildCombinedDiffExpansionState(files, defaultDiffExpanded),
+  );
+  const resolvedExpandedFiles = useMemo(
+    () => reconcileCombinedDiffExpansionState(expandedFiles, files, defaultDiffExpanded),
+    [defaultDiffExpanded, expandedFiles, files],
   );
   const preview =
     files.length === 0
@@ -157,13 +222,29 @@ function CombinedChangesCard({
   const isEmpty = files.length === 0;
   const allFilesExpanded =
     files.length > 0 &&
-    files.every((file) => expandedFiles[buildCombinedFileKey(file)] ?? defaultDiffExpanded);
+    files.every((file) => resolvedExpandedFiles[buildCombinedFileKey(file)] ?? defaultDiffExpanded);
 
   useEffect(() => {
-    setExpandedFiles((current) =>
-      reconcileCombinedDiffExpansionState(current, files, defaultDiffExpanded),
+    if (resolvedExpandedFiles !== expandedFiles) {
+      setExpandedFiles(resolvedExpandedFiles);
+    }
+  }, [expandedFiles, resolvedExpandedFiles]);
+
+  useEffect(() => {
+    if (!combinedChangesDiffExpansionRequest || files.length === 0) {
+      return;
+    }
+    setExpandedFiles(
+      buildCombinedDiffExpansionState(files, combinedChangesDiffExpansionRequest.expanded),
     );
-  }, [defaultDiffExpanded, files]);
+  }, [combinedChangesDiffExpansionRequest, files]);
+
+  useEffect(() => {
+    onCombinedChangesDiffStateChange?.({
+      hasVisibleDiffs: files.length > 0,
+      allExpanded: allFilesExpanded,
+    });
+  }, [allFilesExpanded, files.length, onCombinedChangesDiffStateChange]);
 
   const handleCopy = () => {
     const text =
@@ -177,6 +258,7 @@ function CombinedChangesCard({
   return (
     <article
       className={`message category-tool_edit turn-combined-card${expanded ? " expanded" : " collapsed"}${isEmpty ? " is-empty" : ""}`}
+      data-history-scroll-anchor-id={scrollAnchorId}
     >
       <header className="message-header">
         <button
@@ -209,7 +291,10 @@ function CombinedChangesCard({
                 paneFocus.focusHistoryPane("message");
               }}
               aria-label={allFilesExpanded ? "Collapse Diffs" : "Expand Diffs"}
-              title={allFilesExpanded ? "Collapse Diffs" : "Expand Diffs"}
+              title={formatTooltipLabel(
+                allFilesExpanded ? "Collapse Diffs" : "Expand Diffs",
+                shortcuts.actions.toggleCombinedChangesDiffsExpanded,
+              )}
             >
               <ToolbarIcon name={allFilesExpanded ? "collapseAll" : "expandAll"} />
             </button>
@@ -238,9 +323,13 @@ function CombinedChangesCard({
                 <div className="tool-edit-summary">{preview}</div>
                 {files.map((file) => {
                   const fileExpanded =
-                    expandedFiles[buildCombinedFileKey(file)] ?? defaultDiffExpanded;
+                    resolvedExpandedFiles[buildCombinedFileKey(file)] ?? defaultDiffExpanded;
                   return (
-                    <div key={buildCombinedFileKey(file)} className="turn-combined-file">
+                    <div
+                      key={buildCombinedFileKey(file)}
+                      className="turn-combined-file"
+                      data-history-scroll-anchor-id={`${scrollAnchorId}:${buildCombinedFileKey(file)}`}
+                    >
                       <TurnCombinedFileView
                         file={file}
                         expanded={fileExpanded}
@@ -295,7 +384,17 @@ function reconcileCombinedDiffExpansionState(
     const key = buildCombinedFileKey(file);
     return [key, current[key] ?? defaultExpanded] as const;
   });
-  return Object.fromEntries(nextEntries);
+  const next = Object.fromEntries(nextEntries);
+  const currentKeys = Object.keys(current);
+  if (
+    currentKeys.length === nextEntries.length &&
+    currentKeys.every(
+      (key) => Object.prototype.hasOwnProperty.call(next, key) && next[key] === current[key],
+    )
+  ) {
+    return current;
+  }
+  return next;
 }
 
 function buildCombinedFileBadges(

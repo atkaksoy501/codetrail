@@ -7,6 +7,8 @@ import {
   type MessageCategory,
   PROVIDER_VALUES,
   type Provider,
+  type TurnAnchorKind,
+  type TurnGroupingMode,
   canonicalMessageSchema,
 } from "../contracts/canonical";
 import { createProviderRecord } from "../contracts/providerMetadata";
@@ -26,7 +28,7 @@ import {
 import { projectNameFromPath } from "../discovery/shared";
 import { stringifyCompactMetadata } from "../metadata";
 import { type ParserDiagnostic, parseSession, parseSessionEvent } from "../parsing";
-import { asArray, asRecord, readString } from "../parsing/helpers";
+import { asArray, asRecord, lowerString, readString } from "../parsing/helpers";
 import {
   type ProviderReadSourceResult,
   type ProviderSourceMetadata,
@@ -190,6 +192,11 @@ type MessageProcessingState = {
   previousTimestampMs: number;
   assistantThinkingRunRoot: string | null;
   assistantThinkingRunBaseline: IndexedMessage | null;
+  currentTurnGroupId: string | null;
+  currentNativeTurnId: string | null;
+  claudeTurnRootByEventId: Record<string, string>;
+  claudeTurnRootEventIds: string[];
+  pendingCodexUserMessages: PendingCodexUserMessage[];
   aggregate: SessionAggregateState;
 };
 type SerializableMessageProcessingState = {
@@ -198,7 +205,27 @@ type SerializableMessageProcessingState = {
   previousCursorTimestampMs?: number;
   assistantThinkingRunRoot: string | null;
   assistantThinkingRunBaseline: IndexedMessage | null;
+  currentTurnGroupId: string | null;
+  currentNativeTurnId: string | null;
+  claudeTurnRootByEventId: Record<string, string>;
+  claudeTurnRootEventIds?: string[];
+  pendingCodexUserMessages: SerializablePendingCodexUserMessage[];
   aggregate: SessionAggregateState;
+};
+type MessageNormalizationSnapshot = {
+  previousMessage: IndexedMessage | null;
+  previousTimestampMs: number;
+  assistantThinkingRunRoot: string | null;
+  assistantThinkingRunBaseline: IndexedMessage | null;
+  aggregate: SessionAggregateState;
+};
+type PendingCodexUserMessage = {
+  message: IndexedMessage;
+  nativeTurnId: string | null;
+};
+type SerializablePendingCodexUserMessage = {
+  message: IndexedMessage | null;
+  nativeTurnId: string | null;
 };
 type StreamCheckpointState = {
   filePath: string;
@@ -236,6 +263,7 @@ type StreamJsonlResult = {
   nextLineNumber: number;
   nextEventIndex: number;
 };
+const CLAUDE_TURN_ROOT_EVENT_ID_LIMIT = 2048;
 type JsonlRescueNotice = {
   severity: "info" | "warning";
   message: string;
@@ -352,6 +380,10 @@ type IndexingStatements = {
       number | null,
       "native" | "derived" | null,
       "high" | "low" | null,
+      string | null,
+      TurnGroupingMode,
+      TurnAnchorKind | null,
+      string | null,
     ]
   >;
   getMessageById: PreparedQuery<
@@ -369,6 +401,10 @@ type IndexingStatements = {
         operation_duration_ms: number | null;
         operation_duration_source: "native" | "derived" | null;
         operation_duration_confidence: "high" | "low" | null;
+        turn_group_id: string | null;
+        turn_grouping_mode: TurnGroupingMode;
+        turn_anchor_kind: TurnAnchorKind | null;
+        native_turn_id: string | null;
       }
     | undefined
   >;
@@ -1044,8 +1080,12 @@ function createIndexingStatements(db: SqliteDatabase): IndexingStatements {
         token_output,
         operation_duration_ms,
         operation_duration_source,
-        operation_duration_confidence
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        operation_duration_confidence,
+        turn_group_id,
+        turn_grouping_mode,
+        turn_anchor_kind,
+        native_turn_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ),
     getMessageById: db.prepare(
       `SELECT
@@ -1060,7 +1100,11 @@ function createIndexingStatements(db: SqliteDatabase): IndexingStatements {
          token_output,
          operation_duration_ms,
          operation_duration_source,
-         operation_duration_confidence
+         operation_duration_confidence,
+         turn_group_id,
+         turn_grouping_mode,
+         turn_anchor_kind,
+         native_turn_id
        FROM messages
        WHERE id = ?`,
     ),
@@ -1932,6 +1976,15 @@ function streamAndPersistJsonlEvents(args: {
       },
       onOmittedLine: (omitted) => {
         emittedEvents += 1;
+        flushPendingCodexUserMessages({
+          discovered: args.discovered,
+          processingState: args.processingState,
+          sessionDbId: args.sessionDbId,
+          statements: args.statements,
+          onNotice: args.onNotice,
+          claudeNormalizationState,
+          classification: "user_prompt",
+        });
         persistStreamMessage({
           discovered: args.discovered,
           processingState: args.processingState,
@@ -1964,6 +2017,15 @@ function streamAndPersistJsonlEvents(args: {
         );
       },
     });
+    flushPendingCodexUserMessages({
+      discovered: args.discovered,
+      processingState: args.processingState,
+      sessionDbId: args.sessionDbId,
+      statements: args.statements,
+      onNotice: args.onNotice,
+      claudeNormalizationState,
+      classification: "user_prompt",
+    });
     return { sequence, emittedEvents, streamResult };
   } catch (error) {
     if (error instanceof IndexingFileProcessingError) {
@@ -1992,6 +2054,22 @@ function parseAndPersistStreamEvent(args: {
   onNotice: (notice: IndexingNotice) => void;
   claudeNormalizationState: ClaudeTurnNormalizationState | null;
 }): number {
+  const eventRecord = asRecord(args.event);
+  updateProviderTurnGroupingStateBeforeEvent(
+    args.processingState,
+    args.discovered.provider,
+    eventRecord,
+  );
+  maybeFlushPendingCodexUserMessagesBeforeEvent({
+    discovered: args.discovered,
+    processingState: args.processingState,
+    sessionDbId: args.sessionDbId,
+    statements: args.statements,
+    onNotice: args.onNotice,
+    claudeNormalizationState: args.claudeNormalizationState,
+    eventRecord,
+  });
+
   let parsedEvent: ReturnType<typeof parseSessionEvent>;
   try {
     parsedEvent = parseSessionEvent({
@@ -2016,7 +2094,15 @@ function parseAndPersistStreamEvent(args: {
     return parsedEvent.nextSequence;
   }
 
-  for (const message of parsedEvent.messages) {
+  const preparedMessages = prepareMessagesForPersistence({
+    provider: args.discovered.provider,
+    event: args.event,
+    eventRecord,
+    processingState: args.processingState,
+    messages: parsedEvent.messages,
+  });
+
+  for (const message of preparedMessages.immediateMessages) {
     if (!message) {
       continue;
     }
@@ -2031,6 +2117,8 @@ function parseAndPersistStreamEvent(args: {
     });
   }
 
+  args.processingState.pendingCodexUserMessages.push(...preparedMessages.deferredCodexUserMessages);
+
   processClaudeSnapshotEvent({
     db: args.db,
     discovered: args.discovered,
@@ -2040,7 +2128,287 @@ function parseAndPersistStreamEvent(args: {
     claudeNormalizationState: args.claudeNormalizationState,
   });
 
+  updateProviderTurnGroupingStateAfterEvent(
+    args.processingState,
+    args.discovered.provider,
+    eventRecord,
+  );
+
   return parsedEvent.nextSequence;
+}
+
+function prepareMessagesForPersistence(args: {
+  provider: Provider;
+  event: unknown;
+  eventRecord: Record<string, unknown> | null;
+  processingState: MessageProcessingState;
+  messages: IndexedMessage[];
+}): {
+  immediateMessages: IndexedMessage[];
+  deferredCodexUserMessages: PendingCodexUserMessage[];
+} {
+  if (args.provider === "claude") {
+    return {
+      immediateMessages: annotateClaudeMessagesForEvent(
+        args.processingState,
+        args.eventRecord,
+        args.messages,
+      ),
+      deferredCodexUserMessages: [],
+    };
+  }
+
+  if (args.provider === "codex") {
+    const immediateMessages: IndexedMessage[] = [];
+    const deferredCodexUserMessages: PendingCodexUserMessage[] = [];
+    const codexUserResponse = isCodexResponseItemUserEvent(args.event);
+
+    for (const message of args.messages) {
+      if (codexUserResponse && message.category === "user") {
+        deferredCodexUserMessages.push({
+          message,
+          nativeTurnId: args.processingState.currentNativeTurnId,
+        });
+        continue;
+      }
+      immediateMessages.push(annotateCodexImmediateMessage(args.processingState, message));
+    }
+
+    return {
+      immediateMessages,
+      deferredCodexUserMessages,
+    };
+  }
+
+  return {
+    immediateMessages: args.messages,
+    deferredCodexUserMessages: [],
+  };
+}
+
+function annotateClaudeMessagesForEvent(
+  state: MessageProcessingState,
+  eventRecord: Record<string, unknown> | null,
+  messages: IndexedMessage[],
+): IndexedMessage[] {
+  if (messages.length === 0) {
+    return messages;
+  }
+
+  const messageRecord = asRecord(eventRecord?.message);
+  const normalized = messageRecord ?? eventRecord;
+  const eventId =
+    readString(eventRecord?.uuid) ??
+    readString(eventRecord?.id) ??
+    readString(normalized?.uuid) ??
+    readString(normalized?.id) ??
+    null;
+  const parentEventId =
+    readString(eventRecord?.parentUuid) ??
+    readString(eventRecord?.parent_uuid) ??
+    readString(normalized?.parentUuid) ??
+    readString(normalized?.parent_uuid) ??
+    null;
+  const userAnchorId = messages.find((message) => message.category === "user")?.id ?? null;
+  const eventTurnGroupId =
+    userAnchorId ??
+    (parentEventId ? (state.claudeTurnRootByEventId[parentEventId] ?? null) : null) ??
+    state.currentTurnGroupId;
+
+  if (eventId && eventTurnGroupId) {
+    trackClaudeTurnRootEvent(state, eventId, eventTurnGroupId);
+  }
+  if (eventTurnGroupId) {
+    state.currentTurnGroupId = eventTurnGroupId;
+    state.currentNativeTurnId = eventTurnGroupId;
+  }
+
+  return messages.map((message) => ({
+    ...message,
+    turnGroupId: eventTurnGroupId,
+    turnGroupingMode: "native",
+    turnAnchorKind: message.id === userAnchorId ? "user_prompt" : null,
+    nativeTurnId: eventTurnGroupId,
+  }));
+}
+
+function annotateCodexImmediateMessage(
+  state: MessageProcessingState,
+  message: IndexedMessage,
+): IndexedMessage {
+  return {
+    ...message,
+    turnGroupId: state.currentTurnGroupId,
+    turnGroupingMode: "hybrid",
+    turnAnchorKind: null,
+    nativeTurnId: state.currentNativeTurnId,
+  };
+}
+
+function updateProviderTurnGroupingStateBeforeEvent(
+  state: MessageProcessingState,
+  provider: Provider,
+  eventRecord: Record<string, unknown> | null,
+): void {
+  if (provider !== "codex" || !eventRecord) {
+    return;
+  }
+  const nextNativeTurnId = extractCodexNativeTurnId(eventRecord);
+  if (nextNativeTurnId) {
+    state.currentNativeTurnId = nextNativeTurnId;
+  }
+}
+
+function updateProviderTurnGroupingStateAfterEvent(
+  state: MessageProcessingState,
+  provider: Provider,
+  eventRecord: Record<string, unknown> | null,
+): void {
+  if (provider !== "codex" || !eventRecord) {
+    return;
+  }
+  const payloadRecord = asRecord(eventRecord.payload);
+  const payloadType = lowerString(payloadRecord?.type);
+  if (
+    readString(eventRecord.type) === "event_msg" &&
+    (payloadType === "task_complete" || payloadType === "turn_aborted")
+  ) {
+    state.currentNativeTurnId = null;
+    state.currentTurnGroupId = null;
+  }
+}
+
+function maybeFlushPendingCodexUserMessagesBeforeEvent(args: {
+  discovered: ReturnType<typeof discoverSessionFiles>[number];
+  processingState: MessageProcessingState;
+  sessionDbId: string;
+  statements: IndexingStatements;
+  onNotice: (notice: IndexingNotice) => void;
+  claudeNormalizationState: ClaudeTurnNormalizationState | null;
+  eventRecord: Record<string, unknown> | null;
+}): void {
+  if (
+    args.discovered.provider !== "codex" ||
+    args.processingState.pendingCodexUserMessages.length === 0
+  ) {
+    return;
+  }
+
+  const classification = classifyPendingCodexUserMessages(args.eventRecord);
+  if (classification === "wait") {
+    return;
+  }
+
+  flushPendingCodexUserMessages({
+    discovered: args.discovered,
+    processingState: args.processingState,
+    sessionDbId: args.sessionDbId,
+    statements: args.statements,
+    onNotice: args.onNotice,
+    claudeNormalizationState: args.claudeNormalizationState,
+    classification: classification ?? "user_prompt",
+  });
+}
+
+function classifyPendingCodexUserMessages(
+  eventRecord: Record<string, unknown> | null,
+): TurnAnchorKind | "wait" | null {
+  if (!eventRecord) {
+    return null;
+  }
+  if (readString(eventRecord.type) !== "event_msg") {
+    return null;
+  }
+  const payloadRecord = asRecord(eventRecord.payload);
+  const payloadType = lowerString(payloadRecord?.type);
+  if (payloadType === "user_message") {
+    return "user_prompt";
+  }
+  if (payloadType === "turn_aborted") {
+    return "synthetic_control";
+  }
+  return "wait";
+}
+
+function flushPendingCodexUserMessages(args: {
+  discovered: ReturnType<typeof discoverSessionFiles>[number];
+  processingState: MessageProcessingState;
+  sessionDbId: string;
+  statements: IndexingStatements;
+  onNotice: (notice: IndexingNotice) => void;
+  claudeNormalizationState: ClaudeTurnNormalizationState | null;
+  classification: TurnAnchorKind;
+}): void {
+  if (args.processingState.pendingCodexUserMessages.length === 0) {
+    return;
+  }
+
+  const pending = args.processingState.pendingCodexUserMessages.splice(0);
+  for (const entry of pending) {
+    const annotated = annotateFlushedCodexUserMessage(
+      args.processingState,
+      entry,
+      args.classification,
+    );
+    persistStreamMessage({
+      discovered: args.discovered,
+      processingState: args.processingState,
+      sessionDbId: args.sessionDbId,
+      statements: args.statements,
+      onNotice: args.onNotice,
+      claudeNormalizationState: args.claudeNormalizationState,
+      message: annotated,
+    });
+  }
+}
+
+function annotateFlushedCodexUserMessage(
+  state: MessageProcessingState,
+  entry: PendingCodexUserMessage,
+  classification: TurnAnchorKind,
+): IndexedMessage {
+  const nativeTurnId = entry.nativeTurnId ?? state.currentNativeTurnId;
+  const shouldStartNewDisplayedTurn =
+    classification === "user_prompt" &&
+    (!state.currentTurnGroupId ||
+      !nativeTurnId ||
+      !state.currentNativeTurnId ||
+      nativeTurnId !== state.currentNativeTurnId);
+  const turnGroupId =
+    classification === "user_prompt"
+      ? shouldStartNewDisplayedTurn
+        ? entry.message.id
+        : (state.currentTurnGroupId ?? entry.message.id)
+      : state.currentTurnGroupId;
+
+  if (classification === "user_prompt") {
+    state.currentTurnGroupId = turnGroupId ?? entry.message.id;
+    state.currentNativeTurnId = nativeTurnId;
+  }
+
+  return {
+    ...entry.message,
+    turnGroupId: turnGroupId ?? null,
+    turnGroupingMode: "hybrid",
+    turnAnchorKind: classification,
+    nativeTurnId,
+  };
+}
+
+function isCodexResponseItemUserEvent(event: unknown): boolean {
+  const eventRecord = asRecord(event);
+  if (readString(eventRecord?.type) !== "response_item") {
+    return false;
+  }
+  const payloadRecord = asRecord(eventRecord?.payload);
+  return (
+    lowerString(payloadRecord?.type) === "message" && lowerString(payloadRecord?.role) === "user"
+  );
+}
+
+function extractCodexNativeTurnId(eventRecord: Record<string, unknown>): string | null {
+  const payloadRecord = asRecord(eventRecord.payload);
+  return readString(payloadRecord?.turn_id) ?? readString(eventRecord.turn_id) ?? null;
 }
 
 function persistStreamMessage(args: {
@@ -2052,7 +2420,7 @@ function persistStreamMessage(args: {
   claudeNormalizationState: ClaudeTurnNormalizationState | null;
   message: IndexedMessage;
 }): void {
-  const stateSnapshot = snapshotMessageProcessingState(args.processingState);
+  const stateSnapshot = snapshotMessageNormalizationState(args.processingState);
   const normalizedMessage = normalizeIndexedMessage(args.processingState, args.message);
   const duplicateResolution = resolveStreamDuplicateMessage({
     statements: args.statements,
@@ -2061,7 +2429,7 @@ function persistStreamMessage(args: {
   });
 
   if (duplicateResolution.kind === "skip") {
-    restoreMessageProcessingState(args.processingState, stateSnapshot);
+    restoreMessageNormalizationState(args.processingState, stateSnapshot);
     args.onNotice({
       provider: args.discovered.provider,
       sessionId: args.discovered.sourceSessionId,
@@ -2878,6 +3246,17 @@ function createMessageProcessingState(
   systemMessageRules: RegExp[],
   checkpoint?: SerializableMessageProcessingState,
 ): MessageProcessingState {
+  const claudeTurnRootByEventId = checkpoint?.claudeTurnRootByEventId ?? {};
+  const claudeTurnRootEventIds = (
+    checkpoint?.claudeTurnRootEventIds?.filter((eventId) => eventId in claudeTurnRootByEventId) ??
+    Object.keys(claudeTurnRootByEventId)
+  ).slice(-CLAUDE_TURN_ROOT_EVENT_ID_LIMIT);
+  const limitedClaudeTurnRootByEventId = Object.fromEntries(
+    claudeTurnRootEventIds.flatMap((eventId) => {
+      const turnRootId = claudeTurnRootByEventId[eventId];
+      return turnRootId ? [[eventId, turnRootId]] : [];
+    }),
+  );
   return {
     provider,
     fileMtimeMs,
@@ -2889,6 +3268,21 @@ function createMessageProcessingState(
       Number.NEGATIVE_INFINITY,
     assistantThinkingRunRoot: checkpoint?.assistantThinkingRunRoot ?? null,
     assistantThinkingRunBaseline: checkpoint?.assistantThinkingRunBaseline ?? null,
+    currentTurnGroupId: checkpoint?.currentTurnGroupId ?? null,
+    currentNativeTurnId: checkpoint?.currentNativeTurnId ?? null,
+    claudeTurnRootByEventId: limitedClaudeTurnRootByEventId,
+    claudeTurnRootEventIds,
+    pendingCodexUserMessages:
+      checkpoint?.pendingCodexUserMessages
+        ?.map((entry) =>
+          entry.message
+            ? {
+                message: entry.message,
+                nativeTurnId: entry.nativeTurnId,
+              }
+            : null,
+        )
+        .filter((entry): entry is PendingCodexUserMessage => entry !== null) ?? [],
     aggregate: checkpoint?.aggregate ?? { ...DEFAULT_SESSION_AGGREGATE_STATE },
   };
 }
@@ -2896,6 +3290,26 @@ function createMessageProcessingState(
 function snapshotMessageProcessingState(
   state: MessageProcessingState,
 ): SerializableMessageProcessingState {
+  return {
+    previousMessage: state.previousMessage,
+    previousTimestampMs: state.previousTimestampMs,
+    assistantThinkingRunRoot: state.assistantThinkingRunRoot,
+    assistantThinkingRunBaseline: state.assistantThinkingRunBaseline,
+    currentTurnGroupId: state.currentTurnGroupId,
+    currentNativeTurnId: state.currentNativeTurnId,
+    claudeTurnRootByEventId: state.claudeTurnRootByEventId,
+    claudeTurnRootEventIds: state.claudeTurnRootEventIds,
+    pendingCodexUserMessages: state.pendingCodexUserMessages.map((entry) => ({
+      message: entry.message,
+      nativeTurnId: entry.nativeTurnId,
+    })),
+    aggregate: { ...state.aggregate },
+  };
+}
+
+function snapshotMessageNormalizationState(
+  state: MessageProcessingState,
+): MessageNormalizationSnapshot {
   return {
     previousMessage: state.previousMessage,
     previousTimestampMs: state.previousTimestampMs,
@@ -2913,7 +3327,56 @@ function restoreMessageProcessingState(
   state.previousTimestampMs = snapshot.previousTimestampMs;
   state.assistantThinkingRunRoot = snapshot.assistantThinkingRunRoot;
   state.assistantThinkingRunBaseline = snapshot.assistantThinkingRunBaseline;
+  state.currentTurnGroupId = snapshot.currentTurnGroupId;
+  state.currentNativeTurnId = snapshot.currentNativeTurnId;
+  state.claudeTurnRootByEventId = snapshot.claudeTurnRootByEventId;
+  state.claudeTurnRootEventIds =
+    snapshot.claudeTurnRootEventIds?.filter(
+      (eventId) => eventId in snapshot.claudeTurnRootByEventId,
+    ) ?? Object.keys(snapshot.claudeTurnRootByEventId);
+  state.pendingCodexUserMessages = snapshot.pendingCodexUserMessages
+    .map((entry) =>
+      entry.message
+        ? {
+            message: entry.message,
+            nativeTurnId: entry.nativeTurnId,
+          }
+        : null,
+    )
+    .filter((entry): entry is PendingCodexUserMessage => entry !== null);
   state.aggregate = { ...snapshot.aggregate };
+}
+
+function restoreMessageNormalizationState(
+  state: MessageProcessingState,
+  snapshot: MessageNormalizationSnapshot,
+): void {
+  state.previousMessage = snapshot.previousMessage;
+  state.previousTimestampMs = snapshot.previousTimestampMs;
+  state.assistantThinkingRunRoot = snapshot.assistantThinkingRunRoot;
+  state.assistantThinkingRunBaseline = snapshot.assistantThinkingRunBaseline;
+  state.aggregate = { ...snapshot.aggregate };
+}
+
+function trackClaudeTurnRootEvent(
+  state: MessageProcessingState,
+  eventId: string,
+  turnGroupId: string,
+): void {
+  if (state.claudeTurnRootByEventId[eventId] === turnGroupId) {
+    return;
+  }
+  if (!(eventId in state.claudeTurnRootByEventId)) {
+    state.claudeTurnRootEventIds.push(eventId);
+  }
+  state.claudeTurnRootByEventId[eventId] = turnGroupId;
+  if (state.claudeTurnRootEventIds.length <= CLAUDE_TURN_ROOT_EVENT_ID_LIMIT) {
+    return;
+  }
+  const evictedEventId = state.claudeTurnRootEventIds.shift();
+  if (evictedEventId) {
+    delete state.claudeTurnRootByEventId[evictedEventId];
+  }
 }
 
 function normalizeIndexedMessage(
@@ -3114,6 +3577,14 @@ function serializeProcessingState(
     previousTimestampMs: state.previousTimestampMs,
     assistantThinkingRunRoot: state.assistantThinkingRunRoot,
     assistantThinkingRunBaseline: state.assistantThinkingRunBaseline,
+    currentTurnGroupId: state.currentTurnGroupId,
+    currentNativeTurnId: state.currentNativeTurnId,
+    claudeTurnRootByEventId: state.claudeTurnRootByEventId,
+    claudeTurnRootEventIds: state.claudeTurnRootEventIds,
+    pendingCodexUserMessages: state.pendingCodexUserMessages.map((entry) => ({
+      message: entry.message,
+      nativeTurnId: entry.nativeTurnId,
+    })),
     aggregate: { ...state.aggregate },
   };
 }
@@ -3124,10 +3595,10 @@ function normalizeDuplicateStreamMessage(
     processingState: MessageProcessingState;
     message: IndexedMessage;
   },
-  stateSnapshot: SerializableMessageProcessingState,
+  stateSnapshot: MessageNormalizationSnapshot,
   sourceId: string,
 ): IndexedMessage {
-  restoreMessageProcessingState(args.processingState, stateSnapshot);
+  restoreMessageNormalizationState(args.processingState, stateSnapshot);
   return normalizeIndexedMessage(args.processingState, {
     ...args.message,
     id: sourceId,
@@ -3184,6 +3655,10 @@ function isEquivalentPersistedMessage(
     operation_duration_ms: number | null;
     operation_duration_source: "native" | "derived" | null;
     operation_duration_confidence: "high" | "low" | null;
+    turn_group_id: string | null;
+    turn_grouping_mode: TurnGroupingMode;
+    turn_anchor_kind: TurnAnchorKind | null;
+    native_turn_id: string | null;
   },
   message: IndexedMessage,
 ): boolean {
@@ -3196,7 +3671,11 @@ function isEquivalentPersistedMessage(
     existing.token_output === message.tokenOutput &&
     existing.operation_duration_ms === message.operationDurationMs &&
     existing.operation_duration_source === message.operationDurationSource &&
-    existing.operation_duration_confidence === message.operationDurationConfidence
+    existing.operation_duration_confidence === message.operationDurationConfidence &&
+    existing.turn_group_id === message.turnGroupId &&
+    existing.turn_grouping_mode === message.turnGroupingMode &&
+    existing.turn_anchor_kind === message.turnAnchorKind &&
+    existing.native_turn_id === message.nativeTurnId
   );
 }
 
@@ -3786,6 +4265,10 @@ function insertIndexedMessage(
     message.operationDurationMs,
     message.operationDurationSource,
     message.operationDurationConfidence,
+    message.turnGroupId,
+    message.turnGroupingMode,
+    message.turnAnchorKind,
+    message.nativeTurnId,
   );
   statements.insertMessageFts.run(
     messageId,
@@ -3880,6 +4363,10 @@ function buildSyntheticSystemMessage(
     operationDurationMs: null,
     operationDurationSource: null,
     operationDurationConfidence: null,
+    turnGroupId: null,
+    turnGroupingMode: "heuristic",
+    turnAnchorKind: null,
+    nativeTurnId: null,
   };
 }
 
@@ -4023,6 +4510,31 @@ function deserializeResumeCheckpoint(checkpoint: IndexCheckpointRow): ResumeChec
         assistantThinkingRunBaseline: parseCheckpointMessage(
           processingRecord?.assistantThinkingRunBaseline,
         ),
+        currentTurnGroupId: readString(processingRecord?.currentTurnGroupId) ?? null,
+        currentNativeTurnId: readString(processingRecord?.currentNativeTurnId) ?? null,
+        claudeTurnRootByEventId: Object.fromEntries(
+          Object.entries(asRecord(processingRecord?.claudeTurnRootByEventId) ?? {}).flatMap(
+            ([key, value]) => {
+              const rootId = readString(value);
+              return rootId ? [[key, rootId]] : [];
+            },
+          ),
+        ),
+        claudeTurnRootEventIds: asArray(processingRecord?.claudeTurnRootEventIds)
+          .map((value) => readString(value))
+          .filter((value): value is string => value !== null),
+        pendingCodexUserMessages: asArray(processingRecord?.pendingCodexUserMessages)
+          .map((value) => {
+            const record = asRecord(value);
+            const message = parseCheckpointMessage(record?.message);
+            return message
+              ? {
+                  message,
+                  nativeTurnId: readString(record?.nativeTurnId) ?? null,
+                }
+              : null;
+          })
+          .filter((entry): entry is PendingCodexUserMessage => entry !== null),
         aggregate: parseAggregateState(processingRecord?.aggregate),
       },
       sourceMetadata: {
@@ -4106,6 +4618,18 @@ function parseCheckpointMessage(value: unknown): IndexedMessage | null {
       record.operationDurationConfidence === "high" || record.operationDurationConfidence === "low"
         ? record.operationDurationConfidence
         : null,
+    turnGroupId: readString(record.turnGroupId) ?? null,
+    turnGroupingMode:
+      record.turnGroupingMode === "native" ||
+      record.turnGroupingMode === "hybrid" ||
+      record.turnGroupingMode === "heuristic"
+        ? record.turnGroupingMode
+        : "heuristic",
+    turnAnchorKind:
+      record.turnAnchorKind === "user_prompt" || record.turnAnchorKind === "synthetic_control"
+        ? record.turnAnchorKind
+        : null,
+    nativeTurnId: readString(record.nativeTurnId) ?? null,
   });
   return parsed.success ? parsed.data : null;
 }

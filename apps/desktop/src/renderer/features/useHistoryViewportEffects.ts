@@ -69,7 +69,8 @@ export function useHistoryViewportEffects({
   setFocusMessageId: Dispatch<SetStateAction<string>>;
   scrollPreservationRef: MutableRefObject<{
     scrollTop: number;
-    referenceMessageId: string;
+    referenceElementId: string;
+    referenceElementKind: "message" | "scroll-anchor";
     referenceOffsetTop: number;
   } | null>;
 }) {
@@ -243,9 +244,11 @@ export function useHistoryViewportEffects({
       }
       if (refreshCtx.scrollPreservation) {
         const saved = refreshCtx.scrollPreservation;
-        const refEl = container.querySelector<HTMLElement>(
-          `[data-history-message-id="${CSS.escape(saved.referenceMessageId)}"]`,
-        );
+        const selector =
+          saved.referenceElementKind === "scroll-anchor"
+            ? `[data-history-scroll-anchor-id="${CSS.escape(saved.referenceElementId)}"]`
+            : `[data-history-message-id="${CSS.escape(saved.referenceElementId)}"]`;
+        const refEl = container.querySelector<HTMLElement>(selector);
         if (refEl) {
           container.scrollTop = saved.scrollTop + (refEl.offsetTop - saved.referenceOffsetTop);
           return;
@@ -275,10 +278,12 @@ export function useHistoryViewportEffects({
     }
     scrollPreservationRef.current = null;
 
-    if (saved.referenceMessageId) {
-      const refEl = container.querySelector<HTMLElement>(
-        `[data-history-message-id="${CSS.escape(saved.referenceMessageId)}"]`,
-      );
+    if (saved.referenceElementId) {
+      const selector =
+        saved.referenceElementKind === "scroll-anchor"
+          ? `[data-history-scroll-anchor-id="${CSS.escape(saved.referenceElementId)}"]`
+          : `[data-history-message-id="${CSS.escape(saved.referenceElementId)}"]`;
+      const refEl = container.querySelector<HTMLElement>(selector);
       if (refEl) {
         container.scrollTop = saved.scrollTop + (refEl.offsetTop - saved.referenceOffsetTop);
         return;

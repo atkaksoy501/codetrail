@@ -1,5 +1,10 @@
 import { createHistorySelection } from "../app/historySelection";
-import type { HistoryDetailMode, HistorySelection, HistoryVisualization } from "../app/types";
+import type {
+  HistoryDetailMode,
+  HistorySelection,
+  HistoryVisualization,
+  PaneStateSnapshot,
+} from "../app/types";
 
 export function deriveHistoryVisualization(
   historyMode: HistorySelection["mode"],
@@ -10,6 +15,18 @@ export function deriveHistoryVisualization(
   }
   if (historyMode === "bookmarks") {
     return "bookmarks";
+  }
+  return "messages";
+}
+
+export function deriveInitialHistoryVisualization(
+  initialPaneState: PaneStateSnapshot | null | undefined,
+): HistoryVisualization {
+  if (initialPaneState?.historyMode || initialPaneState?.historyDetailMode) {
+    return deriveHistoryVisualization(
+      initialPaneState.historyMode ?? "project_all",
+      initialPaneState.historyDetailMode ?? "flat",
+    );
   }
   return "messages";
 }

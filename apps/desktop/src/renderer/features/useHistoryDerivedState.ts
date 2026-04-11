@@ -274,7 +274,6 @@ export function useHistoryDerivedState({
       : historyMode === "project_all"
         ? (selectedProject?.messageCount ?? 0)
         : (selectedSession?.messageCount ?? sessionDetail?.session?.messageCount ?? 0);
-
   const isExpandedByDefault = useCallback(
     (category: MessageCategory) => expandedByDefaultCategories.includes(category),
     [expandedByDefaultCategories],

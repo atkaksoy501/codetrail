@@ -95,6 +95,10 @@ function normalizeParsedMessages(
       operationDurationMs: message.operationDurationMs ?? null,
       operationDurationSource: message.operationDurationSource ?? null,
       operationDurationConfidence: message.operationDurationConfidence ?? null,
+      turnGroupId: message.turnGroupId ?? null,
+      turnGroupingMode: message.turnGroupingMode ?? "heuristic",
+      turnAnchorKind: message.turnAnchorKind ?? null,
+      nativeTurnId: message.nativeTurnId ?? null,
     };
 
     // Provider parsers are intentionally permissive. Canonical validation catches anything that

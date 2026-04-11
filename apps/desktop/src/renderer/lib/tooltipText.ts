@@ -59,9 +59,14 @@ function formatShortcutSequencePlainText(sequence: string): string {
 }
 
 export function formatShortcutDisplay(shortcut: string, platform: DesktopPlatform): string {
-  return isMacPlatform(platform)
-    ? formatShortcutSequence(shortcut)
-    : formatShortcutSequencePlainText(shortcut);
+  const sequences = shortcut
+    .split("/")
+    .map((sequence) => sequence.trim())
+    .filter((sequence) => sequence.length > 0);
+  const formatter = isMacPlatform(platform)
+    ? formatShortcutSequence
+    : formatShortcutSequencePlainText;
+  return sequences.map((sequence) => formatter(sequence)).join(" / ");
 }
 
 export function formatTooltip(

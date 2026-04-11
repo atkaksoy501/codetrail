@@ -5,6 +5,8 @@ import type {
   OperationDurationConfidence,
   OperationDurationSource,
   Provider,
+  TurnAnchorKind,
+  TurnGroupingMode,
 } from "../contracts/canonical";
 import {
   extractCodetrailCompactedSnapshotText,
@@ -45,6 +47,10 @@ export type ParsedProviderMessage = {
   operationDurationMs: number | null;
   operationDurationSource: OperationDurationSource | null;
   operationDurationConfidence: OperationDurationConfidence | null;
+  turnGroupId?: string | null;
+  turnGroupingMode?: TurnGroupingMode | null;
+  turnAnchorKind?: TurnAnchorKind | null;
+  nativeTurnId?: string | null;
 };
 
 export type ParseProviderPayloadArgs = {

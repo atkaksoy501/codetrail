@@ -40,6 +40,7 @@ export type HistoryRefreshDetailState = {
   bookmarksResponse: BookmarkListResponse;
   sessionTurnDetail: {
     totalCount?: number | null;
+    totalTurns?: number | null;
   } | null;
 };
 

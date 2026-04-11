@@ -4,14 +4,7 @@ import type { Dispatch, SetStateAction } from "react";
 import type { IpcRequestInput, MessageCategory, SearchMode } from "@codetrail/core/browser";
 
 import { areHistorySelectionsEqual, createHistorySelection } from "../app/historySelection";
-import type {
-  HistoryMessage,
-  HistorySelection,
-  ProjectSummary,
-  SessionDetail,
-  SessionSummary,
-  SessionTurnDetail,
-} from "../app/types";
+import type { HistoryMessage, HistorySelection, SessionTurnDetail } from "../app/types";
 import { useDebouncedValue } from "../hooks/useDebouncedValue";
 import { shouldIgnoreAsyncEffectError } from "../lib/asyncEffectUtils";
 import type { CodetrailClient } from "../lib/codetrailClient";
@@ -30,10 +23,6 @@ export function useHistoryTurnController({
   currentUiHistorySelection,
   selectedProjectId,
   selectedSessionId,
-  sessionDetail,
-  selectedSession,
-  selectedProject,
-  historyCategoryCountsUser,
   turnViewSortDirection,
   turnViewCategories,
   setTurnViewCombinedChangesExpandedOverride,
@@ -48,10 +37,6 @@ export function useHistoryTurnController({
   currentUiHistorySelection: HistorySelection;
   selectedProjectId: string;
   selectedSessionId: string;
-  sessionDetail: SessionDetail | null;
-  selectedSession: SessionSummary | null;
-  selectedProject: ProjectSummary | null;
-  historyCategoryCountsUser: number;
   turnViewSortDirection: "asc" | "desc";
   turnViewCategories: MessageCategory[];
   setTurnViewCombinedChangesExpandedOverride: Dispatch<SetStateAction<boolean | null>>;
@@ -136,11 +121,8 @@ export function useHistoryTurnController({
         ? Boolean(
             ("sessionId" in turnVisualizationSelection && turnVisualizationSelection.sessionId) ||
               selectedSessionId,
-          ) &&
-          ((sessionDetail?.categoryCounts.user ?? 0) > 0 ||
-            (selectedSession?.messageCount ?? 0) > 0)
-        : Boolean(turnVisualizationSelection.projectId) &&
-          (historyCategoryCountsUser > 0 || (selectedProject?.messageCount ?? 0) > 0);
+          )
+        : Boolean(turnVisualizationSelection.projectId);
 
   const currentTurnScopeKey = useMemo(
     () => getTurnScopeKey(turnVisualizationSelection),

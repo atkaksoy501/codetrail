@@ -174,7 +174,7 @@ export function HistoryDetailPane({
       ? "There are no bookmarks for this session."
       : "There are no bookmarks for this project.";
   const bookmarksEmptyStateActionLabel =
-    history.selectedSessionId.length > 0 ? "Go To Session Messages" : "Go To Project Messages";
+    history.selectedSessionId.length > 0 ? "Go To Session Flat View" : "Go To Project Flat View";
   const preserveMessagePaneFocusProps = paneFocus.getPreservePaneFocusProps("message");
   const exportAllPagesCount =
     history.historyMode === "bookmarks"
@@ -384,7 +384,7 @@ export function HistoryDetailPane({
                 history.handleSelectMessagesView();
                 focusMessagePane();
               }}
-              title={formatTooltipLabel("Messages", [
+              title={formatTooltipLabel("Flat: all messages in order", [
                 shortcuts.actions.showMessagesView,
                 {
                   label: "Cycle",
@@ -393,7 +393,7 @@ export function HistoryDetailPane({
               ])}
             >
               <ToolbarIcon name="history" />
-              <span>Messages</span>
+              <span>Flat</span>
             </button>
             <button
               type="button"
@@ -406,7 +406,7 @@ export function HistoryDetailPane({
                 focusMessagePane();
               }}
               disabled={!history.canToggleTurnView && !isTurnView}
-              title={formatTooltipLabel("Turns", [
+              title={formatTooltipLabel("Turns: grouped by user turns", [
                 shortcuts.actions.showTurnsView,
                 {
                   label: "Cycle",

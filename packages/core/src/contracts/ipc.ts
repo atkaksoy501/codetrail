@@ -11,6 +11,8 @@ import {
   operationDurationConfidenceSchema,
   operationDurationSourceSchema,
   providerSchema,
+  turnAnchorKindSchema,
+  turnGroupingModeSchema,
 } from "./canonical";
 import { KNOWN_EXTERNAL_APP_VALUES } from "./externalApps";
 import { PROVIDER_LIST, createProviderRecord } from "./providerMetadata";
@@ -76,6 +78,10 @@ const sessionMessageSchema = z.object({
   operationDurationMs: z.number().int().nonnegative().nullable(),
   operationDurationSource: operationDurationSourceSchema.nullable(),
   operationDurationConfidence: operationDurationConfidenceSchema.nullable(),
+  turnGroupId: z.string().min(1).nullable(),
+  turnGroupingMode: turnGroupingModeSchema,
+  turnAnchorKind: turnAnchorKindSchema.nullable(),
+  nativeTurnId: z.string().min(1).nullable(),
   toolEditFiles: z
     .array(
       z.object({

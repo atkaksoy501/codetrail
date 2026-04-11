@@ -63,13 +63,20 @@ type HistoryStub = {
   turnViewExpandedByDefaultCategories: MessageCategory[];
   turnViewCombinedChangesExpanded: boolean;
   effectiveTurnCombinedChangesExpanded: boolean;
+  combinedChangesDiffExpansionRequest: {
+    expanded: boolean;
+    version: number;
+  } | null;
   turnVisibleMessages: TurnMessageStub[];
+  activeHistoryMessages: TurnMessageStub[];
   turnCategoryCounts: Record<MessageCategory, number>;
   handleToggleVisibleCategoryMessagesExpandedInTurn: ReturnType<typeof vi.fn>;
   handleToggleMessageExpanded: ReturnType<typeof vi.fn>;
   handleToggleMessageExpandedInTurn: ReturnType<typeof vi.fn>;
   setTurnViewCombinedChangesExpanded: ReturnType<typeof vi.fn>;
   setTurnViewCombinedChangesExpandedOverride: ReturnType<typeof vi.fn>;
+  handleCombinedChangesDiffStateChange: ReturnType<typeof vi.fn>;
+  handleSelectMessagesView: ReturnType<typeof vi.fn>;
   handleToggleBookmark: ReturnType<typeof vi.fn>;
   handleRevealInSessionWithTurnExit: ReturnType<typeof vi.fn>;
   handleRevealInProjectWithTurnExit: ReturnType<typeof vi.fn>;
@@ -177,7 +184,9 @@ function createHistoryStub(): HistoryStub {
     turnViewExpandedByDefaultCategories: ["user", "assistant"] as MessageCategory[],
     turnViewCombinedChangesExpanded: false,
     effectiveTurnCombinedChangesExpanded: false,
+    combinedChangesDiffExpansionRequest: null,
     turnVisibleMessages: [],
+    activeHistoryMessages: [],
     turnCategoryCounts: {
       user: 1,
       assistant: 1,
@@ -192,6 +201,8 @@ function createHistoryStub(): HistoryStub {
     handleToggleMessageExpandedInTurn: vi.fn(),
     setTurnViewCombinedChangesExpanded: vi.fn(),
     setTurnViewCombinedChangesExpandedOverride: vi.fn(),
+    handleCombinedChangesDiffStateChange: vi.fn(),
+    handleSelectMessagesView: vi.fn(),
     handleToggleBookmark: vi.fn(),
     handleRevealInSessionWithTurnExit: vi.fn(),
     handleRevealInProjectWithTurnExit: vi.fn(),
@@ -219,6 +230,7 @@ function cloneHistoryStub(history: HistoryStub): HistoryStub {
     turnViewExpandedByDefaultCategories: [...history.turnViewExpandedByDefaultCategories],
     turnViewCombinedChangesExpanded: history.turnViewCombinedChangesExpanded,
     effectiveTurnCombinedChangesExpanded: history.effectiveTurnCombinedChangesExpanded,
+    combinedChangesDiffExpansionRequest: history.combinedChangesDiffExpansionRequest,
     sessionTurnDetail: {
       ...history.sessionTurnDetail,
       categoryCounts: { ...history.sessionTurnDetail.categoryCounts },
@@ -229,6 +241,7 @@ function cloneHistoryStub(history: HistoryStub): HistoryStub {
       messages: history.sessionTurnDetail.messages.map((message) => ({ ...message })),
     },
     turnVisibleMessages: history.turnVisibleMessages.map((message) => ({ ...message })),
+    activeHistoryMessages: history.activeHistoryMessages.map((message) => ({ ...message })),
     turnCategoryCounts: { ...history.turnCategoryCounts },
   };
 }
@@ -244,6 +257,9 @@ function syncTurnDerived(history: HistoryStub) {
     history.sessionTurnDetail.messages,
     history.sessionTurnDetail.anchorMessage,
   );
+  history.activeHistoryMessages = history.sessionTurnDetail.messages.map((message) => ({
+    ...message,
+  }));
 }
 
 function renderTurnView(history: HistoryStub) {
@@ -332,6 +348,111 @@ describe("TurnView", () => {
     expect(rowTypes).not.toContain("User");
   });
 
+  it("pins the anchor user row first even when the visible message order arrives differently", () => {
+    const history = createHistoryStub();
+    syncTurnDerived(history);
+    history.turnVisibleMessages = [
+      history.sessionTurnDetail.messages[0]!,
+      history.sessionTurnDetail.messages[1]!,
+      history.sessionTurnDetail.messages[2]!,
+    ];
+
+    const { container } = renderTurnView(history);
+
+    const rowTypes = Array.from(container.querySelectorAll(".message .msg-role")).map((node) =>
+      node.textContent?.trim(),
+    );
+    expect(rowTypes[0]).toBe("User");
+    expect(rowTypes[1]).toBe("Combined Changes");
+  });
+
+  it("uses the earliest visible user row as the display anchor when the stored anchor is system", () => {
+    const history = createHistoryStub();
+    history.sessionTurnDetail.anchorMessageId = "message_0";
+    history.sessionTurnDetail.anchorMessage = {
+      id: "message_0",
+      sourceId: "source_0",
+      sessionId: "session_1",
+      provider: "codex",
+      category: "system",
+      content: "# AGENTS.md instructions",
+      createdAt: "2026-04-07T09:59:59.000Z",
+      tokenInput: null,
+      tokenOutput: null,
+      operationDurationMs: null,
+      operationDurationSource: null,
+      operationDurationConfidence: null,
+    };
+    history.sessionTurnDetail.messages = [
+      history.sessionTurnDetail.anchorMessage,
+      ...history.sessionTurnDetail.messages.map((message) => ({ ...message, provider: "codex" })),
+    ];
+    history.sessionTurnDetail.totalCount = 4;
+    history.sessionTurnDetail.categoryCounts.system = 1;
+    syncTurnDerived(history);
+
+    const { container } = renderTurnView(history);
+
+    const rowTypes = Array.from(container.querySelectorAll(".message .msg-role")).map((node) =>
+      node.textContent?.trim(),
+    );
+    expect(rowTypes[0]).toBe("User");
+    expect(rowTypes[1]).toBe("Combined Changes");
+    expect(screen.getByText("Refactor turn history")).toBeInTheDocument();
+  });
+
+  it("shows an empty-turn explanation and flat CTA when flat messages exist", () => {
+    const history = createHistoryStub();
+    history.sessionTurnDetail.anchorMessageId = null as never;
+    history.sessionTurnDetail.anchorMessage = null as never;
+    history.sessionTurnDetail.turnNumber = 0;
+    history.sessionTurnDetail.totalTurns = 0;
+    history.sessionTurnDetail.totalCount = 0;
+    history.sessionTurnDetail.messages = [];
+    history.turnVisibleMessages = [];
+    history.activeHistoryMessages = [
+      {
+        id: "flat_1",
+        sourceId: "flat_source_1",
+        sessionId: "session_1",
+        provider: "codex",
+        category: "assistant",
+        content: "Still has flat messages",
+        createdAt: "2026-04-07T10:00:00.000Z",
+        tokenInput: null,
+        tokenOutput: null,
+        operationDurationMs: null,
+        operationDurationSource: null,
+        operationDurationConfidence: null,
+      },
+    ];
+
+    renderTurnView(history);
+
+    expect(
+      screen.getByText("No user messages in this scope, so there are no turns yet."),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Go to Flat view" }));
+    expect(history.handleSelectMessagesView).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows a no-messages empty state without a flat CTA when the scope is empty", () => {
+    const history = createHistoryStub();
+    history.sessionTurnDetail.anchorMessageId = null as never;
+    history.sessionTurnDetail.anchorMessage = null as never;
+    history.sessionTurnDetail.turnNumber = 0;
+    history.sessionTurnDetail.totalTurns = 0;
+    history.sessionTurnDetail.totalCount = 0;
+    history.sessionTurnDetail.messages = [];
+    history.turnVisibleMessages = [];
+    history.activeHistoryMessages = [];
+
+    renderTurnView(history);
+
+    expect(screen.getByText("No messages in this scope yet.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Go to Flat view" })).toBeNull();
+  });
+
   it("uses the global multi-file diff collapse preference for combined changes", () => {
     document.documentElement.dataset.collapseMultiFileToolDiffs = "true";
     const history = createHistoryStub();
@@ -412,6 +533,186 @@ describe("TurnView", () => {
 
     expect(screen.getByRole("button", { name: "Expand diff for query.ts" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Collapse diff for query.ts" })).toBeNull();
+  });
+
+  it("applies visible diff expansion requests to expanded combined changes", () => {
+    document.documentElement.dataset.collapseMultiFileToolDiffs = "true";
+    const history = createHistoryStub();
+    replaceTurnMessage(history, 1, {
+      toolEditFiles: [
+        {
+          filePath: "/workspace/project-one/src/query.ts",
+          previousFilePath: null,
+          changeType: "update",
+          unifiedDiff: [
+            "--- a//workspace/project-one/src/query.ts",
+            "+++ b//workspace/project-one/src/query.ts",
+            "@@ -1,1 +1,1 @@",
+            "-return stable;",
+            "+return turnStable;",
+          ].join("\n"),
+          addedLineCount: 1,
+          removedLineCount: 1,
+          exactness: "exact",
+        },
+        {
+          filePath: "/workspace/project-one/src/other.ts",
+          previousFilePath: null,
+          changeType: "delete",
+          unifiedDiff: [
+            "--- a//workspace/project-one/src/other.ts",
+            "+++ /dev/null",
+            "@@ -1,1 +0,0 @@",
+            "-export const removed = true;",
+          ].join("\n"),
+          addedLineCount: 0,
+          removedLineCount: 1,
+          exactness: "best_effort",
+        },
+      ],
+    });
+    syncTurnDerived(history);
+
+    const { rerenderHistory } = renderTurnView(history);
+
+    fireEvent.click(screen.getByRole("button", { name: /expand combined changes/i }));
+    expect(screen.getByRole("button", { name: "Expand Diffs" })).toBeInTheDocument();
+
+    const nextHistory = cloneHistoryStub(history);
+    nextHistory.turnViewCombinedChangesExpanded = true;
+    nextHistory.effectiveTurnCombinedChangesExpanded = true;
+    nextHistory.combinedChangesDiffExpansionRequest = {
+      expanded: true,
+      version: 1,
+    };
+    rerenderHistory(nextHistory);
+
+    expect(screen.getAllByRole("button", { name: "Collapse Diffs" }).length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: "Collapse diff for other.ts" })).toBeInTheDocument();
+  });
+
+  it("keeps combined changes collapsed while applying hidden diff expansion requests", () => {
+    document.documentElement.dataset.collapseMultiFileToolDiffs = "true";
+    const history = createHistoryStub();
+    replaceTurnMessage(history, 1, {
+      toolEditFiles: [
+        {
+          filePath: "/workspace/project-one/src/query.ts",
+          previousFilePath: null,
+          changeType: "update",
+          unifiedDiff: [
+            "--- a//workspace/project-one/src/query.ts",
+            "+++ b//workspace/project-one/src/query.ts",
+            "@@ -1,1 +1,1 @@",
+            "-return stable;",
+            "+return turnStable;",
+          ].join("\n"),
+          addedLineCount: 1,
+          removedLineCount: 1,
+          exactness: "exact",
+        },
+        {
+          filePath: "/workspace/project-one/src/other.ts",
+          previousFilePath: null,
+          changeType: "delete",
+          unifiedDiff: [
+            "--- a//workspace/project-one/src/other.ts",
+            "+++ /dev/null",
+            "@@ -1,1 +0,0 @@",
+            "-export const removed = true;",
+          ].join("\n"),
+          addedLineCount: 0,
+          removedLineCount: 1,
+          exactness: "best_effort",
+        },
+      ],
+    });
+    syncTurnDerived(history);
+
+    const { rerenderHistory } = renderTurnView(history);
+    expect(screen.getByRole("button", { name: /expand combined changes/i })).toBeInTheDocument();
+
+    const nextHistory = cloneHistoryStub(history);
+    nextHistory.combinedChangesDiffExpansionRequest = {
+      expanded: true,
+      version: 1,
+    };
+    rerenderHistory(nextHistory);
+
+    expect(screen.getByRole("button", { name: /expand combined changes/i })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /expand combined changes/i }));
+    expect(screen.getByRole("button", { name: "Collapse diff for other.ts" })).toBeInTheDocument();
+  });
+
+  it("applies combined diff collapse requests after the section is already open", () => {
+    document.documentElement.dataset.collapseMultiFileToolDiffs = "true";
+    const history = createHistoryStub();
+    replaceTurnMessage(history, 1, {
+      toolEditFiles: [
+        {
+          filePath: "/workspace/project-one/src/query.ts",
+          previousFilePath: null,
+          changeType: "update",
+          unifiedDiff: [
+            "--- a//workspace/project-one/src/query.ts",
+            "+++ b//workspace/project-one/src/query.ts",
+            "@@ -1,1 +1,1 @@",
+            "-return stable;",
+            "+return turnStable;",
+          ].join("\n"),
+          addedLineCount: 1,
+          removedLineCount: 1,
+          exactness: "exact",
+        },
+        {
+          filePath: "/workspace/project-one/src/other.ts",
+          previousFilePath: null,
+          changeType: "delete",
+          unifiedDiff: [
+            "--- a//workspace/project-one/src/other.ts",
+            "+++ /dev/null",
+            "@@ -1,1 +0,0 @@",
+            "-export const removed = true;",
+          ].join("\n"),
+          addedLineCount: 0,
+          removedLineCount: 1,
+          exactness: "best_effort",
+        },
+      ],
+    });
+    syncTurnDerived(history);
+
+    const { rerenderHistory } = renderTurnView(history);
+    fireEvent.click(screen.getByRole("button", { name: /expand combined changes/i }));
+    expect(screen.getByRole("button", { name: "Expand Diffs" })).toBeInTheDocument();
+
+    const expandedHistory = cloneHistoryStub(history);
+    expandedHistory.turnViewCombinedChangesExpanded = true;
+    expandedHistory.effectiveTurnCombinedChangesExpanded = true;
+    expandedHistory.combinedChangesDiffExpansionRequest = {
+      expanded: true,
+      version: 1,
+    };
+    rerenderHistory(expandedHistory);
+    expect(
+      screen
+        .getAllByRole("button", { name: "Collapse Diffs" })
+        .some((button) => button.getAttribute("title")?.includes("⌘D / ⌘⇧D")),
+    ).toBe(true);
+    expect(screen.getByRole("button", { name: "Collapse diff for other.ts" })).toBeInTheDocument();
+
+    const collapsedHistory = cloneHistoryStub(expandedHistory);
+    collapsedHistory.combinedChangesDiffExpansionRequest = {
+      expanded: false,
+      version: 2,
+    };
+    rerenderHistory(collapsedHistory);
+    expect(
+      screen
+        .getAllByRole("button", { name: "Expand Diffs" })
+        .some((button) => button.getAttribute("title")?.includes("⌘⇧D")),
+    ).toBe(true);
+    expect(screen.getByRole("button", { name: "Expand diff for other.ts" })).toBeInTheDocument();
   });
 
   it("renders multi-edit files in one diff viewer with sequence separators", () => {

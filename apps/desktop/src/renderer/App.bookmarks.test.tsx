@@ -620,15 +620,12 @@ describe("App bookmarks", () => {
       expect(screen.getByText("There are no bookmarks for this session.")).toBeInTheDocument();
     });
 
-    await user.click(screen.getByRole("button", { name: "Go To Session Messages" }));
+    await user.click(screen.getByRole("button", { name: "Go To Session Flat View" }));
 
     await waitFor(() => {
       expect(screen.getByText("Please review markdown table rendering")).toBeInTheDocument();
     });
-    expect(screen.getByRole("tab", { name: /^Messages$/i })).toHaveAttribute(
-      "aria-selected",
-      "true",
-    );
+    expect(screen.getByRole("tab", { name: /^Flat$/i })).toHaveAttribute("aria-selected", "true");
   });
 
   it("shows an empty-state page for a project with no bookmarks and returns to project messages", async () => {
@@ -675,15 +672,12 @@ describe("App bookmarks", () => {
       expect(screen.getByText("There are no bookmarks for this project.")).toBeInTheDocument();
     });
 
-    await user.click(screen.getByRole("button", { name: "Go To Project Messages" }));
+    await user.click(screen.getByRole("button", { name: "Go To Project Flat View" }));
 
     await waitFor(() => {
       expect(screen.getByText("Please review markdown table rendering")).toBeInTheDocument();
     });
-    expect(screen.getByRole("tab", { name: /^Messages$/i })).toHaveAttribute(
-      "aria-selected",
-      "true",
-    );
+    expect(screen.getByRole("tab", { name: /^Flat$/i })).toHaveAttribute("aria-selected", "true");
   });
 
   it("keeps bookmarks visualization active when switching sessions and scopes bookmark requests by session", async () => {

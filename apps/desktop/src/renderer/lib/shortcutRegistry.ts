@@ -107,12 +107,12 @@ function getShortcutItems(platform: DesktopPlatform) {
     {
       group: "Search & Navigation",
       shortcut: `${modifier}+T`,
-      description: "Cycle Messages and Turns",
+      description: "Cycle Flat and Turns",
     },
     {
       group: "Search & Navigation",
       shortcut: `${modifier}+Shift+M`,
-      description: "Show Messages view",
+      description: "Show Flat view",
     },
     {
       group: "Search & Navigation",
@@ -189,6 +189,11 @@ function getShortcutItems(platform: DesktopPlatform) {
       shortcut: `${modifier}+E`,
       description: "Expand, collapse, or restore shown items",
     },
+    {
+      group: "Panels",
+      shortcut: isMacPlatform(platform) ? "Cmd+D / Cmd+Shift+D" : `${modifier}+Shift+D`,
+      description: "Expand or collapse Combined Changes diffs",
+    },
     ...CATEGORY_DIGIT_SHORTCUTS.flatMap(([category, digit]) => {
       const categoryLabel =
         category === "tool_edit"
@@ -257,6 +262,7 @@ function getShortcutItems(platform: DesktopPlatform) {
 }
 
 export type ShortcutRegistry = {
+  platform: DesktopPlatform;
   labels: {
     categoryClickModifier: "Cmd" | "Ctrl";
   };
@@ -266,6 +272,7 @@ export type ShortcutRegistry = {
     refreshNow: string;
     toggleAutoRefresh: string;
     toggleAllMessagesExpanded: string;
+    toggleCombinedChangesDiffsExpanded: string;
     toggleFocusMode: string;
     toggleProjectPane: string;
     toggleSessionPane: string;
@@ -304,6 +311,7 @@ export function createShortcutRegistry(platform: DesktopPlatform): ShortcutRegis
   const modifier = getPrimaryModifierLabel(platform);
   const isMac = isMacPlatform(platform);
   return {
+    platform,
     labels: {
       categoryClickModifier: isMac ? "Cmd" : "Ctrl",
     },
@@ -313,6 +321,7 @@ export function createShortcutRegistry(platform: DesktopPlatform): ShortcutRegis
       refreshNow: `${modifier}+R`,
       toggleAutoRefresh: `${modifier}+Shift+R`,
       toggleAllMessagesExpanded: `${modifier}+E`,
+      toggleCombinedChangesDiffsExpanded: isMac ? "Cmd+D / Cmd+Shift+D" : `${modifier}+Shift+D`,
       toggleFocusMode: "",
       toggleProjectPane: `${modifier}+B`,
       toggleSessionPane: `${modifier}+Alt+B`,

@@ -1160,6 +1160,7 @@ export function App({
     focusSessionSearch,
     toggleFocusMode,
     toggleAllMessagesExpanded: history.handleToggleAllCategoryDefaultExpansion,
+    toggleCombinedChangesDiffsExpanded: history.handleToggleCombinedChangesDiffsExpanded,
     toggleHistoryCategory: history.handleToggleHistoryCategoryShortcut,
     soloHistoryCategory: history.handleSoloHistoryCategoryShortcut,
     toggleHistoryCategoryDefaultExpansion: history.handleToggleCategoryDefaultExpansion,

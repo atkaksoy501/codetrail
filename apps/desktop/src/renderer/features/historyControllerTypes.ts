@@ -9,7 +9,8 @@ export type RefreshContext = {
   followEligible: boolean;
   scrollPreservation: {
     scrollTop: number;
-    referenceMessageId: string;
+    referenceElementId: string;
+    referenceElementKind: "message" | "scroll-anchor";
     referenceOffsetTop: number;
   } | null;
   prevMessageIds: string;

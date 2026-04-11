@@ -285,6 +285,10 @@ describe("initializeDatabase", () => {
          operation_duration_ms INTEGER,
          operation_duration_source TEXT,
          operation_duration_confidence TEXT,
+         turn_group_id TEXT,
+         turn_grouping_mode TEXT NOT NULL DEFAULT 'heuristic',
+         turn_anchor_kind TEXT,
+         native_turn_id TEXT,
          created_at_ms INTEGER GENERATED ALWAYS AS (
            CASE
              WHEN unixepoch(created_at) IS NOT NULL THEN CAST(unixepoch(created_at) AS INTEGER) * 1000

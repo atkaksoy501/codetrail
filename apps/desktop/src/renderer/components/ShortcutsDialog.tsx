@@ -139,7 +139,7 @@ export function ShortcutsDialog({
   ];
   const viewRows: ShortcutSectionRow[] = [
     {
-      label: "Messages view",
+      label: "Flat view",
       shortcuts: [shortcuts.actions.showMessagesView],
     },
     {

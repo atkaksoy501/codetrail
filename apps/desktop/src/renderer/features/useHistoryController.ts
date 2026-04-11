@@ -26,6 +26,7 @@ import type {
   SessionDetail,
   TreeAutoRevealSessionRequest,
 } from "../app/types";
+import { aggregateTurnCombinedFiles } from "../components/history/turnCombinedDiff";
 import { useDebouncedValue } from "../hooks/useDebouncedValue";
 import { usePaneStateSync } from "../hooks/usePaneStateSync";
 import { useCodetrailClient } from "../lib/codetrailClient";
@@ -56,6 +57,21 @@ const TURN_PRIMARY_HISTORY_CATEGORIES: readonly MessageCategory[] = [
   "assistant",
   "tool_edit",
 ];
+function turnHasCombinedVisibleDiffs(
+  messages: Array<{
+    category: MessageCategory;
+    content: string;
+    createdAt: string;
+    id: string;
+    sourceId: string;
+    provider: Provider;
+    toolEditFiles?: unknown;
+  }>,
+): boolean {
+  return (
+    aggregateTurnCombinedFiles(messages.filter((message) => message.category !== "user")).length > 0
+  );
+}
 
 export type { HistorySelectionDebounceOverrides } from "./useHistorySelectionState";
 
@@ -145,8 +161,20 @@ export function useHistoryController({
     useState<boolean | null>(null);
   const [visibleExpansionActionState, setVisibleExpansionActionState] =
     useState<VisibleExpansionAction>("expand");
+  const [combinedChangesDiffExpansionRequest, setCombinedChangesDiffExpansionRequest] = useState<{
+    expanded: boolean;
+    version: number;
+  } | null>(null);
   const visibleExpansionScopeKeyRef = useRef("");
   const visibleExpansionItemCountRef = useRef(0);
+  const combinedChangesDiffScopeKeyRef = useRef("");
+  const [combinedChangesDiffState, setCombinedChangesDiffState] = useState<{
+    hasVisibleDiffs: boolean;
+    allExpanded: boolean;
+  }>({
+    hasVisibleDiffs: false,
+    allExpanded: false,
+  });
   const [bookmarkReturnSelection, setBookmarkReturnSelection] = useState<HistorySelection | null>(
     null,
   );
@@ -774,10 +802,6 @@ export function useHistoryController({
     currentUiHistorySelection,
     selectedProjectId,
     selectedSessionId,
-    sessionDetail,
-    selectedSession,
-    selectedProject,
-    historyCategoryCountsUser: historyCategoryCounts.user,
     turnViewSortDirection,
     turnViewCategories,
     setTurnViewCombinedChangesExpandedOverride,
@@ -1482,7 +1506,6 @@ export function useHistoryController({
     (category: MessageCategory) => turnViewExpandedByDefaultCategories.includes(category),
     [turnViewExpandedByDefaultCategories],
   );
-
   const effectiveTurnCombinedChangesExpanded =
     turnViewCombinedChangesExpandedOverride ?? turnViewCombinedChangesExpanded;
 
@@ -1626,6 +1649,15 @@ export function useHistoryController({
     setVisibleExpansionActionState(deriveVisibleExpansionAction(visibleExpansionItems));
   }, [visibleExpansionItems, visibleExpansionScopeKey]);
 
+  useEffect(() => {
+    if (combinedChangesDiffScopeKeyRef.current === visibleExpansionScopeKey) {
+      return;
+    }
+    combinedChangesDiffScopeKeyRef.current = visibleExpansionScopeKey;
+    setCombinedChangesDiffState({ hasVisibleDiffs: false, allExpanded: false });
+    setCombinedChangesDiffExpansionRequest(null);
+  }, [visibleExpansionScopeKey]);
+
   const handleToggleAllCategoryDefaultExpansion = useCallback(() => {
     if (visibleExpansionItems.length === 0) {
       return;
@@ -1688,6 +1720,38 @@ export function useHistoryController({
     visibleExpansionActionState,
     visibleExpansionItems,
   ]);
+
+  const hasTurnCombinedDiffTarget = useMemo(
+    () =>
+      historyDetailMode === "turn" &&
+      turnHasCombinedVisibleDiffs(
+        (sessionTurnDetail?.messages ?? []) as Parameters<typeof turnHasCombinedVisibleDiffs>[0],
+      ),
+    [historyDetailMode, sessionTurnDetail?.messages],
+  );
+
+  const handleCombinedChangesDiffStateChange = useCallback(
+    (state: { hasVisibleDiffs: boolean; allExpanded: boolean }) => {
+      setCombinedChangesDiffState((current) =>
+        current.hasVisibleDiffs === state.hasVisibleDiffs &&
+        current.allExpanded === state.allExpanded
+          ? current
+          : state,
+      );
+    },
+    [],
+  );
+
+  const handleToggleCombinedChangesDiffsExpanded = useCallback(() => {
+    if (!hasTurnCombinedDiffTarget) {
+      return;
+    }
+    const nextExpanded = !combinedChangesDiffState.allExpanded;
+    setCombinedChangesDiffExpansionRequest((current) => ({
+      expanded: nextExpanded,
+      version: (current?.version ?? 0) + 1,
+    }));
+  }, [combinedChangesDiffState.allExpanded, hasTurnCombinedDiffTarget]);
 
   const areAllMessagesExpanded =
     visibleExpansionItems.length > 0 && visibleExpansionItems.every((item) => item.currentExpanded);
@@ -2018,6 +2082,10 @@ export function useHistoryController({
     setTurnViewCombinedChangesExpanded,
     setTurnViewCombinedChangesExpandedOverride,
     effectiveTurnCombinedChangesExpanded,
+    combinedChangesDiffExpansionRequest,
+    handleCombinedChangesDiffStateChange,
+    collapseMultiFileToolDiffs: appearance.collapseMultiFileToolDiffs,
+    setCollapseMultiFileToolDiffs: appearance.setCollapseMultiFileToolDiffs,
     liveWatchEnabled,
     setLiveWatchEnabled,
     liveWatchRowHasBackground,
@@ -2099,6 +2167,7 @@ export function useHistoryController({
     handleToggleVisibleCategoryMessagesExpandedInTurn,
     handleToggleCategoryDefaultExpansion,
     handleToggleAllCategoryDefaultExpansion,
+    handleToggleCombinedChangesDiffsExpanded,
     handleToggleMessageExpanded,
     handleToggleMessageExpandedInTurn,
     handleToggleBookmark,

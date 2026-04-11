@@ -77,6 +77,7 @@ function createProps(
     focusSessionSearch: vi.fn(),
     toggleFocusMode: vi.fn(),
     toggleAllMessagesExpanded: vi.fn(),
+    toggleCombinedChangesDiffsExpanded: vi.fn(),
     toggleHistoryCategory: vi.fn(),
     soloHistoryCategory: vi.fn(),
     toggleHistoryCategoryDefaultExpansion: vi.fn(),
@@ -197,6 +198,7 @@ describe("useKeyboardShortcuts", () => {
     expect(props.applyZoomAction).toHaveBeenCalledWith("in");
     expect(props.toggleFocusMode).not.toHaveBeenCalled();
     expect(props.toggleAllMessagesExpanded).toHaveBeenCalledTimes(1);
+    expect(props.toggleCombinedChangesDiffsExpanded).not.toHaveBeenCalled();
     expect(props.toggleHistoryCategory).toHaveBeenCalledWith("user");
     expect(props.soloHistoryCategory).toHaveBeenCalledWith("user");
     expect(props.toggleHistoryCategoryDefaultExpansion).toHaveBeenCalledWith("user");
@@ -302,6 +304,18 @@ describe("useKeyboardShortcuts", () => {
     expect(props.toggleAllHistoryCategoriesVisibility).toHaveBeenCalledTimes(1);
     expect(props.focusPrimaryHistoryCategoriesVisibility).toHaveBeenCalledTimes(1);
     expect(props.focusAllHistoryCategoriesVisibility).toHaveBeenCalledTimes(1);
+  });
+
+  it("routes Cmd+D and Cmd/Ctrl+Shift+D to visible diff expansion in history view", () => {
+    const props = createProps();
+
+    renderHarness(props);
+
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "d", metaKey: true }));
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "d", metaKey: true, shiftKey: true }));
+
+    expect(props.toggleCombinedChangesDiffsExpanded).toHaveBeenCalledTimes(2);
+    expect(props.pageHistoryMessagesDown).not.toHaveBeenCalled();
   });
 
   it("ignores repeated category and preset keydown events", () => {

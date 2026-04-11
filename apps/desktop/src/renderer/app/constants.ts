@@ -22,11 +22,18 @@ export const BOOKMARKS_NAV_ID = "__bookmarks__";
 
 export const PROVIDERS = [...UI_PROVIDER_VALUES];
 export const CATEGORIES = [...UI_MESSAGE_CATEGORY_VALUES];
-export const DEFAULT_MESSAGE_CATEGORIES: MessageCategory[] = ["user", "assistant"];
+export const DEFAULT_MESSAGE_CATEGORIES: MessageCategory[] = [
+  "user",
+  "assistant",
+  "tool_use",
+  "tool_edit",
+  "tool_result",
+];
+export const DEFAULT_EXPANDED_MESSAGE_CATEGORIES: MessageCategory[] = ["user", "assistant"];
 export const DEFAULT_TURN_VIEW_MESSAGE_CATEGORIES: MessageCategory[] = [
   "user",
   "assistant",
-  "tool_edit",
+  "tool_use",
 ];
 export const DEFAULT_TURN_VIEW_EXPANDED_CATEGORIES: MessageCategory[] = ["assistant"];
 

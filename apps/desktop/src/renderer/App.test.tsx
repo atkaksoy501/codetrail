@@ -1527,10 +1527,7 @@ describe("App shell", () => {
       fireEvent.keyDown(window, { key: "m", metaKey: true, shiftKey: true });
     });
     await waitFor(() => {
-      expect(screen.getByRole("tab", { name: /Messages/i })).toHaveAttribute(
-        "aria-selected",
-        "true",
-      );
+      expect(screen.getByRole("tab", { name: /Flat/i })).toHaveAttribute("aria-selected", "true");
       expect(screen.getByRole("combobox", { name: "Messages per page" })).toBeInTheDocument();
     });
   });
@@ -1716,10 +1713,7 @@ describe("App shell", () => {
 
     fireEvent.keyDown(window, { key: "m", metaKey: true, shiftKey: true });
     await waitFor(() => {
-      expect(screen.getByRole("tab", { name: /Messages/i })).toHaveAttribute(
-        "aria-selected",
-        "true",
-      );
+      expect(screen.getByRole("tab", { name: /Flat/i })).toHaveAttribute("aria-selected", "true");
     });
 
     fireEvent.keyDown(window, { key: "t", metaKey: true });
@@ -1764,18 +1758,12 @@ describe("App shell", () => {
 
     fireEvent.keyDown(window, { key: "m", metaKey: true, shiftKey: true });
     await waitFor(() => {
-      expect(screen.getByRole("tab", { name: /Messages/i })).toHaveAttribute(
-        "aria-selected",
-        "true",
-      );
+      expect(screen.getByRole("tab", { name: /Flat/i })).toHaveAttribute("aria-selected", "true");
     });
 
     await user.click(screen.getByRole("button", { name: /All Sessions/i }));
     await waitFor(() => {
-      expect(screen.getByRole("tab", { name: /Messages/i })).toHaveAttribute(
-        "aria-selected",
-        "true",
-      );
+      expect(screen.getByRole("tab", { name: /Flat/i })).toHaveAttribute("aria-selected", "true");
     });
 
     fireEvent.keyDown(window, { key: "t", metaKey: true });
@@ -2223,13 +2211,13 @@ describe("App shell", () => {
       expect(screen.getByRole("tab", { name: /Turns/i })).toBeInTheDocument();
     });
 
-    expect(screen.getByRole("tab", { name: /Messages/i })).toHaveAttribute(
+    expect(screen.getByRole("tab", { name: /Flat/i })).toHaveAttribute(
       "title",
-      "Messages  ⌘⇧M • Cycle: ⌘T",
+      "Flat: all messages in order  ⌘⇧M • Cycle: ⌘T",
     );
     expect(screen.getByRole("tab", { name: /Turns/i })).toHaveAttribute(
       "title",
-      "Turns  ⌘⇧T • Cycle: ⌘T",
+      "Turns: grouped by user turns  ⌘⇧T • Cycle: ⌘T",
     );
   });
 
@@ -2285,10 +2273,7 @@ describe("App shell", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByRole("tab", { name: /Messages/i })).toHaveAttribute(
-        "aria-selected",
-        "true",
-      );
+      expect(screen.getByRole("tab", { name: /Flat/i })).toHaveAttribute("aria-selected", "true");
     });
 
     await waitFor(() => {
@@ -2340,10 +2325,7 @@ describe("App shell", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByRole("tab", { name: /Messages/i })).toHaveAttribute(
-        "aria-selected",
-        "true",
-      );
+      expect(screen.getByRole("tab", { name: /Flat/i })).toHaveAttribute("aria-selected", "true");
       expect(
         screen.getByRole("button", { name: /first \(all sessions\)\. switch to/i }),
       ).toBeInTheDocument();
@@ -2388,10 +2370,7 @@ describe("App shell", () => {
 
     fireEvent.keyDown(window, { key: "m", metaKey: true, shiftKey: true });
     await waitFor(() => {
-      expect(screen.getByRole("tab", { name: /Messages/i })).toHaveAttribute(
-        "aria-selected",
-        "true",
-      );
+      expect(screen.getByRole("tab", { name: /Flat/i })).toHaveAttribute("aria-selected", "true");
     });
 
     fireEvent.keyDown(window, { key: "t", metaKey: true });
@@ -3462,13 +3441,10 @@ describe("App shell", () => {
     expect(screen.getByText("25 of 25 bookmarked messages")).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Page number" })).toHaveValue("1");
 
-    await user.click(screen.getByRole("tab", { name: /Messages/i }));
+    await user.click(screen.getByRole("tab", { name: /Flat/i }));
 
     await waitFor(() => {
-      expect(screen.getByRole("tab", { name: /Messages/i })).toHaveAttribute(
-        "aria-selected",
-        "true",
-      );
+      expect(screen.getByRole("tab", { name: /Flat/i })).toHaveAttribute("aria-selected", "true");
     });
     expect(screen.getByText("Please review markdown table rendering")).toBeInTheDocument();
   });
