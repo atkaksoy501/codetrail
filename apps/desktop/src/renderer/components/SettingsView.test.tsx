@@ -308,6 +308,7 @@ function createBaseProps(): Omit<
         gemini: [],
         cursor: [],
         copilot: [],
+        copilot_cli: [],
       },
       onAddSystemMessageRegexRule: vi.fn(),
       onUpdateSystemMessageRegexRule: vi.fn(),

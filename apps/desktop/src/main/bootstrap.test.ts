@@ -241,6 +241,7 @@ const {
             gemini: 0,
             cursor: 0,
             copilot: 0,
+            copilot_cli: 0,
           },
           sessions: [],
           claudeHookState: {
@@ -291,6 +292,7 @@ vi.mock("@codetrail/core", async () => {
       geminiProjectsPath: null,
       cursorRoot: "/cursor/root",
       copilotRoot: "/copilot/root",
+      copilotCliRoot: "/copilot-cli/root",
       includeClaudeSubagents: false,
     },
     initializeDatabase: mockInitializeDatabase,
@@ -475,6 +477,7 @@ describe("bootstrapMainProcess", () => {
       gemini: [],
       cursor: [],
       copilot: [],
+      copilot_cli: [],
     },
   };
 
@@ -607,6 +610,7 @@ describe("bootstrapMainProcess", () => {
           geminiRoot: "/gemini/root",
           cursorRoot: "/cursor/root",
           copilotRoot: "/copilot/root",
+          copilotCliRoot: "/copilot-cli/root",
         },
       }).discovery,
     );
@@ -939,6 +943,7 @@ describe("bootstrapMainProcess", () => {
         gemini: [],
         cursor: [],
         copilot: [],
+        copilot_cli: [],
       },
     });
     expect(getRequiredHandler(handlers, "indexer:getConfig")({})).toEqual({
@@ -1205,6 +1210,7 @@ describe("bootstrapMainProcess", () => {
           "/Users/test/.gemini/history",
           "/cursor/root",
           "/copilot/root",
+          "/copilot-cli/root",
         ],
         backend: "kqueue",
       });
@@ -1216,6 +1222,7 @@ describe("bootstrapMainProcess", () => {
           "/Users/test/.gemini/history",
           "/cursor/root",
           "/copilot/root",
+          "/copilot-cli/root",
         ],
         expect.any(Function),
         expect.objectContaining({
@@ -1302,6 +1309,7 @@ describe("bootstrapMainProcess", () => {
           "/Users/test/.gemini/history",
           "/cursor/root",
           "/copilot/root",
+          "/copilot-cli/root",
         ],
         expect.any(Function),
         expect.objectContaining({
@@ -1318,6 +1326,7 @@ describe("bootstrapMainProcess", () => {
           "/Users/test/.gemini/history",
           "/cursor/root",
           "/copilot/root",
+          "/copilot-cli/root",
         ],
         expect.any(Function),
         expect.objectContaining({
