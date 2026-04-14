@@ -207,18 +207,7 @@ function CombinedChangesCard({
     () => reconcileCombinedDiffExpansionState(expandedFiles, files, defaultDiffExpanded),
     [defaultDiffExpanded, expandedFiles, files],
   );
-  const preview =
-    files.length === 0
-      ? "No file changes in this turn"
-      : formatToolEditFileSummary(
-          files.map((file) => ({
-            filePath: file.filePath,
-            changeType: file.changeType === "move" ? "update" : file.changeType,
-            oldText: null,
-            newText: null,
-            diff: file.displayUnifiedDiff,
-          })),
-        );
+  const summary = useMemo(() => buildCombinedChangesSummary(files), [files]);
   const isEmpty = files.length === 0;
   const allFilesExpanded =
     files.length > 0 &&
@@ -277,7 +266,14 @@ function CombinedChangesCard({
             <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2" />
           </svg>
           <span className="msg-role category-tool_edit">Combined Changes</span>
-          {!expanded ? <span className="message-preview">{preview}</span> : null}
+          {!expanded ? (
+            <CombinedChangesSummaryText
+              className="message-preview"
+              description={summary.description}
+              addedLineCount={summary.addedLineCount}
+              removedLineCount={summary.removedLineCount}
+            />
+          ) : null}
         </button>
         <div className="message-header-actions">
           {files.length > 0 ? (
@@ -320,7 +316,13 @@ function CombinedChangesCard({
           <div className="message-body">
             <div className="message-content">
               <div className="tool-edit-view turn-combined-body">
-                <div className="tool-edit-summary">{preview}</div>
+                <div className="tool-edit-summary">
+                  <CombinedChangesSummaryText
+                    description={summary.description}
+                    addedLineCount={summary.addedLineCount}
+                    removedLineCount={summary.removedLineCount}
+                  />
+                </div>
                 {files.map((file) => {
                   const fileExpanded =
                     resolvedExpandedFiles[buildCombinedFileKey(file)] ?? defaultDiffExpanded;
@@ -419,6 +421,63 @@ function buildCombinedFileBadges(
     });
   }
   return badges;
+}
+
+function buildCombinedChangesSummary(files: TurnCombinedFile[]): {
+  description: string;
+  addedLineCount: number;
+  removedLineCount: number;
+} {
+  if (files.length === 0) {
+    return {
+      description: "No file changes in this turn",
+      addedLineCount: 0,
+      removedLineCount: 0,
+    };
+  }
+
+  return {
+    description: formatToolEditFileSummary(
+      files.map((file) => ({
+        filePath: file.filePath,
+        changeType: file.changeType === "move" ? "update" : file.changeType,
+        oldText: null,
+        newText: null,
+        diff: file.displayUnifiedDiff,
+      })),
+    ),
+    addedLineCount: files.reduce((total, file) => total + file.addedLineCount, 0),
+    removedLineCount: files.reduce((total, file) => total + file.removedLineCount, 0),
+  };
+}
+
+function CombinedChangesSummaryText({
+  className,
+  description,
+  addedLineCount,
+  removedLineCount,
+}: {
+  className?: string;
+  description: string;
+  addedLineCount: number;
+  removedLineCount: number;
+}) {
+  return (
+    <span className={className}>
+      <span>{description}</span>
+      <span
+        className="turn-combined-summary-counts"
+        aria-label={`${addedLineCount} added lines and ${removedLineCount} removed lines`}
+        title={`${addedLineCount} added, ${removedLineCount} removed`}
+      >
+        <span className="turn-combined-summary-separator" aria-hidden="true">
+          ·
+        </span>
+        <span className="diff-meta-added">+{addedLineCount}</span>
+        <span className="diff-meta-removed">-{removedLineCount}</span>
+      </span>
+    </span>
+  );
 }
 
 function TurnCombinedFileView({

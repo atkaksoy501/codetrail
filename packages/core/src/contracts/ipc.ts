@@ -423,6 +423,11 @@ const watcherStatsResponseSchema = z.object({
     fallbackToIncrementalScans: z.number().int().nonnegative(),
     lastTriggerAt: z.string().nullable(),
     lastTriggerPathCount: z.number().int().nonnegative().nullable(),
+    structuralInvalidationObservedAt: z.string().nullable(),
+    forcedRestartCount: z.number().int().nonnegative(),
+    lastForcedRestartAt: z.string().nullable(),
+    lastPostRestartTrackedCatchupCount: z.number().int().nonnegative().nullable(),
+    lastStaleCandidateCountAfterRepair: z.number().int().nonnegative().nullable(),
   }),
   jobs: z.object({
     startupIncremental: diagnosticsSourceSchema,

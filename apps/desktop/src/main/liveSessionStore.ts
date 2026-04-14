@@ -69,9 +69,12 @@ type LiveSessionRepairResult = {
   candidateCount: number;
   recoveredSessionCount: number;
   repairedTrackedSessionCount: number;
-  restartedStore: boolean;
   consumedStructuralInvalidation: boolean;
   staleCandidateCountAfterRepair: number;
+};
+
+type LiveSessionRepairInput = {
+  minFileMtimeMs: number;
 };
 
 type RepairPassSummary = {
@@ -79,8 +82,6 @@ type RepairPassSummary = {
   recoveredSessionCount: number;
   repairedTrackedSessionCount: number;
 };
-
-type CandidateRepairKind = "untracked" | "tracked";
 
 export type LiveSessionStoreOptions = {
   queryService: Pick<QueryService, "listRecentLiveSessionFiles">;
@@ -127,8 +128,8 @@ export class LiveSessionStore {
   private hookLogPreparedForAppStart = false;
   private readonly indexingPrefetchByFilePath = new Map<string, PrefetchedJsonlChunk>();
   private readonly liveTraceLogPath: string;
-  private liveWatchStartedAtMs: number | null = null;
   private structuralInvalidationPending = false;
+  private structuralInvalidationObservedAtMs: number | null = null;
 
   constructor(options: LiveSessionStoreOptions) {
     this.queryService = options.queryService;
@@ -149,8 +150,7 @@ export class LiveSessionStore {
   async start(input: { discoveryConfig: DiscoveryConfig }): Promise<void> {
     this.enabled = true;
     this.discoveryConfig = input.discoveryConfig;
-    this.liveWatchStartedAtMs = this.now();
-    this.structuralInvalidationPending = false;
+    this.clearStructuralInvalidation();
     this.sessionCursors.clear();
     this.resetHookCursor();
     this.invalidateSnapshotCache();
@@ -170,8 +170,7 @@ export class LiveSessionStore {
 
   async stop(): Promise<void> {
     this.enabled = false;
-    this.liveWatchStartedAtMs = null;
-    this.structuralInvalidationPending = false;
+    this.clearStructuralInvalidation();
     this.sessionCursors.clear();
     this.indexingPrefetchByFilePath.clear();
     this.invalidateSnapshotCache();
@@ -191,82 +190,107 @@ export class LiveSessionStore {
     return chunks;
   }
 
-  noteStructuralInvalidation(): void {
+  noteStructuralInvalidation(observedAtMs: number): void {
     if (!this.enabled || !this.discoveryConfig) {
       return;
     }
     this.structuralInvalidationPending = true;
+    this.structuralInvalidationObservedAtMs ??= observedAtMs;
   }
 
-  async repairRecentSessionsAfterIndexing(): Promise<LiveSessionRepairResult> {
-    if (!this.enabled || !this.discoveryConfig || this.liveWatchStartedAtMs === null) {
+  hasStructuralInvalidationPending(): boolean {
+    return this.structuralInvalidationPending;
+  }
+
+  getStructuralInvalidationObservedAtMs(): number | null {
+    return this.structuralInvalidationObservedAtMs;
+  }
+
+  async catchUpTrackedTranscriptsAfterWatcherRestart(input: {
+    restartStartedAtMs: number;
+  }): Promise<{ processedTrackedFileCount: number }> {
+    let processedTrackedFileCount = 0;
+    const trackedFilePaths = [...this.sessionCursors.keys()];
+    const results = await Promise.allSettled(
+      trackedFilePaths.map(async (filePath) => {
+        const cursor = this.sessionCursors.get(filePath);
+        if (!cursor) {
+          return;
+        }
+        const fileStat = await safeStat(filePath);
+        if (!fileStat?.isFile()) {
+          this.sessionCursors.delete(filePath);
+          this.indexingPrefetchByFilePath.delete(filePath);
+          this.invalidateSnapshotCache();
+          processedTrackedFileCount += 1;
+          return;
+        }
+        const fileMtimeMs = Math.trunc(fileStat.mtimeMs);
+        const changedDuringRestart =
+          fileStat.size > cursor.lastSize ||
+          (fileMtimeMs > cursor.lastMtimeMs && fileMtimeMs >= input.restartStartedAtMs);
+        if (!changedDuringRestart) {
+          return;
+        }
+        await this.processTranscriptPath(filePath);
+        processedTrackedFileCount += 1;
+      }),
+    );
+    results.forEach((result, index) => {
+      if (result.status === "rejected") {
+        this.reportBackgroundError(
+          "Failed catching up tracked live transcript after watcher restart",
+          result.reason,
+          {
+            filePath: trackedFilePaths[index],
+          },
+        );
+      }
+    });
+    return { processedTrackedFileCount };
+  }
+
+  async repairRecentSessionsAfterIndexing(
+    input: LiveSessionRepairInput,
+  ): Promise<LiveSessionRepairResult> {
+    if (!this.enabled || !this.discoveryConfig) {
       return {
         ran: false,
         candidateCount: 0,
         recoveredSessionCount: 0,
         repairedTrackedSessionCount: 0,
-        restartedStore: false,
         consumedStructuralInvalidation: false,
         staleCandidateCountAfterRepair: 0,
       };
     }
 
     const consumedStructuralInvalidation = this.structuralInvalidationPending;
-    const repairMinFileMtimeMs = this.liveWatchStartedAtMs;
     const providers = this.getRecentLiveProviders();
     let candidateCount = 0;
     let recoveredSessionCount = 0;
     let repairedTrackedSessionCount = 0;
-    let restartedStore = false;
     try {
-      const candidateKindsByFilePath = new Map<string, CandidateRepairKind>();
-      const initialRepair = await this.repairCandidatesSince(
-        {
-          providers,
-          minFileMtimeMs: repairMinFileMtimeMs,
-        },
-        {
-          recordCandidateKindByFilePath: candidateKindsByFilePath,
-        },
-      );
+      const initialRepair = await this.repairCandidatesSince({
+        providers,
+        minFileMtimeMs: input.minFileMtimeMs,
+      });
       candidateCount = initialRepair.candidateCount;
       recoveredSessionCount = initialRepair.recoveredSessionCount;
       repairedTrackedSessionCount = initialRepair.repairedTrackedSessionCount;
-      let staleCandidatesAfterRepair = await this.collectStaleRecentSessionCandidatesSince({
+      const staleCandidatesAfterRepair = await this.collectStaleRecentSessionCandidatesSince({
         providers,
-        minFileMtimeMs: repairMinFileMtimeMs,
+        minFileMtimeMs: input.minFileMtimeMs,
       });
-      if (staleCandidatesAfterRepair.length > 0) {
-        restartedStore = true;
-        const restartRepair = await this.softRestartForRepair({
-          discoveryConfig: this.discoveryConfig,
-          providers,
-          minFileMtimeMs: repairMinFileMtimeMs,
-          staleUntrackedCandidates: staleCandidatesAfterRepair.filter(
-            (candidate) => candidateKindsByFilePath.get(candidate.filePath) === "untracked",
-          ),
-          staleTrackedCandidates: staleCandidatesAfterRepair.filter(
-            (candidate) => candidateKindsByFilePath.get(candidate.filePath) === "tracked",
-          ),
-        });
-        recoveredSessionCount += restartRepair.recoveredSessionCount;
-        repairedTrackedSessionCount += restartRepair.repairedTrackedSessionCount;
-        staleCandidatesAfterRepair = await this.collectStaleRecentSessionCandidatesSince({
-          providers,
-          minFileMtimeMs: repairMinFileMtimeMs,
-        });
-      }
       const staleCandidateCountAfterRepair = staleCandidatesAfterRepair.length;
       const repairedCleanly = staleCandidateCountAfterRepair === 0;
       if (consumedStructuralInvalidation && repairedCleanly) {
-        this.structuralInvalidationPending = false;
+        this.clearStructuralInvalidation();
       }
       return {
         ran: true,
         recoveredSessionCount,
         candidateCount,
         repairedTrackedSessionCount,
-        restartedStore,
         consumedStructuralInvalidation: consumedStructuralInvalidation && repairedCleanly,
         staleCandidateCountAfterRepair,
       };
@@ -274,14 +298,12 @@ export class LiveSessionStore {
       this.reportBackgroundError("Failed repairing recent live sessions after indexing", error, {
         consumedStructuralInvalidation,
         candidateCount,
-        restartedStore,
       });
       return {
         ran: false,
         candidateCount,
         recoveredSessionCount,
         repairedTrackedSessionCount,
-        restartedStore,
         consumedStructuralInvalidation: false,
         staleCandidateCountAfterRepair: 0,
       };
@@ -546,33 +568,16 @@ export class LiveSessionStore {
     return { untrackedCandidates, trackedIncrementalCandidates, trackedReplayCandidates };
   }
 
-  private async repairCandidatesSince(
-    input: {
-      providers: Array<"claude" | "codex">;
-      minFileMtimeMs: number;
-    },
-    options: {
-      countedFilePaths?: ReadonlySet<string>;
-      recordCandidateKindByFilePath?: Map<string, CandidateRepairKind>;
-    } = {},
-  ): Promise<RepairPassSummary> {
+  private async repairCandidatesSince(input: {
+    providers: Array<"claude" | "codex">;
+    minFileMtimeMs: number;
+  }): Promise<RepairPassSummary> {
     let candidateCount = 0;
     let recoveredSessionCount = 0;
     let repairedTrackedSessionCount = 0;
     await this.forEachRecentSessionCandidatePage(input, async (page) => {
       candidateCount += page.length;
       const pageBuckets = this.partitionRecentSessionCandidates(page);
-      if (options.recordCandidateKindByFilePath) {
-        for (const candidate of pageBuckets.untrackedCandidates) {
-          options.recordCandidateKindByFilePath?.set(candidate.filePath, "untracked");
-        }
-        for (const candidate of [
-          ...pageBuckets.trackedIncrementalCandidates,
-          ...pageBuckets.trackedReplayCandidates,
-        ]) {
-          options.recordCandidateKindByFilePath?.set(candidate.filePath, "tracked");
-        }
-      }
       await this.ingestRecentSessionCandidates(pageBuckets.untrackedCandidates, {
         initialTailBytes: INITIAL_TAIL_BYTES,
       });
@@ -581,14 +586,12 @@ export class LiveSessionStore {
       });
       await this.replayRecentSessionCandidatesFromStart(pageBuckets.trackedReplayCandidates);
       recoveredSessionCount += this.countHealthyRecentSessionCandidates(
-        this.filterCandidatesByFilePath(pageBuckets.untrackedCandidates, options.countedFilePaths),
+        pageBuckets.untrackedCandidates,
       );
-      repairedTrackedSessionCount += this.countHealthyRecentSessionCandidates(
-        this.filterCandidatesByFilePath(
-          [...pageBuckets.trackedIncrementalCandidates, ...pageBuckets.trackedReplayCandidates],
-          options.countedFilePaths,
-        ),
-      );
+      repairedTrackedSessionCount += this.countHealthyRecentSessionCandidates([
+        ...pageBuckets.trackedIncrementalCandidates,
+        ...pageBuckets.trackedReplayCandidates,
+      ]);
     });
     return {
       candidateCount,
@@ -629,58 +632,6 @@ export class LiveSessionStore {
     cursor: FileCursorState,
   ): boolean {
     return cursor.lastMtimeMs >= candidate.fileMtimeMs && cursor.lastSize >= candidate.fileSize;
-  }
-
-  private async softRestartForRepair(input: {
-    discoveryConfig: DiscoveryConfig;
-    providers: Array<"claude" | "codex">;
-    minFileMtimeMs: number;
-    staleUntrackedCandidates: RecentLiveSessionCandidate[];
-    staleTrackedCandidates: RecentLiveSessionCandidate[];
-  }): Promise<Omit<RepairPassSummary, "candidateCount">> {
-    const previousLiveWatchStartedAtMs = this.liveWatchStartedAtMs;
-    const structuralInvalidationPending = this.structuralInvalidationPending;
-    await this.stop();
-    try {
-      await this.start({ discoveryConfig: input.discoveryConfig });
-      this.liveWatchStartedAtMs = previousLiveWatchStartedAtMs;
-      this.structuralInvalidationPending = structuralInvalidationPending;
-      const recoveredSessionCount = this.countHealthyRecentSessionCandidates(
-        input.staleUntrackedCandidates,
-      );
-      const repairedTrackedSessionCount = this.countHealthyRecentSessionCandidates(
-        input.staleTrackedCandidates,
-      );
-      const remainingStaleCandidateFilePaths = new Set(
-        [...input.staleUntrackedCandidates, ...input.staleTrackedCandidates]
-          .filter((candidate) => {
-            const cursor = this.sessionCursors.get(candidate.filePath);
-            return !cursor || !this.isRecentSessionCandidateHealthy(candidate, cursor);
-          })
-          .map((candidate) => candidate.filePath),
-      );
-      const repairSummary = await this.repairCandidatesSince(
-        {
-          providers: input.providers,
-          minFileMtimeMs: input.minFileMtimeMs,
-        },
-        {
-          countedFilePaths: remainingStaleCandidateFilePaths,
-        },
-      );
-      return {
-        recoveredSessionCount: recoveredSessionCount + repairSummary.recoveredSessionCount,
-        repairedTrackedSessionCount:
-          repairedTrackedSessionCount + repairSummary.repairedTrackedSessionCount,
-      };
-    } catch (error) {
-      this.enabled = true;
-      this.discoveryConfig = input.discoveryConfig;
-      this.liveWatchStartedAtMs = previousLiveWatchStartedAtMs;
-      this.structuralInvalidationPending = structuralInvalidationPending;
-      this.invalidateSnapshotCache();
-      throw error;
-    }
   }
 
   private async replayRecentSessionCandidatesFromStart(
@@ -760,16 +711,6 @@ export class LiveSessionStore {
         (candidate): candidate is RecentLiveSessionCandidate =>
           candidate.provider === "claude" || candidate.provider === "codex",
       );
-  }
-
-  private filterCandidatesByFilePath(
-    candidates: RecentLiveSessionCandidate[],
-    filePaths: ReadonlySet<string> | undefined,
-  ): RecentLiveSessionCandidate[] {
-    if (!filePaths) {
-      return candidates;
-    }
-    return candidates.filter((candidate) => filePaths.has(candidate.filePath));
   }
 
   private cloneCursor(cursor: FileCursorState | null): FileCursorState | null {
@@ -1091,6 +1032,11 @@ export class LiveSessionStore {
 
   private getClaudeHookLogPath(): string {
     return getClaudeHookLogPath(this.userDataDir);
+  }
+
+  private clearStructuralInvalidation(): void {
+    this.structuralInvalidationPending = false;
+    this.structuralInvalidationObservedAtMs = null;
   }
 
   private reportBackgroundError(

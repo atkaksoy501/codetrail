@@ -77,6 +77,8 @@ type IndexingJobSettledEvent = {
   request: {
     kind: "incremental" | "changedFiles" | "maintenance";
   };
+  startedAtMs: number;
+  finishedAtMs: number;
   durationMs: number;
   success: boolean;
 };
@@ -87,6 +89,7 @@ type MainProcessRuntimeState = {
   liveSessionStore: LiveSessionStore | null;
   watcherDebounceMs: 1000 | 3000 | 5000 | null;
   watcherBackend: "default" | "kqueue" | null;
+  activeWatcherToken: symbol | null;
   watcherLeaseCounts: Map<number, number>;
   watcherTrackedSenderIds: Set<number>;
   watcherTransitionQueue: Promise<void>;
@@ -103,6 +106,7 @@ function createRuntimeState(): MainProcessRuntimeState {
     liveSessionStore: null,
     watcherDebounceMs: null,
     watcherBackend: null,
+    activeWatcherToken: null,
     watcherLeaseCounts: new Map(),
     watcherTrackedSenderIds: new Set(),
     watcherTransitionQueue: Promise.resolve(),
@@ -182,6 +186,7 @@ async function disposeRuntimeState(state: MainProcessRuntimeState | null): Promi
   }
   state.watcherDebounceMs = null;
   state.watcherBackend = null;
+  state.activeWatcherToken = null;
   state.watcherLeaseCounts.clear();
   state.watcherTrackedSenderIds.clear();
   state.watcherTransitionQueue = Promise.resolve();
@@ -253,28 +258,64 @@ export async function bootstrapMainProcess(
           throw new Error("Inconsistent watcher state during post-index live repair.");
         }
         const temporarilyStartedForRepair = watcherInactive;
+        const shouldRestartWatcherForStructuralInvalidation =
+          watcherActive &&
+          runtime.liveSessionStore.hasStructuralInvalidationPending() &&
+          runtime.watcherBackend !== null &&
+          mainPlatform.preferredWatcherBackends.some(
+            (backendPlan) =>
+              backendPlan.backend === runtime.watcherBackend &&
+              backendPlan.restartOnStructuralInvalidation,
+          );
         try {
           if (temporarilyStartedForRepair) {
             await runtime.liveSessionStore.start({
               discoveryConfig: getEffectiveDiscoveryConfig(),
             });
           }
-          await runtime.liveSessionStore.repairRecentSessionsAfterIndexing();
+          let restartStartedAtMs: number | null = null;
+          if (shouldRestartWatcherForStructuralInvalidation) {
+            try {
+              restartStartedAtMs = await restartWatcherForStructuralInvalidation();
+            } catch (error) {
+              reportBackgroundError(
+                "failed restarting watcher after structural invalidation",
+                error,
+                {
+                  backend: runtime.watcherBackend,
+                },
+              );
+            }
+          }
+          if (restartStartedAtMs !== null) {
+            const catchupResult =
+              await runtime.liveSessionStore.catchUpTrackedTranscriptsAfterWatcherRestart({
+                restartStartedAtMs,
+              });
+            watchStatsStore.recordForcedWatcherRestart({
+              restartAtMs: restartStartedAtMs,
+              trackedCatchupCount: catchupResult.processedTrackedFileCount,
+            });
+          }
+          const repairMinFileMtimeMs =
+            runtime.liveSessionStore.getStructuralInvalidationObservedAtMs() ?? event.startedAtMs;
+          const repairResult = await runtime.liveSessionStore.repairRecentSessionsAfterIndexing({
+            minFileMtimeMs: repairMinFileMtimeMs,
+          });
+          watchStatsStore.recordPostRepairStaleCandidateCount(
+            repairResult.staleCandidateCountAfterRepair,
+          );
         } finally {
           if (temporarilyStartedForRepair) {
             await runtime.liveSessionStore.stop();
           }
         }
-      }).catch((error: unknown) => {
-        if (options.onBackgroundError) {
-          options.onBackgroundError("post-index live repair failed", error, {
-            source: event.source,
-            requestKind: event.request.kind,
-          });
-          return;
-        }
-        console.error("[codetrail] post-index live repair failed", error);
-      });
+      }).catch((error: unknown) =>
+        reportBackgroundError("post-index live repair failed", error, {
+          source: event.source,
+          requestKind: event.request.kind,
+        }),
+      );
     },
     ...(options.onIndexingFileIssue ? { onFileIssue: options.onIndexingFileIssue } : {}),
     ...(options.onIndexingNotice ? { onNotice: options.onIndexingNotice } : {}),
@@ -398,7 +439,20 @@ export async function bootstrapMainProcess(
     }
     runtime.watcherDebounceMs = null;
     runtime.watcherBackend = null;
+    runtime.activeWatcherToken = null;
     await syncLiveSessionStore();
+  };
+
+  const reportBackgroundError = (
+    message: string,
+    error: unknown,
+    details?: Record<string, unknown>,
+  ) => {
+    if (options.onBackgroundError) {
+      options.onBackgroundError(message, error, details);
+      return;
+    }
+    console.error(`[codetrail] ${message}`, error, details);
   };
 
   const trackWatcherSender = (sender: Pick<WebContents, "id" | "once">) => {
@@ -455,84 +509,113 @@ export async function bootstrapMainProcess(
     await syncLiveSessionStore();
   };
 
-  const startWatcherWithConfig = async (debounceMs: 1000 | 3000 | 5000) => {
-    const watcherRoots = listDiscoveryWatchRoots(getEffectiveDiscoveryConfig());
-    const createFileWatcher = (watcherOptions: FileWatcherOptions) =>
-      new FileWatcherService(
-        watcherRoots,
-        async (batch: FileWatcherBatch) => {
-          invalidateAllowedRootsCache();
-          const changedPaths = [...new Set(batch.changedPaths)];
-          if (batch.requiresFullScan) {
-            runtime.liveSessionStore?.noteStructuralInvalidation();
-          }
-          const liveChangedPaths = filterPotentialLiveTranscriptPaths(
-            changedPaths,
-            getEffectiveDiscoveryConfig(),
-          );
-          if (liveChangedPaths.length > 0) {
-            await runtime.liveSessionStore?.handleWatcherBatch({
-              ...batch,
-              changedPaths: liveChangedPaths,
+  const createWatcherService = (
+    watcherRoots: string[],
+    debounceMs: 1000 | 3000 | 5000,
+    watcherToken: symbol,
+    watcherOptions: FileWatcherOptions,
+  ) =>
+    new FileWatcherService(
+      watcherRoots,
+      async (batch: FileWatcherBatch) => {
+        if (runtime.activeWatcherToken !== watcherToken) {
+          return;
+        }
+        invalidateAllowedRootsCache();
+        const changedPaths = [...new Set(batch.changedPaths)];
+        if (batch.requiresFullScan) {
+          const structuralInvalidationObservedAtMs = Date.now();
+          runtime.liveSessionStore?.noteStructuralInvalidation(structuralInvalidationObservedAtMs);
+          watchStatsStore.recordStructuralInvalidation(structuralInvalidationObservedAtMs);
+        }
+        const liveChangedPaths = filterPotentialLiveTranscriptPaths(
+          changedPaths,
+          getEffectiveDiscoveryConfig(),
+        );
+        if (liveChangedPaths.length > 0) {
+          await runtime.liveSessionStore?.handleWatcherBatch({
+            ...batch,
+            changedPaths: liveChangedPaths,
+          });
+        }
+        const prefetchedJsonlChunks =
+          runtime.liveSessionStore?.takeIndexingPrefetchedJsonlChunks(changedPaths) ?? [];
+        watchStatsStore.recordWatcherTrigger({
+          changedPathCount: changedPaths.length,
+          requiresFullScan: batch.requiresFullScan,
+        });
+        const enqueuePromise = batch.requiresFullScan
+          ? indexingRunner.enqueue({ force: false }, { source: "watch_fallback_incremental" })
+          : indexingRunner.enqueueChangedFiles(changedPaths, {
+              source: "watch_targeted",
+              ...(prefetchedJsonlChunks.length > 0 ? { prefetchedJsonlChunks } : {}),
             });
-          }
-          const prefetchedJsonlChunks =
-            runtime.liveSessionStore?.takeIndexingPrefetchedJsonlChunks(changedPaths) ?? [];
-          watchStatsStore.recordWatcherTrigger({
-            changedPathCount: changedPaths.length,
+        void enqueuePromise.catch((error: unknown) =>
+          reportBackgroundError("watcher-triggered indexing failed", error, {
             requiresFullScan: batch.requiresFullScan,
-          });
-          const enqueuePromise = batch.requiresFullScan
-            ? indexingRunner.enqueue({ force: false }, { source: "watch_fallback_incremental" })
-            : indexingRunner.enqueueChangedFiles(changedPaths, {
-                source: "watch_targeted",
-                ...(prefetchedJsonlChunks.length > 0 ? { prefetchedJsonlChunks } : {}),
-              });
-          void enqueuePromise.catch((error: unknown) => {
-            if (options.onBackgroundError) {
-              options.onBackgroundError("watcher-triggered indexing failed", error, {
-                requiresFullScan: batch.requiresFullScan,
-                changedPathCount: changedPaths.length,
-              });
-              return;
-            }
-            console.error("[codetrail] watcher-triggered indexing failed", error);
-          });
-        },
-        {
-          ...watcherOptions,
-          debounceMs,
-        },
-      );
+            changedPathCount: changedPaths.length,
+          }),
+        );
+      },
+      {
+        ...watcherOptions,
+        debounceMs,
+      },
+    );
 
-    const startWatcher = async (
-      watcherOptions: FileWatcherOptions,
-      backend: "default" | "kqueue",
-    ) => {
-      const fileWatcher = createFileWatcher(watcherOptions);
-      await fileWatcher.start();
-      runtime.fileWatcher = fileWatcher;
-      runtime.watcherDebounceMs = debounceMs;
-      runtime.watcherBackend = backend;
+  const startWatcherFromPlan = async (
+    debounceMs: 1000 | 3000 | 5000,
+    backendPlan: (typeof mainPlatform.preferredWatcherBackends)[number],
+    options: { syncLiveStore?: boolean } = {},
+  ) => {
+    const watcherRoots = listDiscoveryWatchRoots(getEffectiveDiscoveryConfig());
+    const watcherToken = Symbol(`watcher-${backendPlan.backend}`);
+    const fileWatcher = createWatcherService(
+      watcherRoots,
+      debounceMs,
+      watcherToken,
+      backendPlan.subscribeOptions ? { subscribeOptions: backendPlan.subscribeOptions } : {},
+    );
+    await fileWatcher.start();
+    runtime.activeWatcherToken = watcherToken;
+    runtime.fileWatcher = fileWatcher;
+    runtime.watcherDebounceMs = debounceMs;
+    runtime.watcherBackend = backendPlan.backend;
+    if (options.syncLiveStore !== false) {
       await syncLiveSessionStore();
-      watchStatsStore.recordWatcherStart({
-        backend,
-        watchedRootCount: fileWatcher.getWatchedRoots().length,
-      });
-      return {
-        backend,
-        watchedRoots: fileWatcher.getWatchedRoots(),
-      };
+    }
+    watchStatsStore.recordWatcherStart({
+      backend: backendPlan.backend,
+      watchedRootCount: fileWatcher.getWatchedRoots().length,
+    });
+    return {
+      backend: backendPlan.backend,
+      watchedRoots: fileWatcher.getWatchedRoots(),
     };
+  };
 
-    for (const backendPlan of mainPlatform.preferredWatcherBackends) {
+  const startWatcherWithConfig = async (
+    debounceMs: 1000 | 3000 | 5000,
+    options: { preferredBackend?: "default" | "kqueue"; syncLiveStore?: boolean } = {},
+  ) => {
+    const backendPlans =
+      options.preferredBackend !== undefined
+        ? mainPlatform.preferredWatcherBackends.filter(
+            (backendPlan) => backendPlan.backend === options.preferredBackend,
+          )
+        : mainPlatform.preferredWatcherBackends;
+    if (backendPlans.length === 0) {
+      throw new Error("No file watcher backend plan matched the requested backend.");
+    }
+    for (const backendPlan of backendPlans) {
       try {
-        return await startWatcher(
-          backendPlan.subscribeOptions ? { subscribeOptions: backendPlan.subscribeOptions } : {},
-          backendPlan.backend,
+        return await startWatcherFromPlan(
+          debounceMs,
+          backendPlan,
+          options.syncLiveStore === undefined ? {} : { syncLiveStore: options.syncLiveStore },
         );
       } catch (error) {
-        if (backendPlan.backend !== "default") {
+        if (backendPlan.backend !== "default" && options.preferredBackend === undefined) {
           console.warn(
             backendPlan.failureMessage ??
               "[codetrail] failed to start preferred file watcher backend",
@@ -566,6 +649,29 @@ export async function bootstrapMainProcess(
       ...startedWatcher,
       didRestart: true,
     };
+  };
+
+  const restartWatcherForStructuralInvalidation = async (): Promise<number> => {
+    const currentWatcher = runtime.fileWatcher;
+    const currentBackend = runtime.watcherBackend;
+    const currentDebounceMs = runtime.watcherDebounceMs;
+    if (!currentWatcher || !currentBackend || currentDebounceMs === null) {
+      throw new Error("Expected an active watcher before structural restart.");
+    }
+    const restartStartedAtMs = Date.now();
+    const restartedWatcher = await startWatcherWithConfig(currentDebounceMs, {
+      preferredBackend: currentBackend,
+      syncLiveStore: false,
+    });
+    try {
+      await currentWatcher.stop({ flushPending: true });
+    } catch (error) {
+      reportBackgroundError("failed stopping old watcher during structural restart", error, {
+        backend: currentBackend,
+        watchedRoots: currentWatcher.getWatchedRoots(),
+      });
+    }
+    return restartStartedAtMs;
   };
 
   registerIpcHandlers(

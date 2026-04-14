@@ -68,6 +68,9 @@ const {
     handleWatcherBatch: ReturnType<typeof vi.fn>;
     takeIndexingPrefetchedJsonlChunks: ReturnType<typeof vi.fn>;
     noteStructuralInvalidation: ReturnType<typeof vi.fn>;
+    hasStructuralInvalidationPending: ReturnType<typeof vi.fn>;
+    getStructuralInvalidationObservedAtMs: ReturnType<typeof vi.fn>;
+    catchUpTrackedTranscriptsAfterWatcherRestart: ReturnType<typeof vi.fn>;
     repairRecentSessionsAfterIndexing: ReturnType<typeof vi.fn>;
     snapshot: ReturnType<typeof vi.fn>;
     installClaudeHooks: ReturnType<typeof vi.fn>;
@@ -78,6 +81,8 @@ const {
       onJobSettled?: (event: {
         source: string;
         request: { kind: "incremental" | "changedFiles" | "maintenance" };
+        startedAtMs: number;
+        finishedAtMs: number;
         durationMs: number;
         success: boolean;
       }) => void | Promise<void>;
@@ -225,12 +230,16 @@ const {
         handleWatcherBatch: vi.fn(async () => undefined),
         takeIndexingPrefetchedJsonlChunks: vi.fn(() => []),
         noteStructuralInvalidation: vi.fn(),
+        hasStructuralInvalidationPending: vi.fn(() => false),
+        getStructuralInvalidationObservedAtMs: vi.fn(() => null),
+        catchUpTrackedTranscriptsAfterWatcherRestart: vi.fn(async () => ({
+          processedTrackedFileCount: 0,
+        })),
         repairRecentSessionsAfterIndexing: vi.fn(async () => ({
           ran: true,
           candidateCount: 0,
           recoveredSessionCount: 0,
           repairedTrackedSessionCount: 0,
-          restartedStore: false,
           consumedStructuralInvalidation: false,
           staleCandidateCountAfterRepair: 0,
         })),
@@ -406,6 +415,8 @@ function getLastLiveSessionStore() {
 async function settleIndexingJob(event: {
   source: string;
   request: { kind: "incremental" | "changedFiles" | "maintenance" };
+  startedAtMs?: number;
+  finishedAtMs?: number;
   durationMs?: number;
   success: boolean;
 }) {
@@ -413,8 +424,12 @@ async function settleIndexingJob(event: {
   if (!onJobSettled) {
     throw new Error("Missing WorkerIndexingRunner onJobSettled dependency");
   }
+  const startedAtMs = event.startedAtMs ?? Date.parse("2026-04-11T09:00:00.000Z");
+  const durationMs = event.durationMs ?? 5;
   await onJobSettled({
-    durationMs: event.durationMs ?? 5,
+    startedAtMs,
+    finishedAtMs: event.finishedAtMs ?? startedAtMs + durationMs,
+    durationMs,
     ...event,
   });
 }
@@ -499,6 +514,8 @@ describe("bootstrapMainProcess", () => {
         onJobSettled?: (event: {
           source: string;
           request: { kind: "incremental" | "changedFiles" | "maintenance" };
+          startedAtMs: number;
+          finishedAtMs: number;
           durationMs: number;
           success: boolean;
         }) => void | Promise<void>;
@@ -1552,13 +1569,18 @@ describe("bootstrapMainProcess", () => {
     expect(mockEnqueueChangedFiles).not.toHaveBeenCalled();
   });
 
-  it("marks structural invalidation for structure-only watcher batches and repairs after fallback indexing settles", async () => {
+  it("restarts the kqueue watcher after structural fallback indexing settles and repairs with the structural baseline", async () => {
     await bootstrapMainProcess({ runStartupIndexing: false });
     await getRequiredHandler(handlers, "watcher:start")({ debounceMs: 5000 });
     const liveSessionStore = getLastLiveSessionStore();
     mockEnqueue.mockClear();
     liveSessionStore.noteStructuralInvalidation.mockClear();
+    liveSessionStore.catchUpTrackedTranscriptsAfterWatcherRestart.mockClear();
     liveSessionStore.repairRecentSessionsAfterIndexing.mockClear();
+    liveSessionStore.hasStructuralInvalidationPending.mockReturnValue(true);
+    liveSessionStore.getStructuralInvalidationObservedAtMs.mockReturnValue(
+      Date.parse("2026-04-11T08:59:00.000Z"),
+    );
 
     const firstWatcher = mockFileWatcherInstances[0];
     if (!firstWatcher) {
@@ -1571,6 +1593,7 @@ describe("bootstrapMainProcess", () => {
     });
 
     expect(liveSessionStore.noteStructuralInvalidation).toHaveBeenCalledTimes(1);
+    expect(liveSessionStore.noteStructuralInvalidation).toHaveBeenCalledWith(expect.any(Number));
     expect(mockEnqueue).toHaveBeenCalledWith(
       { force: false },
       { source: "watch_fallback_incremental" },
@@ -1579,12 +1602,255 @@ describe("bootstrapMainProcess", () => {
     await settleIndexingJob({
       source: "watch_fallback_incremental",
       request: { kind: "incremental" },
+      startedAtMs: Date.parse("2026-04-11T09:00:00.000Z"),
       success: true,
     });
 
     await vi.waitFor(() => {
+      expect(mockFileWatcherInstances).toHaveLength(2);
+      expect(firstWatcher.stop).toHaveBeenCalledWith({ flushPending: true });
+      expect(liveSessionStore.catchUpTrackedTranscriptsAfterWatcherRestart).toHaveBeenCalledTimes(
+        1,
+      );
       expect(liveSessionStore.repairRecentSessionsAfterIndexing).toHaveBeenCalledTimes(1);
     });
+    expect(liveSessionStore.repairRecentSessionsAfterIndexing).toHaveBeenCalledWith({
+      minFileMtimeMs: Date.parse("2026-04-11T08:59:00.000Z"),
+    });
+  });
+
+  it("continues repair and ignores stale watcher callbacks when stopping the old watcher fails", async () => {
+    const originalPlatform = process.platform;
+    const onBackgroundError = vi.fn();
+    Object.defineProperty(process, "platform", { value: "darwin" });
+
+    try {
+      await bootstrapMainProcess({
+        runStartupIndexing: false,
+        onBackgroundError,
+      });
+      await getRequiredHandler(handlers, "watcher:start")({ debounceMs: 5000 });
+      const liveSessionStore = getLastLiveSessionStore();
+      liveSessionStore.noteStructuralInvalidation.mockClear();
+      liveSessionStore.handleWatcherBatch.mockClear();
+      liveSessionStore.catchUpTrackedTranscriptsAfterWatcherRestart.mockClear();
+      liveSessionStore.repairRecentSessionsAfterIndexing.mockClear();
+      liveSessionStore.hasStructuralInvalidationPending.mockReturnValue(true);
+      liveSessionStore.getStructuralInvalidationObservedAtMs.mockReturnValue(
+        Date.parse("2026-04-11T08:59:00.000Z"),
+      );
+
+      const firstWatcher = mockFileWatcherInstances[0];
+      if (!firstWatcher) {
+        throw new Error("Expected watcher instance");
+      }
+      firstWatcher.stop.mockRejectedValueOnce(new Error("stop failed"));
+      await firstWatcher.onFilesChanged({
+        changedPaths: [],
+        requiresFullScan: true,
+      });
+
+      await settleIndexingJob({
+        source: "watch_fallback_incremental",
+        request: { kind: "incremental" },
+        startedAtMs: Date.parse("2026-04-11T09:00:00.000Z"),
+        success: true,
+      });
+
+      await vi.waitFor(() => {
+        expect(onBackgroundError).toHaveBeenCalledWith(
+          "failed stopping old watcher during structural restart",
+          expect.any(Error),
+          expect.objectContaining({ backend: "kqueue" }),
+        );
+        expect(liveSessionStore.catchUpTrackedTranscriptsAfterWatcherRestart).toHaveBeenCalledTimes(
+          1,
+        );
+        expect(liveSessionStore.repairRecentSessionsAfterIndexing).toHaveBeenCalledTimes(1);
+      });
+
+      mockEnqueueChangedFiles.mockClear();
+      liveSessionStore.handleWatcherBatch.mockClear();
+      await firstWatcher.onFilesChanged({
+        changedPaths: ["/codex/root/2026/04/11/old-watcher.jsonl"],
+        requiresFullScan: false,
+      });
+
+      expect(liveSessionStore.handleWatcherBatch).not.toHaveBeenCalled();
+      expect(mockEnqueueChangedFiles).not.toHaveBeenCalled();
+    } finally {
+      Object.defineProperty(process, "platform", { value: originalPlatform });
+    }
+  });
+
+  it("still repairs after structural invalidation when restarting the watcher fails", async () => {
+    const originalPlatform = process.platform;
+    const onBackgroundError = vi.fn();
+    Object.defineProperty(process, "platform", { value: "darwin" });
+
+    try {
+      await bootstrapMainProcess({
+        runStartupIndexing: false,
+        onBackgroundError,
+      });
+      await getRequiredHandler(handlers, "watcher:start")({ debounceMs: 5000 });
+      const liveSessionStore = getLastLiveSessionStore();
+      liveSessionStore.noteStructuralInvalidation.mockClear();
+      liveSessionStore.catchUpTrackedTranscriptsAfterWatcherRestart.mockClear();
+      liveSessionStore.repairRecentSessionsAfterIndexing.mockClear();
+      liveSessionStore.hasStructuralInvalidationPending.mockReturnValue(true);
+      liveSessionStore.getStructuralInvalidationObservedAtMs.mockReturnValue(
+        Date.parse("2026-04-11T08:59:00.000Z"),
+      );
+
+      const firstWatcher = mockFileWatcherInstances[0];
+      if (!firstWatcher) {
+        throw new Error("Expected watcher instance");
+      }
+      await firstWatcher.onFilesChanged({
+        changedPaths: [],
+        requiresFullScan: true,
+      });
+
+      mockFileWatcherService.mockImplementationOnce(
+        (
+          roots: string[],
+          onFilesChanged: (batch: {
+            changedPaths: string[];
+            requiresFullScan: boolean;
+          }) => Promise<void>,
+          options: Record<string, unknown> = {},
+        ) => {
+          const instance = {
+            roots,
+            options,
+            onFilesChanged,
+            start: vi.fn(async () => {
+              throw new Error("restart failed");
+            }),
+            stop: vi.fn(async () => {}),
+            getWatchedRoots: vi.fn(() => roots),
+            getStatus: vi.fn(() => ({ running: false, processing: false, pendingPathCount: 0 })),
+          };
+          mockFileWatcherInstances.push(instance);
+          return instance;
+        },
+      );
+
+      await settleIndexingJob({
+        source: "watch_fallback_incremental",
+        request: { kind: "incremental" },
+        startedAtMs: Date.parse("2026-04-11T09:00:00.000Z"),
+        success: true,
+      });
+
+      await vi.waitFor(() => {
+        expect(onBackgroundError).toHaveBeenCalledWith(
+          "failed restarting watcher after structural invalidation",
+          expect.any(Error),
+          expect.objectContaining({ backend: "kqueue" }),
+        );
+        expect(
+          liveSessionStore.catchUpTrackedTranscriptsAfterWatcherRestart,
+        ).not.toHaveBeenCalled();
+        expect(liveSessionStore.repairRecentSessionsAfterIndexing).toHaveBeenCalledWith({
+          minFileMtimeMs: Date.parse("2026-04-11T08:59:00.000Z"),
+        });
+      });
+    } finally {
+      Object.defineProperty(process, "platform", { value: originalPlatform });
+    }
+  });
+
+  it("does not restart the default watcher backend after structural fallback indexing settles", async () => {
+    const originalPlatform = process.platform;
+    Object.defineProperty(process, "platform", { value: "darwin" });
+
+    try {
+      await bootstrapMainProcess({ runStartupIndexing: false });
+      mockFileWatcherService
+        .mockImplementationOnce(
+          (
+            roots: string[],
+            onFilesChanged: (batch: {
+              changedPaths: string[];
+              requiresFullScan: boolean;
+            }) => Promise<void>,
+            options: Record<string, unknown> = {},
+          ) => {
+            const instance = {
+              roots,
+              options,
+              onFilesChanged,
+              start: vi.fn(async () => {
+                throw new Error("kqueue unavailable");
+              }),
+              stop: vi.fn(async () => {}),
+              getWatchedRoots: vi.fn(() => roots),
+              getStatus: vi.fn(() => ({ running: false, processing: false, pendingPathCount: 0 })),
+            };
+            mockFileWatcherInstances.push(instance);
+            return instance;
+          },
+        )
+        .mockImplementationOnce(
+          (
+            roots: string[],
+            onFilesChanged: (batch: {
+              changedPaths: string[];
+              requiresFullScan: boolean;
+            }) => Promise<void>,
+            options: Record<string, unknown> = {},
+          ) => {
+            const instance = {
+              roots,
+              options,
+              onFilesChanged,
+              start: vi.fn(async () => {}),
+              stop: vi.fn(async () => {}),
+              getWatchedRoots: vi.fn(() => roots),
+              getStatus: vi.fn(() => ({ running: false, processing: false, pendingPathCount: 0 })),
+            };
+            mockFileWatcherInstances.push(instance);
+            return instance;
+          },
+        );
+      await getRequiredHandler(handlers, "watcher:start")({ debounceMs: 5000 });
+
+      const liveSessionStore = getLastLiveSessionStore();
+      liveSessionStore.noteStructuralInvalidation.mockClear();
+      liveSessionStore.catchUpTrackedTranscriptsAfterWatcherRestart.mockClear();
+      liveSessionStore.repairRecentSessionsAfterIndexing.mockClear();
+      liveSessionStore.hasStructuralInvalidationPending.mockReturnValue(true);
+      liveSessionStore.getStructuralInvalidationObservedAtMs.mockReturnValue(
+        Date.parse("2026-04-11T08:58:00.000Z"),
+      );
+
+      const activeWatcher = mockFileWatcherInstances[1];
+      if (!activeWatcher) {
+        throw new Error("Expected default watcher instance");
+      }
+      await activeWatcher.onFilesChanged({
+        changedPaths: [],
+        requiresFullScan: true,
+      });
+
+      await settleIndexingJob({
+        source: "watch_fallback_incremental",
+        request: { kind: "incremental" },
+        startedAtMs: Date.parse("2026-04-11T09:00:00.000Z"),
+        success: true,
+      });
+
+      await vi.waitFor(() => {
+        expect(liveSessionStore.repairRecentSessionsAfterIndexing).toHaveBeenCalledTimes(1);
+      });
+      expect(mockFileWatcherInstances).toHaveLength(2);
+      expect(activeWatcher.stop).not.toHaveBeenCalled();
+      expect(liveSessionStore.catchUpTrackedTranscriptsAfterWatcherRestart).not.toHaveBeenCalled();
+    } finally {
+      Object.defineProperty(process, "platform", { value: originalPlatform });
+    }
   });
 
   it("repairs live sessions after successful manual incremental refresh completion", async () => {
@@ -1592,28 +1858,35 @@ describe("bootstrapMainProcess", () => {
     await getRequiredHandler(handlers, "watcher:start")({ debounceMs: 5000 });
     const liveSessionStore = getLastLiveSessionStore();
     liveSessionStore.repairRecentSessionsAfterIndexing.mockClear();
+    liveSessionStore.getStructuralInvalidationObservedAtMs.mockReturnValue(null);
 
     await settleIndexingJob({
       source: "manual_incremental",
       request: { kind: "incremental" },
+      startedAtMs: Date.parse("2026-04-11T09:10:00.000Z"),
       success: true,
     });
 
     await vi.waitFor(() => {
       expect(liveSessionStore.repairRecentSessionsAfterIndexing).toHaveBeenCalledTimes(1);
     });
+    expect(liveSessionStore.repairRecentSessionsAfterIndexing).toHaveBeenCalledWith({
+      minFileMtimeMs: Date.parse("2026-04-11T09:10:00.000Z"),
+    });
   });
 
-  it("temporarily starts the live store to repair manual refreshes when no watcher is active", async () => {
+  it("temporarily starts the live store to repair manual refreshes when no watcher is active using the indexing baseline", async () => {
     await bootstrapMainProcess({ runStartupIndexing: false });
     const liveSessionStore = getLastLiveSessionStore();
     liveSessionStore.start.mockClear();
     liveSessionStore.stop.mockClear();
     liveSessionStore.repairRecentSessionsAfterIndexing.mockClear();
+    liveSessionStore.getStructuralInvalidationObservedAtMs.mockReturnValue(null);
 
     await settleIndexingJob({
       source: "manual_incremental",
       request: { kind: "incremental" },
+      startedAtMs: Date.parse("2026-04-11T06:00:00.000Z"),
       success: true,
     });
 
@@ -1629,6 +1902,9 @@ describe("bootstrapMainProcess", () => {
     expect(
       liveSessionStore.repairRecentSessionsAfterIndexing.mock.invocationCallOrder[0],
     ).toBeLessThan(liveSessionStore.stop.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY);
+    expect(liveSessionStore.repairRecentSessionsAfterIndexing).toHaveBeenCalledWith({
+      minFileMtimeMs: Date.parse("2026-04-11T06:00:00.000Z"),
+    });
   });
 
   it("stops the temporarily started live store when repair throws", async () => {
@@ -1644,6 +1920,7 @@ describe("bootstrapMainProcess", () => {
     await settleIndexingJob({
       source: "manual_incremental",
       request: { kind: "incremental" },
+      startedAtMs: Date.parse("2026-04-11T09:20:00.000Z"),
       success: true,
     });
 
@@ -1680,6 +1957,10 @@ describe("bootstrapMainProcess", () => {
 
     liveSessionStore.noteStructuralInvalidation.mockClear();
     liveSessionStore.repairRecentSessionsAfterIndexing.mockClear();
+    liveSessionStore.hasStructuralInvalidationPending.mockReturnValue(true);
+    liveSessionStore.getStructuralInvalidationObservedAtMs.mockReturnValue(
+      Date.parse("2026-04-11T08:30:00.000Z"),
+    );
 
     await firstWatcher.onFilesChanged({
       changedPaths: [],
@@ -1690,6 +1971,7 @@ describe("bootstrapMainProcess", () => {
     await settleIndexingJob({
       source: "watch_fallback_incremental",
       request: { kind: "incremental" },
+      startedAtMs: Date.parse("2026-04-11T09:00:00.000Z"),
       success: false,
     });
     expect(liveSessionStore.repairRecentSessionsAfterIndexing).not.toHaveBeenCalled();
@@ -1697,10 +1979,14 @@ describe("bootstrapMainProcess", () => {
     await settleIndexingJob({
       source: "manual_incremental",
       request: { kind: "incremental" },
+      startedAtMs: Date.parse("2026-04-11T09:10:00.000Z"),
       success: true,
     });
     await vi.waitFor(() => {
       expect(liveSessionStore.repairRecentSessionsAfterIndexing).toHaveBeenCalledTimes(1);
+    });
+    expect(liveSessionStore.repairRecentSessionsAfterIndexing).toHaveBeenCalledWith({
+      minFileMtimeMs: Date.parse("2026-04-11T08:30:00.000Z"),
     });
   });
 

@@ -161,6 +161,10 @@ function getSingleSession(
   return session;
 }
 
+async function repairRecentSessions(store: LiveSessionStore, minFileMtimeMs = 0) {
+  return store.repairRecentSessionsAfterIndexing({ minFileMtimeMs });
+}
+
 describe("LiveSessionStore", () => {
   const tempDirs: string[] = [];
 
@@ -552,14 +556,13 @@ describe("LiveSessionStore", () => {
     await store.start({ discoveryConfig: config });
     expect(store.snapshot().sessions).toHaveLength(0);
 
-    const result = await store.repairRecentSessionsAfterIndexing();
+    const result = await repairRecentSessions(store);
 
     expect(result).toEqual({
       ran: true,
       candidateCount: 1,
       recoveredSessionCount: 1,
       repairedTrackedSessionCount: 0,
-      restartedStore: false,
       consumedStructuralInvalidation: false,
       staleCandidateCountAfterRepair: 0,
     });
@@ -629,14 +632,13 @@ describe("LiveSessionStore", () => {
     writeFileSync(filePath, rewrittenTranscript, "utf8");
     utimesSync(filePath, newerMtimeMs / 1000, newerMtimeMs / 1000);
 
-    const result = await store.repairRecentSessionsAfterIndexing();
+    const result = await repairRecentSessions(store);
 
     expect(result).toEqual({
       ran: true,
       candidateCount: 1,
       recoveredSessionCount: 0,
       repairedTrackedSessionCount: 1,
-      restartedStore: false,
       consumedStructuralInvalidation: false,
       staleCandidateCountAfterRepair: 0,
     });
@@ -770,14 +772,13 @@ describe("LiveSessionStore", () => {
       "utf8",
     );
 
-    const result = await store.repairRecentSessionsAfterIndexing();
+    const result = await repairRecentSessions(store);
 
     expect(result).toEqual({
       ran: true,
       candidateCount: 1,
       recoveredSessionCount: 0,
       repairedTrackedSessionCount: 1,
-      restartedStore: false,
       consumedStructuralInvalidation: false,
       staleCandidateCountAfterRepair: 0,
     });
@@ -785,7 +786,7 @@ describe("LiveSessionStore", () => {
     expect(getSingleSession(store).detailText).toBe("bun run typecheck");
   });
 
-  it("reports stale missing indexed files after repair and attempts a soft restart", async () => {
+  it("reports stale missing indexed files after repair without clearing live state", async () => {
     const dir = mkdtempSync(join(tmpdir(), "codetrail-live-store-backfill-missing-"));
     tempDirs.push(dir);
     const config = makeConfig(dir);
@@ -813,14 +814,13 @@ describe("LiveSessionStore", () => {
 
     await store.start({ discoveryConfig: config });
 
-    const result = await store.repairRecentSessionsAfterIndexing();
+    const result = await repairRecentSessions(store);
 
     expect(result).toEqual({
       ran: true,
       candidateCount: 1,
       recoveredSessionCount: 0,
       repairedTrackedSessionCount: 0,
-      restartedStore: true,
       consumedStructuralInvalidation: false,
       staleCandidateCountAfterRepair: 1,
     });
@@ -884,8 +884,8 @@ describe("LiveSessionStore", () => {
     );
     await records[0]!.callback(makeBatch(hookLogPath));
 
-    store.noteStructuralInvalidation();
-    const result = await store.repairRecentSessionsAfterIndexing();
+    store.noteStructuralInvalidation(Date.parse("2026-04-11T09:00:00.000Z"));
+    const result = await repairRecentSessions(store);
 
     const sessions = store.snapshot().sessions;
     expect(result).toEqual({
@@ -893,7 +893,6 @@ describe("LiveSessionStore", () => {
       candidateCount: 1,
       recoveredSessionCount: 1,
       repairedTrackedSessionCount: 0,
-      restartedStore: false,
       consumedStructuralInvalidation: true,
       staleCandidateCountAfterRepair: 0,
     });
@@ -941,54 +940,37 @@ describe("LiveSessionStore", () => {
     });
 
     await store.start({ discoveryConfig: config });
-    store.noteStructuralInvalidation();
+    store.noteStructuralInvalidation(Date.parse("2026-04-11T09:00:00.000Z"));
 
-    const firstAttempt = await store.repairRecentSessionsAfterIndexing();
+    const firstAttempt = await repairRecentSessions(store);
     expect(firstAttempt).toEqual({
       ran: false,
       candidateCount: 0,
       recoveredSessionCount: 0,
       repairedTrackedSessionCount: 0,
-      restartedStore: false,
       consumedStructuralInvalidation: false,
       staleCandidateCountAfterRepair: 0,
     });
 
-    const secondAttempt = await store.repairRecentSessionsAfterIndexing();
+    const secondAttempt = await repairRecentSessions(store);
     expect(secondAttempt).toEqual({
       ran: true,
       candidateCount: 1,
       recoveredSessionCount: 1,
       repairedTrackedSessionCount: 0,
-      restartedStore: false,
       consumedStructuralInvalidation: true,
       staleCandidateCountAfterRepair: 0,
     });
     expect(getSingleSession(store).detailText).toBe("Recovered on retry");
   });
 
-  it("soft-restarts the live store and recovers candidates that only become readable during restart", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "codetrail-live-store-repair-restart-"));
+  it("keeps the first structural invalidation timestamp until repair succeeds", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-live-store-structural-ts-"));
     tempDirs.push(dir);
     const config = makeConfig(dir);
-    const filePath = join(config.codexRoot, "2026", "04", "11", "recovered-on-restart.jsonl");
-    const candidate = {
-      filePath,
-      provider: "codex" as const,
-      fileMtimeMs: Date.parse("2026-04-11T09:00:02.000Z"),
-      fileSize: 1,
-    };
-    let seededStartupCandidates = false;
-    const listRecentLiveSessionFiles = vi.fn(() => {
-      if (!seededStartupCandidates) {
-        seededStartupCandidates = true;
-        return [];
-      }
-      return [candidate];
-    });
     const store = new LiveSessionStore({
       queryService: {
-        listRecentLiveSessionFiles,
+        listRecentLiveSessionFiles: vi.fn(() => []),
       } satisfies Pick<QueryService, "listRecentLiveSessionFiles">,
       userDataDir: join(dir, "user-data"),
       homeDir: join(dir, "home"),
@@ -996,54 +978,115 @@ describe("LiveSessionStore", () => {
     });
 
     await store.start({ discoveryConfig: config });
-    const originalStart = store.start.bind(store);
-    const startSpy = vi.spyOn(store, "start").mockImplementationOnce(async (input) => {
-      createCodexTranscript(filePath);
-      appendFileSync(
-        filePath,
-        `${JSON.stringify({
-          timestamp: "2026-04-11T09:00:02.000Z",
-          type: "response_item",
-          payload: {
-            type: "function_call",
-            name: "exec_command",
-            arguments: { cmd: "bun run typecheck" },
-          },
-        })}\n`,
-        "utf8",
-      );
-      await originalStart(input);
+    store.noteStructuralInvalidation(Date.parse("2026-04-11T09:00:00.000Z"));
+    store.noteStructuralInvalidation(Date.parse("2026-04-11T09:05:00.000Z"));
+
+    expect(store.hasStructuralInvalidationPending()).toBe(true);
+    expect(store.getStructuralInvalidationObservedAtMs()).toBe(
+      Date.parse("2026-04-11T09:00:00.000Z"),
+    );
+  });
+
+  it("catches up tracked transcripts after a watcher restart gap", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-live-store-repair-catchup-"));
+    tempDirs.push(dir);
+    const config = makeConfig(dir);
+    const filePath = join(config.codexRoot, "2026", "04", "11", "tracked-during-restart.jsonl");
+    createCodexTranscript(filePath);
+    const store = new LiveSessionStore({
+      queryService: {
+        listRecentLiveSessionFiles: vi.fn(() => []),
+      } satisfies Pick<QueryService, "listRecentLiveSessionFiles">,
+      userDataDir: join(dir, "user-data"),
+      homeDir: join(dir, "home"),
+      now: () => Date.parse("2026-04-11T09:00:00.000Z"),
     });
 
-    const result = await store.repairRecentSessionsAfterIndexing();
-    startSpy.mockRestore();
+    await store.start({ discoveryConfig: config });
+    await store.handleWatcherBatch(makeBatch(filePath));
+    appendFileSync(
+      filePath,
+      `${JSON.stringify({
+        timestamp: "2026-04-11T09:00:02.000Z",
+        type: "response_item",
+        payload: {
+          type: "function_call",
+          name: "exec_command",
+          arguments: { cmd: "bun run typecheck" },
+        },
+      })}\n`,
+      "utf8",
+    );
 
-    expect(result).toEqual({
-      ran: true,
-      candidateCount: 1,
-      recoveredSessionCount: 1,
-      repairedTrackedSessionCount: 0,
-      restartedStore: true,
-      consumedStructuralInvalidation: false,
-      staleCandidateCountAfterRepair: 0,
+    const result = await store.catchUpTrackedTranscriptsAfterWatcherRestart({
+      restartStartedAtMs: Date.parse("2026-04-11T09:00:01.000Z"),
     });
+
+    expect(result).toEqual({ processedTrackedFileCount: 1 });
     expect(getSingleSession(store).statusKind).toBe("running_tool");
     expect(getSingleSession(store).detailText).toBe("bun run typecheck");
   });
 
-  it("retains structural invalidation when soft restart fails and consumes it after a later success", async () => {
+  it("removes tracked sessions when the transcript disappears during the watcher restart gap", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-live-store-repair-catchup-delete-"));
+    tempDirs.push(dir);
+    const config = makeConfig(dir);
+    const filePath = join(config.codexRoot, "2026", "04", "11", "deleted-during-restart.jsonl");
+    createCodexTranscript(filePath);
+    appendFileSync(
+      filePath,
+      `${JSON.stringify({
+        timestamp: "2026-04-11T09:00:01.000Z",
+        type: "event_msg",
+        payload: { type: "agent_message", text: "Tracked before deletion" },
+      })}\n`,
+      "utf8",
+    );
+    const store = new LiveSessionStore({
+      queryService: {
+        listRecentLiveSessionFiles: vi.fn(() => []),
+      } satisfies Pick<QueryService, "listRecentLiveSessionFiles">,
+      userDataDir: join(dir, "user-data"),
+      homeDir: join(dir, "home"),
+      now: () => Date.parse("2026-04-11T09:00:00.000Z"),
+    });
+
+    await store.start({ discoveryConfig: config });
+    await store.handleWatcherBatch(makeBatch(filePath));
+    rmSync(filePath, { force: true });
+
+    const result = await store.catchUpTrackedTranscriptsAfterWatcherRestart({
+      restartStartedAtMs: Date.parse("2026-04-11T09:00:02.000Z"),
+    });
+
+    expect(result).toEqual({ processedTrackedFileCount: 1 });
+    expect(store.snapshot().sessions).toHaveLength(0);
+  });
+
+  it("retains live state when repair leaves stale candidates and consumes structural invalidation later", async () => {
     const dir = mkdtempSync(join(tmpdir(), "codetrail-live-store-repair-restart-error-"));
     tempDirs.push(dir);
     const config = makeConfig(dir);
     const missingPath = join(config.codexRoot, "2026", "04", "11", "missing-session.jsonl");
-    const recoveredPath = join(config.codexRoot, "2026", "04", "11", "recovered-session.jsonl");
+    const trackedPath = join(config.codexRoot, "2026", "04", "11", "tracked-session.jsonl");
+    const recoveredPath = join(config.codexRoot, "2026", "04", "11", "recovered-later.jsonl");
+    createCodexTranscript(trackedPath);
+    appendFileSync(
+      trackedPath,
+      `${JSON.stringify({
+        timestamp: "2026-04-11T09:00:01.000Z",
+        type: "event_msg",
+        payload: { type: "agent_message", text: "Tracked before stale repair" },
+      })}\n`,
+      "utf8",
+    );
     createCodexTranscript(recoveredPath);
     appendFileSync(
       recoveredPath,
       `${JSON.stringify({
         timestamp: "2026-04-11T09:00:02.000Z",
         type: "event_msg",
-        payload: { type: "agent_message", text: "Recovered after restart failure" },
+        payload: { type: "agent_message", text: "Recovered after stale repair" },
       })}\n`,
       "utf8",
     );
@@ -1080,36 +1123,35 @@ describe("LiveSessionStore", () => {
     });
 
     await store.start({ discoveryConfig: config });
-    store.noteStructuralInvalidation();
-    const startSpy = vi.spyOn(store, "start").mockImplementationOnce(async () => {
-      throw new Error("restart start failed");
-    });
+    await store.handleWatcherBatch(makeBatch(trackedPath));
+    store.noteStructuralInvalidation(Date.parse("2026-04-11T09:00:00.000Z"));
 
-    const firstAttempt = await store.repairRecentSessionsAfterIndexing();
+    const firstAttempt = await repairRecentSessions(store);
     expect(firstAttempt).toEqual({
-      ran: false,
+      ran: true,
       candidateCount: 1,
       recoveredSessionCount: 0,
       repairedTrackedSessionCount: 0,
-      restartedStore: true,
       consumedStructuralInvalidation: false,
-      staleCandidateCountAfterRepair: 0,
+      staleCandidateCountAfterRepair: 1,
     });
+    expect(getSingleSession(store).detailText).toBe("Tracked before stale repair");
 
-    startSpy.mockRestore();
     repairMode = "recovered";
 
-    const secondAttempt = await store.repairRecentSessionsAfterIndexing();
+    const secondAttempt = await repairRecentSessions(store);
     expect(secondAttempt).toEqual({
       ran: true,
       candidateCount: 1,
       recoveredSessionCount: 1,
       repairedTrackedSessionCount: 0,
-      restartedStore: false,
       consumedStructuralInvalidation: true,
       staleCandidateCountAfterRepair: 0,
     });
-    expect(getSingleSession(store).detailText).toBe("Recovered after restart failure");
+    expect(store.snapshot().sessions).toHaveLength(2);
+    expect(store.snapshot().sessions.map((session) => session.detailText)).toContain(
+      "Recovered after stale repair",
+    );
   });
 
   it("updates Claude sessions from the dedicated hook watcher", async () => {

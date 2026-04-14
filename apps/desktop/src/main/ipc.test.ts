@@ -224,6 +224,11 @@ describe("registerIpcHandlers", () => {
             fallbackToIncrementalScans: 0,
             lastTriggerAt: null,
             lastTriggerPathCount: null,
+            structuralInvalidationObservedAt: null,
+            forcedRestartCount: 0,
+            lastForcedRestartAt: null,
+            lastPostRestartTrackedCatchupCount: null,
+            lastStaleCandidateCountAfterRepair: null,
           },
           jobs: {
             startupIncremental: makeDiagnosticsBucket(),
@@ -441,6 +446,11 @@ describe("registerIpcHandlers", () => {
             fallbackToIncrementalScans: 0,
             lastTriggerAt: null,
             lastTriggerPathCount: null,
+            structuralInvalidationObservedAt: null,
+            forcedRestartCount: 0,
+            lastForcedRestartAt: null,
+            lastPostRestartTrackedCatchupCount: null,
+            lastStaleCandidateCountAfterRepair: null,
           },
           jobs: {
             startupIncremental: makeDiagnosticsBucket(),

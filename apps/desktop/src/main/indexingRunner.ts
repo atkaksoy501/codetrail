@@ -105,6 +105,8 @@ export type IndexingRunnerDependencies = {
   onJobSettled?: (event: {
     source: IndexingJobSource;
     request: QueuedJobRequest;
+    startedAtMs: number;
+    finishedAtMs: number;
     durationMs: number;
     success: boolean;
   }) => void | Promise<void>;
@@ -145,6 +147,8 @@ export class WorkerIndexingRunner {
     | ((event: {
         source: IndexingJobSource;
         request: QueuedJobRequest;
+        startedAtMs: number;
+        finishedAtMs: number;
         durationMs: number;
         success: boolean;
       }) => void | Promise<void>)
@@ -337,17 +341,23 @@ export class WorkerIndexingRunner {
         } finally {
           bookmarkStore.close();
         }
+        const finishedAt = Date.now();
         this.notifyJobSettled({
           source,
           request,
-          durationMs: Date.now() - startedAt,
+          startedAtMs: startedAt,
+          finishedAtMs: finishedAt,
+          durationMs: finishedAt - startedAt,
           success: true,
         });
       } catch (error) {
+        const finishedAt = Date.now();
         this.notifyJobSettled({
           source,
           request,
-          durationMs: Date.now() - startedAt,
+          startedAtMs: startedAt,
+          finishedAtMs: finishedAt,
+          durationMs: finishedAt - startedAt,
           success: false,
         });
         throw error;
@@ -376,6 +386,8 @@ export class WorkerIndexingRunner {
   private notifyJobSettled(event: {
     source: IndexingJobSource;
     request: QueuedJobRequest;
+    startedAtMs: number;
+    finishedAtMs: number;
     durationMs: number;
     success: boolean;
   }): void {

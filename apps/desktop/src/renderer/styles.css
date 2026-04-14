@@ -3416,6 +3416,17 @@ button svg *,
   white-space: normal;
 }
 
+.turn-combined-summary-counts {
+  display: inline-flex;
+  align-items: baseline;
+  margin-left: 6px;
+  gap: 6px;
+}
+
+.turn-combined-summary-separator {
+  color: var(--text-tertiary);
+}
+
 .md-p {
   margin: 0;
   font-size: calc(var(--message-font-size) - 0.5px);

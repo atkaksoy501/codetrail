@@ -24,6 +24,11 @@ export class WatchStatsStore {
   private fallbackToIncrementalScans = 0;
   private lastTriggerAt: string | null = null;
   private lastTriggerPathCount: number | null = null;
+  private structuralInvalidationObservedAt: string | null = null;
+  private forcedRestartCount = 0;
+  private lastForcedRestartAt: string | null = null;
+  private lastPostRestartTrackedCatchupCount: number | null = null;
+  private lastStaleCandidateCountAfterRepair: number | null = null;
   private completedRuns = 0;
   private failedRuns = 0;
   private readonly buckets: Record<WatchDiagnosticsSource, DiagnosticsBucket> = {
@@ -52,6 +57,20 @@ export class WatchStatsStore {
     }
     this.lastTriggerAt = new Date().toISOString();
     this.lastTriggerPathCount = input.changedPathCount;
+  }
+
+  recordStructuralInvalidation(observedAtMs: number): void {
+    this.structuralInvalidationObservedAt = new Date(observedAtMs).toISOString();
+  }
+
+  recordForcedWatcherRestart(input: { restartAtMs: number; trackedCatchupCount: number }): void {
+    this.forcedRestartCount += 1;
+    this.lastForcedRestartAt = new Date(input.restartAtMs).toISOString();
+    this.lastPostRestartTrackedCatchupCount = input.trackedCatchupCount;
+  }
+
+  recordPostRepairStaleCandidateCount(count: number): void {
+    this.lastStaleCandidateCountAfterRepair = count;
   }
 
   recordJobSettled(input: {
@@ -91,6 +110,11 @@ export class WatchStatsStore {
         fallbackToIncrementalScans: this.fallbackToIncrementalScans,
         lastTriggerAt: this.lastTriggerAt,
         lastTriggerPathCount: this.lastTriggerPathCount,
+        structuralInvalidationObservedAt: this.structuralInvalidationObservedAt,
+        forcedRestartCount: this.forcedRestartCount,
+        lastForcedRestartAt: this.lastForcedRestartAt,
+        lastPostRestartTrackedCatchupCount: this.lastPostRestartTrackedCatchupCount,
+        lastStaleCandidateCountAfterRepair: this.lastStaleCandidateCountAfterRepair,
       },
       jobs: {
         startupIncremental: this.buckets.startup_incremental,

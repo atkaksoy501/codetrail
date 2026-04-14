@@ -326,11 +326,74 @@ describe("TurnView", () => {
     fireEvent.click(screen.getByRole("button", { name: "Collapse message" }));
     expect(history.handleToggleMessageExpandedInTurn).toHaveBeenCalledWith("message_1", "user");
 
+    expect(container.querySelector(".message-preview .diff-meta-added")?.textContent).toBe("+1");
+    expect(container.querySelector(".message-preview .diff-meta-removed")?.textContent).toBe("-1");
+
     fireEvent.click(screen.getByRole("button", { name: /expand combined changes/i }));
 
     expect(screen.getByText("1 file changed")).toBeInTheDocument();
+    expect(container.querySelector(".tool-edit-summary .diff-meta-added")?.textContent).toBe("+1");
+    expect(container.querySelector(".tool-edit-summary .diff-meta-removed")?.textContent).toBe(
+      "-1",
+    );
     expect(document.querySelectorAll(".turn-combined-file .content-viewer")).toHaveLength(1);
     expect(screen.queryByText("Best Effort")).toBeNull();
+  });
+
+  it("shows aggregate added and removed line counts in the combined changes summary", () => {
+    const history = createHistoryStub();
+    replaceTurnMessage(history, 1, {
+      toolEditFiles: [
+        {
+          filePath: "/workspace/project-one/src/query.ts",
+          previousFilePath: null,
+          changeType: "update",
+          unifiedDiff: [
+            "--- a//workspace/project-one/src/query.ts",
+            "+++ b//workspace/project-one/src/query.ts",
+            "@@ -1,2 +1,3 @@",
+            "-const oldValue = 1;",
+            "+const newValue = 2;",
+            "+const newerValue = 3;",
+          ].join("\n"),
+          addedLineCount: 2,
+          removedLineCount: 1,
+          exactness: "exact",
+        },
+        {
+          filePath: "/workspace/project-one/src/other.ts",
+          previousFilePath: null,
+          changeType: "update",
+          unifiedDiff: [
+            "--- a//workspace/project-one/src/other.ts",
+            "+++ b//workspace/project-one/src/other.ts",
+            "@@ -1,2 +1,4 @@",
+            "-const firstOld = true;",
+            "-const secondOld = false;",
+            "+const firstNew = true;",
+            "+const secondNew = false;",
+            "+const thirdNew = maybe;",
+          ].join("\n"),
+          addedLineCount: 3,
+          removedLineCount: 2,
+          exactness: "exact",
+        },
+      ],
+    });
+    syncTurnDerived(history);
+
+    const { container } = renderTurnView(history);
+
+    expect(screen.getByText("2 files changed")).toBeInTheDocument();
+    expect(container.querySelector(".message-preview .diff-meta-added")?.textContent).toBe("+5");
+    expect(container.querySelector(".message-preview .diff-meta-removed")?.textContent).toBe("-3");
+
+    fireEvent.click(screen.getByRole("button", { name: /expand combined changes/i }));
+
+    expect(container.querySelector(".tool-edit-summary .diff-meta-added")?.textContent).toBe("+5");
+    expect(container.querySelector(".tool-edit-summary .diff-meta-removed")?.textContent).toBe(
+      "-3",
+    );
   });
 
   it("renders combined changes first when the user category is hidden", () => {

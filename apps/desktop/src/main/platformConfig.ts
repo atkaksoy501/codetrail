@@ -23,6 +23,7 @@ export type MainPlatformConfig = {
     backend: "default" | "kqueue";
     subscribeOptions?: { backend: "kqueue" };
     failureMessage?: string;
+    restartOnStructuralInvalidation?: boolean;
   }>;
 };
 
@@ -47,6 +48,7 @@ export function createMainPlatformConfig(platform: DesktopPlatform): MainPlatfor
         {
           backend: "kqueue",
           subscribeOptions: { backend: "kqueue" },
+          restartOnStructuralInvalidation: true,
           failureMessage:
             "[codetrail] Failed to start kqueue watcher on macOS, falling back to default backend",
         },

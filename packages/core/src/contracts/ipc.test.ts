@@ -501,6 +501,11 @@ const channelExamples: Record<IpcChannel, ChannelExample> = {
         fallbackToIncrementalScans: 1,
         lastTriggerAt: "2026-03-16T10:05:00.000Z",
         lastTriggerPathCount: 3,
+        structuralInvalidationObservedAt: null,
+        forcedRestartCount: 0,
+        lastForcedRestartAt: null,
+        lastPostRestartTrackedCatchupCount: null,
+        lastStaleCandidateCountAfterRepair: null,
       },
       jobs: {
         startupIncremental: makeDiagnosticsBucket(),

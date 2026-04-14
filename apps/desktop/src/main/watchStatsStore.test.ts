@@ -15,6 +15,11 @@ describe("WatchStatsStore", () => {
         fallbackToIncrementalScans: 0,
         lastTriggerAt: null,
         lastTriggerPathCount: null,
+        structuralInvalidationObservedAt: null,
+        forcedRestartCount: 0,
+        lastForcedRestartAt: null,
+        lastPostRestartTrackedCatchupCount: null,
+        lastStaleCandidateCountAfterRepair: null,
       },
       jobs: {
         startupIncremental: emptyBucket(),
@@ -40,6 +45,12 @@ describe("WatchStatsStore", () => {
     store.recordWatcherStart({ backend: "kqueue", watchedRootCount: 5 });
     store.recordWatcherTrigger({ changedPathCount: 2, requiresFullScan: false });
     store.recordWatcherTrigger({ changedPathCount: 0, requiresFullScan: true });
+    store.recordStructuralInvalidation(Date.parse("2026-03-16T10:05:00.000Z"));
+    store.recordForcedWatcherRestart({
+      restartAtMs: Date.parse("2026-03-16T10:06:00.000Z"),
+      trackedCatchupCount: 4,
+    });
+    store.recordPostRepairStaleCandidateCount(1);
     store.recordJobSettled({ source: "manual_incremental", durationMs: 150, success: true });
     store.recordJobSettled({ source: "watch_targeted", durationMs: 80, success: true });
     store.recordJobSettled({
@@ -57,6 +68,11 @@ describe("WatchStatsStore", () => {
         fallbackToIncrementalScans: 1,
         lastTriggerAt: expect.any(String),
         lastTriggerPathCount: 0,
+        structuralInvalidationObservedAt: "2026-03-16T10:05:00.000Z",
+        forcedRestartCount: 1,
+        lastForcedRestartAt: "2026-03-16T10:06:00.000Z",
+        lastPostRestartTrackedCatchupCount: 4,
+        lastStaleCandidateCountAfterRepair: 1,
       },
       jobs: {
         startupIncremental: emptyBucket(),

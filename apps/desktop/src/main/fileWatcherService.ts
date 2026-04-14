@@ -22,6 +22,10 @@ export type FileWatcherOptions = {
   subscribeOptions?: SubscribeOptions;
 };
 
+type StopOptions = {
+  flushPending?: boolean;
+};
+
 export type FileWatcherStatus = {
   running: boolean;
   processing: boolean;
@@ -84,6 +88,9 @@ export class FileWatcherService {
         const subscription = await this.subscribeFn(
           watchedRoot,
           (err, events) => {
+            if (!this.running || this.stopped) {
+              return;
+            }
             if (err) {
               this.onError(err);
               return;
@@ -127,19 +134,27 @@ export class FileWatcherService {
     }
   }
 
-  async stop(): Promise<void> {
+  async stop(options: StopOptions = {}): Promise<void> {
     if (!this.running) {
       return;
     }
 
     this.running = false;
-    this.stopped = true;
 
     if (this.debounceTimer !== null) {
       clearTimeout(this.debounceTimer);
       this.debounceTimer = null;
     }
 
+    if (options.flushPending && (this.pendingPaths.size > 0 || this.pendingStructureChange)) {
+      if (this.flushPromise) {
+        await this.flushPromise;
+      }
+      this.flushPromise = this.flush();
+      await this.flushPromise;
+    }
+
+    this.stopped = true;
     this.pendingPaths.clear();
     this.pendingStructureChange = false;
 
@@ -208,7 +223,11 @@ export class FileWatcherService {
       this.processing = false;
       this.flushPromise = null;
       // If new paths accumulated during processing, flush again
-      if (!this.stopped && (this.pendingPaths.size > 0 || this.pendingStructureChange)) {
+      if (
+        this.running &&
+        !this.stopped &&
+        (this.pendingPaths.size > 0 || this.pendingStructureChange)
+      ) {
         this.flushPromise = this.flush();
       }
     }

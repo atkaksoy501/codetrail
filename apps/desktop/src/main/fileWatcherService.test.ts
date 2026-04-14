@@ -313,6 +313,61 @@ describe("FileWatcherService", () => {
     expect(onFilesChanged).not.toHaveBeenCalled();
   });
 
+  it("stop({ flushPending: true }) flushes the final pending batch before unsubscribe", async () => {
+    const { subscribe, callbacks } = createMockSubscribe();
+    const onFilesChanged = vi.fn();
+
+    const service = new FileWatcherService(["/root/a"], onFilesChanged, {
+      subscribe,
+      debounceMs: 50,
+    });
+    await service.start();
+
+    getCallback(callbacks, 0)(null, [{ path: "/root/a/file.jsonl", type: "update" as const }]);
+    await service.stop({ flushPending: true });
+
+    expect(onFilesChanged).toHaveBeenCalledTimes(1);
+    expect(onFilesChanged).toHaveBeenCalledWith({
+      changedPaths: ["/root/a/file.jsonl"],
+      requiresFullScan: false,
+    });
+  });
+
+  it("ignores new watcher callbacks that arrive while flushPending stop is draining", async () => {
+    const { subscribe, callbacks } = createMockSubscribe();
+    let finishProcessing: (() => void) | null = null;
+    const onFilesChanged = vi.fn(
+      (_batch: FileWatcherBatch) =>
+        new Promise<void>((resolve) => {
+          finishProcessing = resolve;
+        }),
+    );
+
+    const service = new FileWatcherService(["/root/a"], onFilesChanged, {
+      subscribe,
+      debounceMs: 50,
+    });
+    await service.start();
+
+    getCallback(callbacks, 0)(null, [{ path: "/root/a/file.jsonl", type: "update" as const }]);
+    const stopPromise = service.stop({ flushPending: true });
+    await vi.advanceTimersByTimeAsync(0);
+    getCallback(callbacks, 0)(null, [{ path: "/root/a/late.jsonl", type: "update" as const }]);
+    const completeFirstBatch =
+      finishProcessing ??
+      (() => {
+        throw new Error("Expected in-flight processing resolver");
+      });
+    completeFirstBatch();
+    await stopPromise;
+
+    expect(onFilesChanged).toHaveBeenCalledTimes(1);
+    expect(onFilesChanged).toHaveBeenCalledWith({
+      changedPaths: ["/root/a/file.jsonl"],
+      requiresFullScan: false,
+    });
+  });
+
   it("stop() prevents in-flight processing from re-triggering flush", async () => {
     const { subscribe, callbacks } = createMockSubscribe();
     let finishProcessing: (() => void) | null = null;
