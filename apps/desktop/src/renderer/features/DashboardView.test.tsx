@@ -267,15 +267,11 @@ describe("DashboardView", () => {
     expect(screen.getByText("Provider Write Throughput")).toBeInTheDocument();
     expect(screen.getByText("Top Written Files")).toBeInTheDocument();
     expect(screen.getByText("Top File Types")).toBeInTheDocument();
-    expect(screen.getByText("Measured from 4 of 5 write events.")).toBeInTheDocument();
-    expect(
-      screen.getByText("Some write payloads could not be fully parsed, so line totals are conservative."),
-    ).toBeInTheDocument();
-    expect(screen.getByText("Category Composition")).toBeInTheDocument();
+    expect(screen.getByText("Message Composition")).toBeInTheDocument();
     expect(screen.getByText("Provider Throughput")).toBeInTheDocument();
     expect(screen.getByText("Message Skyline")).toBeInTheDocument();
-    expect(screen.getByText("Where the action is")).toBeInTheDocument();
-    expect(screen.getByText("Most-used model signatures")).toBeInTheDocument();
+    expect(screen.getByText("Top Projects")).toBeInTheDocument();
+    expect(screen.getByText("Top Models")).toBeInTheDocument();
     expect(screen.getByText("Code Trail")).toBeInTheDocument();
     expect(screen.getByText("src/dashboard.tsx")).toBeInTheDocument();
     expect(screen.getByText(".ts")).toBeInTheDocument();
