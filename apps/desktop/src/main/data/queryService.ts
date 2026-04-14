@@ -25,6 +25,7 @@ import {
   createBookmarkStore,
   resolveBookmarksDbPath,
 } from "./bookmarkStore";
+import { summarizeStoredToolEditActivity } from "../../shared/aiCodeActivity";
 
 type DatabaseHandle = ReturnType<typeof openDatabase>;
 type OpenDatabase = typeof openDatabase;
@@ -164,6 +165,64 @@ type FocusTargetRow = {
   created_at: string;
   created_at_ms: number;
 };
+type DashboardSummaryRow = {
+  project_count: number;
+  session_count: number;
+  message_count: number;
+  tool_call_count: number;
+  indexed_file_count: number;
+  indexed_bytes_total: number;
+  token_input_total: number;
+  token_output_total: number;
+  total_duration_ms: number;
+  average_session_duration_ms: number;
+};
+type DashboardCategoryRow = {
+  category: string;
+  count: number;
+};
+type DashboardProviderRow = {
+  provider: Provider;
+  project_count: number;
+  session_count: number;
+  message_count: number;
+  token_input_total: number;
+  token_output_total: number;
+  last_activity: string | null;
+};
+type DashboardToolCallProviderRow = {
+  provider: Provider;
+  tool_call_count: number;
+};
+type DashboardActivityRow = {
+  date: string;
+  session_count: number;
+  message_count: number;
+};
+type DashboardProjectRow = {
+  project_id: string;
+  provider: Provider;
+  name: string;
+  path: string;
+  session_count: number;
+  message_count: number;
+  last_activity: string | null;
+};
+type DashboardModelRow = {
+  model_name: string;
+  session_count: number;
+  message_count: number;
+};
+type DashboardAiWriteRow = {
+  message_id: string;
+  session_id: string;
+  provider: Provider;
+  created_at: string;
+  tool_name: string | null;
+  args_json: string | null;
+};
+
+type DashboardAiCodeStats = IpcResponse<"dashboard:getStats">["aiCodeStats"];
 
 type TurnAnchorRow = {
   id: string;
@@ -200,6 +259,7 @@ type TurnNavigationMetadata = {
 };
 
 export type QueryService = {
+  getDashboardStats: () => IpcResponse<"dashboard:getStats">;
   listProjects: (request: IpcRequest<"projects:list">) => IpcResponse<"projects:list">;
   getProjectById: (projectId: string) => IpcResponse<"projects:list">["projects"][number] | null;
   getProjectCombinedDetail: (
@@ -266,6 +326,7 @@ export function createQueryServiceFromDb(
 
   let closed = false;
   return {
+    getDashboardStats: () => getDashboardStatsWithDatabase(db, bookmarkStore),
     listProjects: (request) => listProjectsWithDatabase(db, bookmarkStore, request),
     getProjectById: (projectId) => getProjectByIdWithDatabase(db, bookmarkStore, projectId),
     getProjectCombinedDetail: (request) => getProjectCombinedDetailWithDatabase(db, request),
@@ -291,6 +352,453 @@ export function createQueryServiceFromDb(
       }
     },
   };
+}
+
+function getDashboardStatsWithDatabase(
+  db: DatabaseHandle,
+  bookmarkStore: BookmarkStore,
+): IpcResponse<"dashboard:getStats"> {
+  const summaryRow = db
+    .prepare(
+      `SELECT
+         (SELECT COUNT(*) FROM projects) AS project_count,
+         (SELECT COUNT(*) FROM sessions) AS session_count,
+         (SELECT COUNT(*) FROM messages) AS message_count,
+         (SELECT COUNT(*) FROM tool_calls) AS tool_call_count,
+         (SELECT COUNT(*) FROM indexed_files) AS indexed_file_count,
+         (SELECT COALESCE(SUM(file_size), 0) FROM indexed_files) AS indexed_bytes_total,
+         (SELECT COALESCE(SUM(token_input_total), 0) FROM sessions) AS token_input_total,
+         (SELECT COALESCE(SUM(token_output_total), 0) FROM sessions) AS token_output_total,
+         (SELECT COALESCE(SUM(duration_ms), 0) FROM sessions WHERE duration_ms IS NOT NULL) AS total_duration_ms,
+         (SELECT COALESCE(AVG(duration_ms), 0) FROM sessions WHERE duration_ms IS NOT NULL) AS average_session_duration_ms`,
+    )
+    .get() as DashboardSummaryRow | undefined;
+
+  const categoryCounts = makeEmptyCategoryCounts();
+  const categoryRows = db
+    .prepare("SELECT category, COUNT(*) AS count FROM messages GROUP BY category")
+    .all() as DashboardCategoryRow[];
+  for (const row of categoryRows) {
+    categoryCounts[normalizeMessageCategory(row.category)] = Number(row.count ?? 0);
+  }
+
+  const providerCounts = createProviderRecord(() => 0);
+  const providerStatsByProvider = createProviderRecord((provider) => ({
+    provider,
+    projectCount: 0,
+    sessionCount: 0,
+    messageCount: 0,
+    toolCallCount: 0,
+    tokenInputTotal: 0,
+    tokenOutputTotal: 0,
+    lastActivity: null as string | null,
+  }));
+
+  const providerRows = db
+    .prepare(
+      `SELECT
+         provider,
+         COUNT(DISTINCT project_id) AS project_count,
+         COUNT(*) AS session_count,
+         COALESCE(SUM(message_count), 0) AS message_count,
+         COALESCE(SUM(token_input_total), 0) AS token_input_total,
+         COALESCE(SUM(token_output_total), 0) AS token_output_total,
+         MAX(activity_at) AS last_activity
+       FROM sessions
+       GROUP BY provider`,
+    )
+    .all() as DashboardProviderRow[];
+  for (const row of providerRows) {
+    providerCounts[row.provider] = Number(row.message_count ?? 0);
+    providerStatsByProvider[row.provider] = {
+      provider: row.provider,
+      projectCount: Number(row.project_count ?? 0),
+      sessionCount: Number(row.session_count ?? 0),
+      messageCount: Number(row.message_count ?? 0),
+      toolCallCount: 0,
+      tokenInputTotal: Number(row.token_input_total ?? 0),
+      tokenOutputTotal: Number(row.token_output_total ?? 0),
+      lastActivity: row.last_activity ?? null,
+    };
+  }
+
+  const toolCallRows = db
+    .prepare(
+      `SELECT m.provider AS provider, COUNT(*) AS tool_call_count
+       FROM tool_calls tc
+       JOIN messages m ON m.id = tc.message_id
+       GROUP BY m.provider`,
+    )
+    .all() as DashboardToolCallProviderRow[];
+  for (const row of toolCallRows) {
+    providerStatsByProvider[row.provider] = {
+      ...providerStatsByProvider[row.provider],
+      toolCallCount: Number(row.tool_call_count ?? 0),
+    };
+  }
+
+  const activityWindowDays = 14;
+  const activityStart = new Date();
+  activityStart.setUTCHours(0, 0, 0, 0);
+  activityStart.setUTCDate(activityStart.getUTCDate() - (activityWindowDays - 1));
+  const recentActivityRows = db
+    .prepare(
+      `SELECT
+         substr(created_at, 1, 10) AS date,
+         COUNT(DISTINCT session_id) AS session_count,
+         COUNT(*) AS message_count
+       FROM messages
+       WHERE created_at >= ?
+       GROUP BY substr(created_at, 1, 10)
+       ORDER BY date ASC`,
+    )
+    .all(activityStart.toISOString()) as DashboardActivityRow[];
+  const recentActivityByDate = new Map(
+    recentActivityRows.map((row) => [
+      row.date,
+      {
+        date: row.date,
+        sessionCount: Number(row.session_count ?? 0),
+        messageCount: Number(row.message_count ?? 0),
+      },
+    ]),
+  );
+  const recentActivity = Array.from({ length: activityWindowDays }, (_, index) => {
+    const date = new Date(activityStart);
+    date.setUTCDate(activityStart.getUTCDate() + index);
+    const key = date.toISOString().slice(0, 10);
+    return (
+      recentActivityByDate.get(key) ?? {
+        date: key,
+        sessionCount: 0,
+        messageCount: 0,
+      }
+    );
+  });
+  const aiCodeStats = collectDashboardAiCodeStats(db, recentActivity.map((point) => point.date));
+
+  const topProjectRows = db
+    .prepare(
+      `SELECT
+         p.id AS project_id,
+         p.provider AS provider,
+         p.name AS name,
+         p.path AS path,
+         COALESCE(ps.session_count, 0) AS session_count,
+         COALESCE(ps.message_count, 0) AS message_count,
+         ps.last_activity AS last_activity
+       FROM projects p
+       LEFT JOIN project_stats ps ON ps.project_id = p.id
+       ORDER BY COALESCE(ps.message_count, 0) DESC, COALESCE(ps.session_count, 0) DESC, p.name ASC
+       LIMIT 6`,
+    )
+    .all() as DashboardProjectRow[];
+  const topProjectBookmarkCounts = bookmarkStore.countProjectBookmarksByProjectIds?.(
+    topProjectRows.map((row) => row.project_id),
+  );
+  const topProjects = topProjectRows.map((row) => ({
+    projectId: row.project_id,
+    provider: row.provider,
+    name: row.name,
+    path: row.path,
+    sessionCount: Number(row.session_count ?? 0),
+    messageCount: Number(row.message_count ?? 0),
+    bookmarkCount: Number(topProjectBookmarkCounts?.[row.project_id] ?? 0),
+    lastActivity: row.last_activity ?? null,
+  }));
+
+  const topModels = db
+    .prepare(
+      `SELECT
+         model_names AS model_name,
+         COUNT(*) AS session_count,
+         COALESCE(SUM(message_count), 0) AS message_count
+       FROM sessions
+       WHERE TRIM(model_names) <> ''
+       GROUP BY model_names
+       ORDER BY COALESCE(SUM(message_count), 0) DESC, COUNT(*) DESC, model_names ASC
+       LIMIT 6`,
+    )
+    .all() as DashboardModelRow[];
+
+  const summary = {
+    projectCount: Number(summaryRow?.project_count ?? 0),
+    sessionCount: Number(summaryRow?.session_count ?? 0),
+    messageCount: Number(summaryRow?.message_count ?? 0),
+    bookmarkCount: Number(bookmarkStore.countAllBookmarks?.() ?? 0),
+    toolCallCount: Number(summaryRow?.tool_call_count ?? 0),
+    indexedFileCount: Number(summaryRow?.indexed_file_count ?? 0),
+    indexedBytesTotal: Number(summaryRow?.indexed_bytes_total ?? 0),
+    tokenInputTotal: Number(summaryRow?.token_input_total ?? 0),
+    tokenOutputTotal: Number(summaryRow?.token_output_total ?? 0),
+    totalDurationMs: Number(summaryRow?.total_duration_ms ?? 0),
+    averageMessagesPerSession:
+      Number(summaryRow?.session_count ?? 0) > 0
+        ? Number(summaryRow?.message_count ?? 0) / Number(summaryRow?.session_count ?? 1)
+        : 0,
+    averageSessionDurationMs: Number(summaryRow?.average_session_duration_ms ?? 0),
+    activeProviderCount: Object.values(providerStatsByProvider).filter(
+      (stats) => stats.projectCount > 0 || stats.sessionCount > 0 || stats.messageCount > 0,
+    ).length,
+  };
+
+  return {
+    summary,
+    categoryCounts,
+    providerCounts,
+    providerStats: Object.values(providerStatsByProvider),
+    recentActivity,
+    topProjects,
+    topModels: topModels.map((row) => ({
+      modelName: row.model_name,
+      sessionCount: Number(row.session_count ?? 0),
+      messageCount: Number(row.message_count ?? 0),
+    })),
+    aiCodeStats,
+    activityWindowDays,
+  };
+}
+
+function collectDashboardAiCodeStats(
+  db: DatabaseHandle,
+  recentDateKeys: string[],
+): DashboardAiCodeStats {
+  const providerStatsByProvider = createProviderRecord((provider) => ({
+    provider,
+    writeEventCount: 0,
+    fileChangeCount: 0,
+    linesAdded: 0,
+    linesDeleted: 0,
+    writeSessionCount: 0,
+  }));
+  const providerSessionIds = createProviderRecord(() => new Set<string>());
+  const changeTypeCounts: DashboardAiCodeStats["changeTypeCounts"] = {
+    add: 0,
+    update: 0,
+    delete: 0,
+    move: 0,
+  };
+  const recentActivityByDate = new Map(
+    recentDateKeys.map((date) => [
+      date,
+      {
+        date,
+        writeEventCount: 0,
+        fileChangeCount: 0,
+        linesAdded: 0,
+        linesDeleted: 0,
+      },
+    ]),
+  );
+  const fileStatsByPath = new Map<
+    string,
+    {
+      filePath: string;
+      writeEventCount: number;
+      linesAdded: number;
+      linesDeleted: number;
+      lastTouchedAt: string | null;
+    }
+  >();
+  const fileTypeStatsByLabel = new Map<
+    string,
+    {
+      label: string;
+      fileChangeCount: number;
+      linesAdded: number;
+      linesDeleted: number;
+    }
+  >();
+  const distinctSessionIds = new Set<string>();
+  const distinctFilesTouched = new Set<string>();
+  const writeRows = db
+    .prepare(
+      `SELECT
+         m.id AS message_id,
+         m.session_id AS session_id,
+         m.provider AS provider,
+         m.created_at AS created_at,
+         tc.tool_name AS tool_name,
+         tc.args_json AS args_json
+       FROM messages m
+       LEFT JOIN tool_calls tc ON tc.message_id = m.id
+       WHERE m.category = 'tool_edit'
+       ORDER BY m.created_at ASC, m.id ASC`,
+    )
+    .all() as DashboardAiWriteRow[];
+
+  let measurableWriteEventCount = 0;
+  let fileChangeCount = 0;
+  let linesAdded = 0;
+  let linesDeleted = 0;
+  let multiFileWriteCount = 0;
+
+  for (const row of writeRows) {
+    distinctSessionIds.add(row.session_id);
+    providerStatsByProvider[row.provider] = {
+      ...providerStatsByProvider[row.provider],
+      writeEventCount: providerStatsByProvider[row.provider].writeEventCount + 1,
+    };
+    providerSessionIds[row.provider].add(row.session_id);
+
+    const activityPoint = recentActivityByDate.get(row.created_at.slice(0, 10));
+    if (activityPoint) {
+      activityPoint.writeEventCount += 1;
+    }
+
+    const editSummary = summarizeStoredToolEditActivity({
+      toolName: row.tool_name,
+      argsJson: row.args_json,
+    });
+    if (!editSummary || editSummary.files.length === 0) {
+      continue;
+    }
+
+    measurableWriteEventCount += 1;
+    if (editSummary.files.length > 1) {
+      multiFileWriteCount += 1;
+    }
+
+    const eventTouchedPaths = new Set<string>();
+    for (const file of editSummary.files) {
+      fileChangeCount += 1;
+      linesAdded += file.linesAdded;
+      linesDeleted += file.linesDeleted;
+      distinctFilesTouched.add(file.filePath);
+      changeTypeCounts[file.changeType] += 1;
+      eventTouchedPaths.add(file.filePath);
+
+      providerStatsByProvider[row.provider] = {
+        ...providerStatsByProvider[row.provider],
+        fileChangeCount: providerStatsByProvider[row.provider].fileChangeCount + 1,
+        linesAdded: providerStatsByProvider[row.provider].linesAdded + file.linesAdded,
+        linesDeleted: providerStatsByProvider[row.provider].linesDeleted + file.linesDeleted,
+      };
+
+      if (activityPoint) {
+        activityPoint.fileChangeCount += 1;
+        activityPoint.linesAdded += file.linesAdded;
+        activityPoint.linesDeleted += file.linesDeleted;
+      }
+
+      const existingFileStat = fileStatsByPath.get(file.filePath);
+      if (existingFileStat) {
+        existingFileStat.linesAdded += file.linesAdded;
+        existingFileStat.linesDeleted += file.linesDeleted;
+        if (!existingFileStat.lastTouchedAt || row.created_at > existingFileStat.lastTouchedAt) {
+          existingFileStat.lastTouchedAt = row.created_at;
+        }
+      } else {
+        fileStatsByPath.set(file.filePath, {
+          filePath: file.filePath,
+          writeEventCount: 0,
+          linesAdded: file.linesAdded,
+          linesDeleted: file.linesDeleted,
+          lastTouchedAt: row.created_at,
+        });
+      }
+
+      const fileTypeLabel = inferDashboardFileTypeLabel(file.filePath);
+      const existingFileTypeStat = fileTypeStatsByLabel.get(fileTypeLabel);
+      if (existingFileTypeStat) {
+        existingFileTypeStat.fileChangeCount += 1;
+        existingFileTypeStat.linesAdded += file.linesAdded;
+        existingFileTypeStat.linesDeleted += file.linesDeleted;
+      } else {
+        fileTypeStatsByLabel.set(fileTypeLabel, {
+          label: fileTypeLabel,
+          fileChangeCount: 1,
+          linesAdded: file.linesAdded,
+          linesDeleted: file.linesDeleted,
+        });
+      }
+    }
+
+    for (const filePath of eventTouchedPaths) {
+      const fileStat = fileStatsByPath.get(filePath);
+      if (fileStat) {
+        fileStat.writeEventCount += 1;
+      }
+    }
+  }
+
+  for (const provider of Object.keys(providerStatsByProvider) as Provider[]) {
+    providerStatsByProvider[provider] = {
+      ...providerStatsByProvider[provider],
+      writeSessionCount: providerSessionIds[provider].size,
+    };
+  }
+
+  return {
+    summary: {
+      writeEventCount: writeRows.length,
+      measurableWriteEventCount,
+      writeSessionCount: distinctSessionIds.size,
+      fileChangeCount,
+      distinctFilesTouchedCount: distinctFilesTouched.size,
+      linesAdded,
+      linesDeleted,
+      netLines: linesAdded - linesDeleted,
+      multiFileWriteCount,
+      averageFilesPerWrite:
+        measurableWriteEventCount > 0 ? fileChangeCount / measurableWriteEventCount : 0,
+    },
+    changeTypeCounts,
+    providerStats: Object.values(providerStatsByProvider),
+    recentActivity: recentDateKeys.map((date) => {
+      return (
+        recentActivityByDate.get(date) ?? {
+          date,
+          writeEventCount: 0,
+          fileChangeCount: 0,
+          linesAdded: 0,
+          linesDeleted: 0,
+        }
+      );
+    }),
+    topFiles: Array.from(fileStatsByPath.values())
+      .sort((left, right) => {
+        const leftTotal = left.linesAdded + left.linesDeleted;
+        const rightTotal = right.linesAdded + right.linesDeleted;
+        if (rightTotal !== leftTotal) {
+          return rightTotal - leftTotal;
+        }
+        if (right.writeEventCount !== left.writeEventCount) {
+          return right.writeEventCount - left.writeEventCount;
+        }
+        if ((right.lastTouchedAt ?? "") !== (left.lastTouchedAt ?? "")) {
+          return (right.lastTouchedAt ?? "").localeCompare(left.lastTouchedAt ?? "");
+        }
+        return left.filePath.localeCompare(right.filePath);
+      })
+      .slice(0, 6),
+    topFileTypes: Array.from(fileTypeStatsByLabel.values())
+      .sort((left, right) => {
+        if (right.fileChangeCount !== left.fileChangeCount) {
+          return right.fileChangeCount - left.fileChangeCount;
+        }
+        const leftTotal = left.linesAdded + left.linesDeleted;
+        const rightTotal = right.linesAdded + right.linesDeleted;
+        if (rightTotal !== leftTotal) {
+          return rightTotal - leftTotal;
+        }
+        return left.label.localeCompare(right.label);
+      })
+      .slice(0, 6),
+  };
+}
+
+function inferDashboardFileTypeLabel(filePath: string): string {
+  const normalized = filePath.replace(/\\/g, "/");
+  const baseName = normalized.slice(normalized.lastIndexOf("/") + 1);
+  const extensionIndex = baseName.lastIndexOf(".");
+  if (extensionIndex <= 0 || extensionIndex === baseName.length - 1) {
+    if (baseName.startsWith(".") && !baseName.slice(1).includes(".")) {
+      return baseName.toLowerCase();
+    }
+    return "No extension";
+  }
+  return baseName.slice(extensionIndex).toLowerCase();
 }
 
 function listRecentLiveSessionFilesWithDatabase(

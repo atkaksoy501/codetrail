@@ -25,6 +25,31 @@ type ChannelExample = {
   response: unknown;
 };
 
+const emptyAiCodeStats = {
+  summary: {
+    writeEventCount: 0,
+    measurableWriteEventCount: 0,
+    writeSessionCount: 0,
+    fileChangeCount: 0,
+    distinctFilesTouchedCount: 0,
+    linesAdded: 0,
+    linesDeleted: 0,
+    netLines: 0,
+    multiFileWriteCount: 0,
+    averageFilesPerWrite: 0,
+  },
+  changeTypeCounts: {
+    add: 0,
+    update: 0,
+    delete: 0,
+    move: 0,
+  },
+  providerStats: [],
+  recentActivity: [],
+  topFiles: [],
+  topFileTypes: [],
+};
+
 function createClaudeHookStateExample(input: { installed: boolean }) {
   return createClaudeHookStateFixture({
     settingsPath: "/home/user/.claude/settings.json",
@@ -58,6 +83,48 @@ const channelExamples: Record<IpcChannel, ChannelExample> = {
   "db:getSchemaVersion": {
     request: {},
     response: { schemaVersion: 1 },
+  },
+  "dashboard:getStats": {
+    request: {},
+    response: {
+      summary: {
+        projectCount: 0,
+        sessionCount: 0,
+        messageCount: 0,
+        bookmarkCount: 0,
+        toolCallCount: 0,
+        indexedFileCount: 0,
+        indexedBytesTotal: 0,
+        tokenInputTotal: 0,
+        tokenOutputTotal: 0,
+        totalDurationMs: 0,
+        averageMessagesPerSession: 0,
+        averageSessionDurationMs: 0,
+        activeProviderCount: 0,
+      },
+      categoryCounts: {
+        user: 0,
+        assistant: 0,
+        tool_use: 0,
+        tool_edit: 0,
+        tool_result: 0,
+        thinking: 0,
+        system: 0,
+      },
+      providerCounts: {
+        claude: 0,
+        codex: 0,
+        gemini: 0,
+        cursor: 0,
+        copilot: 0,
+      },
+      providerStats: [],
+      recentActivity: [],
+      topProjects: [],
+      topModels: [],
+      aiCodeStats: emptyAiCodeStats,
+      activityWindowDays: 14,
+    },
   },
   "indexer:refresh": {
     request: { force: true, projectId: "project_1" },
