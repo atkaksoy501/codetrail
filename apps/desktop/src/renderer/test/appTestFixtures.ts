@@ -1,8 +1,8 @@
 import {
+  type IpcResponse,
   createProviderRecord,
   indexerConfigBaseSchema,
   paneStateBaseSchema,
-  type IpcResponse,
 } from "@codetrail/core/browser";
 import {
   createClaudeHookStateFixture,

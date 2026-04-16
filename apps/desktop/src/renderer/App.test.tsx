@@ -1601,7 +1601,9 @@ describe("App shell", () => {
       expect(screen.getByRole("tab", { name: /Turns/i })).toBeInTheDocument();
     });
 
-    fireEvent.keyDown(window, { key: "t", metaKey: true });
+    await act(async () => {
+      fireEvent.keyDown(window, { key: "t", metaKey: true });
+    });
 
     await waitFor(() => {
       expect(screen.getByRole("tab", { name: /Turns/i })).toHaveAttribute("aria-selected", "true");
