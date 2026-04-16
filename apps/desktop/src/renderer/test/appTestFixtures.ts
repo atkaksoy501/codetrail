@@ -2,6 +2,7 @@ import {
   createProviderRecord,
   indexerConfigBaseSchema,
   paneStateBaseSchema,
+  type IpcResponse,
 } from "@codetrail/core/browser";
 import {
   createClaudeHookStateFixture,
@@ -22,7 +23,41 @@ const EMPTY_INDEXER_CONFIG = Object.fromEntries(
 );
 
 const SETTINGS_INFO = createSettingsInfoFixture();
-const EMPTY_PROVIDER_COUNTS = createProviderRecord(() => 0);
+export const EMPTY_PROVIDER_COUNTS = createProviderRecord(() => 0);
+
+type SessionDetailMessage = IpcResponse<"sessions:getDetail">["messages"][number];
+
+export function createSessionMessageFixture(
+  overrides: Partial<SessionDetailMessage> & {
+    id: string;
+    sourceId: string;
+    sessionId: string;
+    category: SessionDetailMessage["category"];
+    content: string;
+    createdAt: string;
+  },
+): SessionDetailMessage {
+  const { id, sourceId, sessionId, category, content, createdAt, ...rest } = overrides;
+  return {
+    id,
+    sourceId,
+    sessionId,
+    provider: "claude",
+    category,
+    content,
+    createdAt,
+    tokenInput: null,
+    tokenOutput: null,
+    operationDurationMs: null,
+    operationDurationSource: null,
+    operationDurationConfidence: null,
+    turnGroupId: null,
+    turnGroupingMode: "heuristic",
+    turnAnchorKind: null,
+    nativeTurnId: null,
+    ...rest,
+  };
+}
 
 function cloneValue<T>(value: T): T {
   if (typeof structuredClone === "function") {

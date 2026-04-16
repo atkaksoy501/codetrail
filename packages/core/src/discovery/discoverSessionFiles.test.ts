@@ -353,7 +353,7 @@ describe("discoverSessionFiles", () => {
       geminiProjectsPath: join(dir, ".gemini", "projects.json"),
       cursorRoot: join(dir, ".cursor", "projects"),
       copilotRoot,
-      copilotCliRoot: join(dir, ".copilot-cli-sessions"),
+      copilotCliRoot: join(dir, ".copilot", "session-state"),
       opencodeRoot: join(dir, ".local", "share", "opencode"),
       includeClaudeSubagents: false,
     });

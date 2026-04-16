@@ -12,11 +12,12 @@ vi.mock("../../lib/clipboard", () => ({
   copyTextToClipboard,
 }));
 
+import { createSessionMessageFixture } from "../../test/appTestFixtures";
 import { renderWithPaneFocus } from "../../test/renderWithPaneFocus";
 import { MessageCard, isMessageExpandedByDefault } from "./MessageCard";
 import type { SessionMessage } from "./types";
 
-const message: SessionMessage = {
+const message: SessionMessage = createSessionMessageFixture({
   id: "message_1",
   sourceId: "source_1",
   sessionId: "session_1",
@@ -29,11 +30,7 @@ const message: SessionMessage = {
   operationDurationMs: 5000,
   operationDurationSource: "native",
   operationDurationConfidence: "high",
-  turnGroupId: null,
-  turnGroupingMode: "heuristic",
-  turnAnchorKind: null,
-  nativeTurnId: null,
-};
+});
 
 describe("MessageCard", () => {
   beforeEach(() => {

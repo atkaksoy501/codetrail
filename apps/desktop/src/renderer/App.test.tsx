@@ -25,7 +25,11 @@ import { App } from "./App";
 import type { PaneStateSnapshot } from "./app/types";
 import { formatInteger } from "./lib/numberFormatting";
 import { SEARCH_PLACEHOLDERS } from "./lib/searchLabels";
-import { createAppClient, installScrollIntoViewMock } from "./test/appTestFixtures";
+import {
+  EMPTY_PROVIDER_COUNTS,
+  createAppClient,
+  installScrollIntoViewMock,
+} from "./test/appTestFixtures";
 import { renderWithClient } from "./test/renderWithClient";
 
 function countChannelCalls(client: ReturnType<typeof createAppClient>, channel: string): number {
@@ -521,15 +525,7 @@ describe("App shell", () => {
       "watcher:getLiveStatus": () =>
         createLiveStatusFixture({
           enabled: true,
-          providerCounts: {
-            claude: 1,
-            codex: 0,
-            gemini: 0,
-            cursor: 0,
-            copilot: 0,
-            copilot_cli: 0,
-            opencode: 0,
-          },
+          providerCounts: { ...EMPTY_PROVIDER_COUNTS, claude: 1 },
           sessions: [
             {
               provider: "claude",
@@ -597,15 +593,7 @@ describe("App shell", () => {
         createLiveStatusFixture({
           enabled: true,
           instrumentationEnabled: false,
-          providerCounts: {
-            claude: 1,
-            codex: 0,
-            gemini: 0,
-            cursor: 0,
-            copilot: 0,
-            copilot_cli: 0,
-            opencode: 0,
-          },
+          providerCounts: { ...EMPTY_PROVIDER_COUNTS, claude: 1 },
           sessions: [
             {
               provider: "claude",
@@ -663,15 +651,7 @@ describe("App shell", () => {
       "watcher:getLiveStatus": () =>
         createLiveStatusFixture({
           enabled: true,
-          providerCounts: {
-            claude: 1,
-            codex: 0,
-            gemini: 0,
-            cursor: 0,
-            copilot: 0,
-            copilot_cli: 0,
-            opencode: 0,
-          },
+          providerCounts: { ...EMPTY_PROVIDER_COUNTS, claude: 1 },
           sessions: [
             {
               provider: "claude",
@@ -1391,15 +1371,7 @@ describe("App shell", () => {
       "watcher:getLiveStatus": () =>
         createLiveStatusFixture({
           enabled: true,
-          providerCounts: {
-            claude: 1,
-            codex: 0,
-            gemini: 0,
-            cursor: 0,
-            copilot: 0,
-            copilot_cli: 0,
-            opencode: 0,
-          },
+          providerCounts: { ...EMPTY_PROVIDER_COUNTS, claude: 1 },
           sessions: [
             {
               provider: "claude",
@@ -1629,9 +1601,7 @@ describe("App shell", () => {
       expect(screen.getByRole("tab", { name: /Turns/i })).toBeInTheDocument();
     });
 
-    await act(async () => {
-      fireEvent.keyDown(window, { key: "t", metaKey: true });
-    });
+    fireEvent.keyDown(window, { key: "t", metaKey: true });
 
     await waitFor(() => {
       expect(screen.getByRole("tab", { name: /Turns/i })).toHaveAttribute("aria-selected", "true");
@@ -1832,10 +1802,14 @@ describe("App shell", () => {
       expect(screen.getByRole("tab", { name: /Turns/i })).toBeInTheDocument();
     });
 
-    fireEvent.keyDown(window, { key: "t", metaKey: true });
+    await act(async () => {
+      fireEvent.keyDown(window, { key: "t", metaKey: true });
+    });
     await waitFor(() => {
       expect(screen.getByRole("tab", { name: /Turns/i })).toHaveAttribute("aria-selected", "true");
       expect(screen.getByRole("textbox", { name: "Turn number" })).toHaveValue("1");
+      expect(screen.getByText("Review the latest turn")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Next turn" })).toBeEnabled();
     });
 
     const rememberedTurnMessageList = document.querySelector<HTMLDivElement>(
@@ -1893,6 +1867,8 @@ describe("App shell", () => {
     fireEvent.keyDown(window, { key: "t", metaKey: true });
     await waitFor(() => {
       expect(screen.getByRole("textbox", { name: "Turn number" })).toHaveValue("1");
+      expect(screen.getByText("Review the latest turn")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Next turn" })).toBeEnabled();
     });
 
     const resetRememberedTurnMessageList = document.querySelector<HTMLDivElement>(
@@ -3198,15 +3174,7 @@ describe("App shell", () => {
           return createLiveStatusFixture({
             enabled: true,
             revision: 1,
-            providerCounts: {
-              claude: 0,
-              codex: 0,
-              gemini: 0,
-              cursor: 0,
-              copilot: 0,
-              copilot_cli: 0,
-              opencode: 0,
-            },
+            providerCounts: EMPTY_PROVIDER_COUNTS,
             sessions: [],
             claudeHookState: createClaudeHookStateFixture(),
           });
@@ -3214,15 +3182,7 @@ describe("App shell", () => {
         return createLiveStatusFixture({
           enabled: true,
           revision: 2,
-          providerCounts: {
-            claude: 1,
-            codex: 0,
-            gemini: 0,
-            cursor: 0,
-            copilot: 0,
-            copilot_cli: 0,
-            opencode: 0,
-          },
+          providerCounts: { ...EMPTY_PROVIDER_COUNTS, claude: 1 },
           sessions: [
             {
               provider: "claude",
@@ -3317,15 +3277,7 @@ describe("App shell", () => {
           return createLiveStatusFixture({
             enabled: false,
             revision: 1,
-            providerCounts: {
-              claude: 0,
-              codex: 0,
-              gemini: 0,
-              cursor: 0,
-              copilot: 0,
-              copilot_cli: 0,
-              opencode: 0,
-            },
+            providerCounts: EMPTY_PROVIDER_COUNTS,
             sessions: [],
             claudeHookState: createClaudeHookStateFixture(),
           });
@@ -3333,15 +3285,7 @@ describe("App shell", () => {
         return createLiveStatusFixture({
           enabled: true,
           revision: 2,
-          providerCounts: {
-            claude: 0,
-            codex: 1,
-            gemini: 0,
-            cursor: 0,
-            copilot: 0,
-            copilot_cli: 0,
-            opencode: 0,
-          },
+          providerCounts: { ...EMPTY_PROVIDER_COUNTS, codex: 1 },
           sessions: [
             {
               provider: "codex",

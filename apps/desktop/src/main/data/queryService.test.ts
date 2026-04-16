@@ -1408,24 +1408,27 @@ describe("queryService in-memory", () => {
     );
 
     const bookmarkStore = createBookmarkStoreMock({
-      listProjectBookmarks: vi.fn((): StoredBookmark[] => [
-        {
-          project_id: "project_1",
-          session_id: "session_1",
-          message_id: "message_3",
-          message_source_id: "source_3",
-          provider: "codex",
-          session_title: "Project One",
-          message_category: "user",
-          message_content: "Steer the implementation",
-          message_created_at: "2026-03-01T10:00:02.000Z",
-          bookmarked_at: "2026-03-01T10:10:00.000Z",
-          is_orphaned: 0,
-          orphaned_at: null,
-          snapshot_version: 1,
-          snapshot_json: "{}",
-        },
-      ]),
+      listProjectBookmarks: vi.fn(
+        () =>
+          [
+            {
+              project_id: "project_1",
+              session_id: "session_1",
+              message_id: "message_3",
+              message_source_id: "source_3",
+              provider: "codex",
+              session_title: "Project One",
+              message_category: "user",
+              message_content: "Steer the implementation",
+              message_created_at: "2026-03-01T10:00:02.000Z",
+              bookmarked_at: "2026-03-01T10:10:00.000Z",
+              is_orphaned: 0,
+              orphaned_at: null,
+              snapshot_version: 1,
+              snapshot_json: "{}",
+            },
+          ] satisfies StoredBookmark[],
+      ),
     });
     const service = createQueryServiceFromDb(db, { bookmarkStore, ownsBookmarkStore: false });
 

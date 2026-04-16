@@ -25,15 +25,17 @@ type TurnMessageStub = {
   operationDurationMs: number | null;
   operationDurationSource: string | null;
   operationDurationConfidence: string | null;
-  toolEditFiles?: Array<{
-    filePath: string;
-    previousFilePath: string | null;
-    changeType: "add" | "update" | "delete" | "move";
-    unifiedDiff: string | null;
-    addedLineCount: number;
-    removedLineCount: number;
-    exactness: "exact" | "best_effort";
-  }>;
+  toolEditFiles?:
+    | Array<{
+        filePath: string;
+        previousFilePath: string | null;
+        changeType: "add" | "update" | "delete" | "move";
+        unifiedDiff: string | null;
+        addedLineCount: number;
+        removedLineCount: number;
+        exactness: "exact" | "best_effort";
+      }>
+    | undefined;
 };
 
 type HistoryStub = {
